@@ -15,7 +15,7 @@ impl AppConfig {
     }
 }
 
-/**
+/*
  * includes:
   - path: ./subproject/bloup.yaml
     tags:
