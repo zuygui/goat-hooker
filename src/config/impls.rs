@@ -1,5 +1,8 @@
 use serde_yml;
-use std::{fs, io, path::PathBuf};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use super::{AppConfig, HOOK_CONFIG_FILENAME};
 
@@ -16,8 +19,8 @@ impl AppConfig {
         fs::write(path.join(HOOK_CONFIG_FILENAME), str_config)
     }
 
-    pub fn exists() -> io::Result<bool> {
-        fs::exists(HOOK_CONFIG_FILENAME)
+    pub fn exists() -> bool {
+        Path::new(HOOK_CONFIG_FILENAME).exists()
     }
 }
 

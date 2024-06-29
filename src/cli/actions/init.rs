@@ -18,7 +18,7 @@ pub fn init_configuration(path: Option<PathBuf>) -> io::Result<()> {
         ));
     }
 
-    if AppConfig::exists()? {
+    if AppConfig::exists() {
         println!(
             "{}",
             format!(
