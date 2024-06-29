@@ -1,5 +1,8 @@
 {
     "files.exclude": {
         "**/.git": false
+    },
+    "yaml.schemas": {
+        "file:///mnt/mass_storage/Documents/programmation/git/goat-hooker/target/debug/schema.json": "hooker.config.yaml"
     }
 }

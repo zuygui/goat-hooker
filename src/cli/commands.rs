@@ -1,5 +1,3 @@
-use std::path::{Path, PathBuf};
-
 use clap::{
     builder::{
         styling::{AnsiColor, Effects},
