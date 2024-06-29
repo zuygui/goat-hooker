@@ -1,4 +1,4 @@
-mod impls;
+pub mod impls;
 mod schema;
 
 pub use schema::*;

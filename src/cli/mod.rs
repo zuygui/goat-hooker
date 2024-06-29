@@ -18,5 +18,11 @@ pub fn parse_commands(commands: &AppCli) {
         }
         AppCommands::Install => {}
         AppCommands::Completion { shell } => actions::generator::generate_completion(shell),
+        AppCommands::Run { config_path } => {
+            if let Err(err) = actions::run::run_hooks(config_path) {
+                println!("{}", format!("{}", err).red());
+                process::exit(1);
+            }
+        }
     };
 }

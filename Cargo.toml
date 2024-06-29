@@ -10,7 +10,7 @@ serde = { version = "1", features = ["derive"] }
 serde_yml = { version = "0.0" }
 colored = "2"
 schemars = "0"
-
+thiserror = "1"
 
 [build-dependencies]
 schemars = "0"

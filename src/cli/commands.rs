@@ -7,6 +7,8 @@ use clap::{
 };
 use clap_complete::Shell;
 
+use crate::config::HOOK_CONFIG_FILENAME;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None, styles = styles())]
 pub struct AppCli {
@@ -19,8 +21,8 @@ pub enum AppCommands {
     /// Initialize configuration file
     #[command()]
     Init {
-        #[arg(short = 'w', value_hint = clap::ValueHint::DirPath)]
-        work_dir: Option<std::path::PathBuf>,
+        #[arg(short = 'w', default_value = ".", value_parser, value_hint = clap::ValueHint::DirPath)]
+        work_dir: std::path::PathBuf,
     },
 
     /// Install Git Hooks
@@ -33,6 +35,13 @@ pub enum AppCommands {
     Completion {
         #[arg(default_value_t = Shell::Bash)]
         shell: Shell,
+    },
+
+    /// Run manually the hooks
+    #[command()]
+    Run {
+        #[arg(default_value = HOOK_CONFIG_FILENAME, value_parser, short = 'c')]
+        config_path: std::path::PathBuf,
     },
 }
 
