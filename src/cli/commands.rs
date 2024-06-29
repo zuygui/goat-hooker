@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use clap::{
     builder::{
         styling::{AnsiColor, Effects},
@@ -18,7 +20,10 @@ pub struct AppCli {
 pub enum AppCommands {
     /// Initialize configuration file
     #[command()]
-    Init,
+    Init {
+        #[arg(short = 'w', value_hint = clap::ValueHint::DirPath)]
+        work_dir: Option<std::path::PathBuf>,
+    },
 
     /// Install Git Hooks
     #[command()]
@@ -31,10 +36,6 @@ pub enum AppCommands {
         #[arg(default_value_t = Shell::Bash)]
         shell: Shell,
     },
-}
-
-fn default_shell() -> Option<Shell> {
-    Some(Shell::Bash)
 }
 
 fn styles() -> Styles {

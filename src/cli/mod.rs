@@ -9,9 +9,9 @@ use commands::AppCommands;
 use colored::Colorize;
 
 pub fn parse_commands(commands: &AppCli) {
-    match commands.cmd {
-        AppCommands::Init => {
-            if let Err(err) = actions::init::init_configuration() {
+    match commands.cmd.clone() {
+        AppCommands::Init { work_dir } => {
+            if let Err(err) = actions::init::init_configuration(work_dir) {
                 println!("{}", format!("{}", err).red());
                 process::exit(1);
             }

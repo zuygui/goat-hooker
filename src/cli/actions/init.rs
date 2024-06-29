@@ -1,11 +1,23 @@
-use std::io;
+use std::{io, path::PathBuf};
 
 use colored::Colorize;
 
 use crate::config::{AppConfig, HOOK_CONFIG_FILENAME};
 
 /// create `hooker.config.yaml`
-pub fn init_configuration() -> io::Result<()> {
+pub fn init_configuration(path: Option<PathBuf>) -> io::Result<()> {
+    let p = path.unwrap_or(".".into());
+
+    if !p.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "❌ Provided path `{}` isn't a directory",
+                p.to_string_lossy()
+            ),
+        ));
+    }
+
     if AppConfig::exists()? {
         println!(
             "{}",
@@ -19,7 +31,16 @@ pub fn init_configuration() -> io::Result<()> {
     }
 
     let new_config = AppConfig::default();
-    new_config.write_config()?;
+    new_config.write_config(p)?;
+
+    println!(
+        "{}",
+        format!(
+            "✅ {} file created!",
+            HOOK_CONFIG_FILENAME.italic().yellow()
+        )
+        .green()
+    );
 
     Ok(())
 }

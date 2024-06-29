@@ -1,4 +1,4 @@
-use std::{fs, io, path::Path};
+use std::{fs, io, path::PathBuf};
 
 use rules::HookRule;
 use serde::{Deserialize, Serialize};
@@ -19,10 +19,10 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    pub fn write_config(self) -> io::Result<()> {
+    pub fn write_config(self, path: PathBuf) -> io::Result<()> {
         // Save the configuration
         let str_config = serde_yml::to_string(&self).unwrap();
-        fs::write(HOOK_CONFIG_FILENAME, str_config)
+        fs::write(path.join(HOOK_CONFIG_FILENAME), str_config)
     }
 
     pub fn exists() -> io::Result<bool> {
