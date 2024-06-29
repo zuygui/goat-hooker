@@ -1,6 +1,25 @@
-use std::fs;
+use std::io;
 
-pub fn init_configuration() {
-    // create `hooker.config.yaml`
-    fs::write("hooker.config.yaml", "hooks:\n\t- cmd: echo \"Hello, Hooker!\"");
+use colored::Colorize;
+
+use crate::config::{AppConfig, HOOK_CONFIG_FILENAME};
+
+/// create `hooker.config.yaml`
+pub fn init_configuration() -> io::Result<()> {
+    if AppConfig::exists()? {
+        println!(
+            "{}",
+            format!(
+                "🚀 {} file already exists. Skipping.",
+                HOOK_CONFIG_FILENAME.italic()
+            )
+            .blue()
+        );
+        return Ok(());
+    }
+
+    let new_config = AppConfig::default();
+    new_config.write_config()?;
+
+    Ok(())
 }

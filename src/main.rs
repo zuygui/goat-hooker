@@ -1,3 +1,5 @@
+extern crate colored;
+
 use clap::Parser;
 
 mod cli;

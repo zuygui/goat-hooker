@@ -1,17 +1,32 @@
+use std::{fs, io, path::Path};
+
+use rules::HookRule;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct AppConfig {}
+mod rules;
+
+pub const HOOK_CONFIG_FILENAME: &str = "hooks.config.yaml";
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AppConfig {
+    hooks: Vec<HookRule>,
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
-        AppConfig {}
+        AppConfig { hooks: Vec::new() }
     }
 }
 
 impl AppConfig {
-    pub fn write_config(self) {
+    pub fn write_config(self) -> io::Result<()> {
         // Save the configuration
+        let str_config = serde_yml::to_string(&self).unwrap();
+        fs::write(HOOK_CONFIG_FILENAME, str_config)
+    }
+
+    pub fn exists() -> io::Result<bool> {
+        fs::exists(HOOK_CONFIG_FILENAME)
     }
 }
 
@@ -27,10 +42,10 @@ impl AppConfig {
       - golang
 
 hooks:
-  - repo: 
+  - repo:
       id: commitlint
       name: username/repo
-      
+
 
       rev: 1.0.0
   - repo:
@@ -38,7 +53,7 @@ hooks:
       name: golangci-lint
       rev: 1.0.0      res: username/repo
   - local: ./custom-hooks.yaml
-    
+
 
   - cmd: echo "Hello world"
   - cmds:
