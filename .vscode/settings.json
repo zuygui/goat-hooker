@@ -1,8 +1,0 @@
-{
-    "files.exclude": {
-        "**/.git": false
-    },
-    "yaml.schemas": {
-        "target/debug/schema.json": "hooker.config.yaml"
-    }
-}
