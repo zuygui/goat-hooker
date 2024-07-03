@@ -20,3 +20,4 @@ Cargo.lock
 
 # Files created by app testing
 hooker.config.yaml
+node_modules
