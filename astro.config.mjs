@@ -3,6 +3,8 @@ import starlight from '@astrojs/starlight';
 
 // https://astro.build/config
 export default defineConfig({
+	site: 'https://zuygui.github.io',
+	base: 'goat-hooker',
 	integrations: [
 		starlight({
 			title: 'Goat Hooker',
