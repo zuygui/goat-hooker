@@ -1,0 +1,1 @@
+{"rustc":1059629350237521597,"features":"","declared_features":"","target":0,"profile":0,"path":0,"deps":[[18060309474947388665,"build_script_build",false,10215487616906891980]],"local":[{"RerunIfChanged":{"output":"debug/build/goat-hooker-3bdbee40fda4f813/output","paths":["src/config/*.rs"]}}],"rustflags":[],"metadata":0,"config":0,"compile_kind":0}

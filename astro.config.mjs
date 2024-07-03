@@ -8,6 +8,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Goat Hooker',
+			favicon: 'logo.png',
 			social: {
 				github: 'https://github.com/zuygui/goat-hooker',
 			},
