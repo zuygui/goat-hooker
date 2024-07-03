@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Goat Hooker config",
+  "type": "object",
+  "required": [
+    "hooks"
+  ],
+  "properties": {
+    "hooks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/HookRule"
+      }
+    }
+  },
+  "definitions": {
+    "CommandHookRule": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "cmd"
+          ],
+          "properties": {
+            "cmd": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "cmds"
+          ],
+          "properties": {
+            "cmds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "HookRule": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CommandHookRule"
+        }
+      ]
+    }
+  }
+}

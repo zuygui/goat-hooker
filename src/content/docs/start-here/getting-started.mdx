@@ -1,0 +1,65 @@
+---
+title: Getting Started
+description: A guide to get started with Goat Hooker
+---
+
+Goat Hooker is a CLI tool for creating, managing and executing Git Hooks on any project (including monorepos). It also solves the problem of sharing hooks between different contributors by using explicit configuration files to generate hooks. It also offers pre-made hooks that can be imported into configuration files and configured using a few parameters.
+
+## Quick start
+### Installation
+
+Install Goat Hooker by running the following commands in your terminal:
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<Tabs>
+  <TabItem label="Step 1">
+    ```bash
+    git clone https://github.com/zuygui/goat-hooker
+    ```
+  </TabItem>
+  <TabItem label="Step 2">
+  ```bash
+  cargo build --release
+  ```
+  </TabItem>
+  <TabItem label="Step 3">
+  ```bash
+  export PATH=$PATH:$(pwd)/target/release
+  ```
+  :::danger
+  Remember that the program executable is here and that if you delete the cloned folder, the program will also be deleted and thus unusable.
+  :::
+  </TabItem>
+  
+  :::tip
+  The project is still on development and a more easy way to install is planed. Just wait for a release to get final installation instructions.
+  :::
+
+</Tabs>
+
+### Create a configuration file
+
+Goat hooker has a tool to generate a basic configuration file. To generate it, just run this command is a bash terminal:
+
+```bash
+hooker init
+```
+
+If you wanna do it mannually, you can create a file called `hooker.config.yaml` and fill it with these informations:
+
+```yaml
+
+hooks:
+  - cmd: # A single command
+  - cmds:
+    - # Multiple commands
+```
+
+### Run hooks
+
+With Goat Hooker, everything is easy to do, so, to run your hooks, just run this command in your shell:
+
+```bash
+hooker run
+```
