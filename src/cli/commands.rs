@@ -9,6 +9,8 @@ use clap_complete::Shell;
 
 use crate::config::HOOK_CONFIG_FILENAME;
 
+use super::actions::run::HookTypeToRun;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None, styles = styles())]
 pub struct AppCli {
@@ -40,8 +42,11 @@ pub enum AppCommands {
     /// Run manually the hooks
     #[command()]
     Run {
+        #[arg(value_enum)]
+        hook_type: HookTypeToRun,
+
         #[arg(default_value = HOOK_CONFIG_FILENAME, value_parser, short = 'c')]
-        config_path: std::path::PathBuf,
+        config_path: std::path::PathBuf
     },
 }
 
