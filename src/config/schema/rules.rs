@@ -14,3 +14,4 @@ pub enum CommandHookRule {
     #[serde(rename = "cmds")]
     Multiple(Vec<String>),
 }
+    

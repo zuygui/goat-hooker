@@ -1,5 +1,5 @@
 use serde_yml;
-use std::{fs, path::Path};
+use std::{collections::HashMap, fs, path::Path};
 
 use super::{AppConfig, HOOK_CONFIG_FILENAME};
 
@@ -13,7 +13,7 @@ pub enum ConfigError {
 
 impl Default for AppConfig {
     fn default() -> Self {
-        AppConfig { hooks: Vec::new() }
+        AppConfig { hooks: HashMap::new() }
     }
 }
 

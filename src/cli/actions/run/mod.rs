@@ -37,25 +37,40 @@ fn execute_command(data: String) -> Result<(), RunError> {
     }
 }
 
-pub fn run_hooks(p: PathBuf) -> Result<(), RunError> {
+pub enum HookTypeToRun {
+    All,
+    PreCommit
+}
+
+pub fn run_hooks(p: PathBuf, hooks_to_run: HookTypeToRun) -> Result<(), RunError> {
     let config: AppConfig = AppConfig::read(p).map_err(RunError::from)?;
     let mut results = Vec::new(); // Nouveau vecteur pour stocker les résultats
 
     let hooks = config.hooks;
-    for hook in hooks {
-        match hook {
-            HookRule::Command(command) => match command {
-                CommandHookRule::Single(data) => {
-                    execute_command(data.clone())?;
-                    results.push(data); // Ajouter le résultat au vecteur
-                },
-                CommandHookRule::Multiple(data) => {
-                    for cmd in data {
-                        execute_command(cmd.clone())?;
-                        results.push(cmd); // Ajouter le résultat au vecteur
+    for (h_type, h_rules) in hooks {
+        match hooks_to_run {
+            HookTypeToRun::All => todo!(),
+            HookTypeToRun::PreCommit => match h_type {
+                config::config::HookType::PreCommit => {
+                    for rule in h_rules {
+                        match rule {
+                            HookRule::Command(command) => match command {
+                                CommandHookRule::Single(data) => {
+                                    execute_command(data.clone())?;
+                                    results.push(data); // Ajouter le résultat au vecteur
+                                },
+                                CommandHookRule::Multiple(data) => {
+                                    for cmd in data {
+                                        execute_command(cmd.clone())?;
+                                        results.push(cmd); // Ajouter le résultat au vecteur
+                                    }
+                                },
+                            }
+                        }
                     }
                 },
             }
+
         }
     }
 
