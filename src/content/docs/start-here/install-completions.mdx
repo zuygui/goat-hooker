@@ -1,0 +1,52 @@
+---
+title: Install Completions
+description: A guide to get started with Goat Hooker
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+
+Some shells offer a completion system for command line tools. GoatHooker, in the spirit of simplicity, has a command to make our tool compatible with your favorite shell.
+
+Our completion generator command support theses shells:
+- [Bash](https://www.gnu.org/software/bash/) 
+- [Zsh](https://www.zsh.org/)
+- [Fish](https://fishshell.com/)
+- [Powershell](https://github.com/PowerShell/PowerShell)
+- [Elvish](https://elv.sh/)
+
+Here is command to install completion for your shell
+
+<Tabs>
+  <TabItem label="Bash">
+    ```bash
+    sudo hooker completion bash
+    ```
+
+  :::note
+  Bash completion files are located in a restricted folder who require an admin permission, it's why we use the `sudo` command.
+  :::
+  </TabItem>
+  <TabItem label="Zsh">
+  ```bash
+  hooker completion zsh
+  ```
+  </TabItem>
+  <TabItem label="Fish">
+  ```bash
+  hooker completion fish
+  ```
+  </TabItem>
+  <TabItem label="Powershell">
+  ```bash
+  hooker completion powershell
+  ```
+  </TabItem>
+  <TabItem label="Elvish">
+  ```bash
+  hooker completion elvish
+  ```
+  </TabItem>
+
+  After that, you may need to reload your shell instance or import the completion file into your configuration, but that's out of the scope of our tool and we'll leave you in charge of your machine.
+</Tabs>

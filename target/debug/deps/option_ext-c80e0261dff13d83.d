@@ -1,0 +1,8 @@
+/home/zuygui/Documents/dev/goat-hooker/target/debug/deps/liboption_ext-c80e0261dff13d83.rmeta: /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/option-ext-0.2.0/src/lib.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/option-ext-0.2.0/src/impl.rs
+
+/home/zuygui/Documents/dev/goat-hooker/target/debug/deps/liboption_ext-c80e0261dff13d83.rlib: /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/option-ext-0.2.0/src/lib.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/option-ext-0.2.0/src/impl.rs
+
+/home/zuygui/Documents/dev/goat-hooker/target/debug/deps/option_ext-c80e0261dff13d83.d: /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/option-ext-0.2.0/src/lib.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/option-ext-0.2.0/src/impl.rs
+
+/home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/option-ext-0.2.0/src/lib.rs:
+/home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/option-ext-0.2.0/src/impl.rs:

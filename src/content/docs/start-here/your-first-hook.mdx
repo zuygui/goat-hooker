@@ -1,0 +1,70 @@
+---
+title: Your First Hook
+description: A guide to setup your first hook
+---
+
+Here is a short guide to write your first hook. In this tutorial, we'll implement an hook that lint our Rust code
+
+## Init Goat-Hooker
+
+It's very simple, just run:
+
+```bash
+hooker init
+```
+
+You should have a new file called `hooker.config.yaml`, it should like something like
+
+```yaml title="hooker.config.yaml"
+hooks:
+```
+
+## Create a Hook
+
+We want a `pre-commit` hook, a hook that run on `git commit` but before the commit is done.
+
+So let's write it:
+
+```diff lang=yaml title="hooker.config.yaml"
+hooks:
++ - pre-commit:
++   - cmd: "cargo clippy --all -- --check"
+```
+
+We specify in the `pre-commit` section that we want to define a hook who contain only one command.
+In this command, we ask to [clippy](https://github.com/rust-lang/rust-clippy) (a Rust-code linter) to lint our code.
+
+## Install hooks
+
+Goat-Hooker implement a function to install hooks to Git, in only one command:
+
+```bash
+hooker install
+```
+
+A lot of file should be created in `.git/hooks/` who contain an Goat-Hooker command.
+
+## Test our Hook 
+
+In the case you're not sure about your Hook code,Goat-Hooker provide a command to test your hook(s).
+
+There-is two case:
+
+- First, you want to run all your hooks:
+
+```bash
+hooker run all
+```
+
+- Second, you want to run a specific event-typed hook:
+
+```bash
+hooker run pre-commit
+```
+
+Check your code after running one of these commands, your code might be linted.
+
+## Commit
+
+To finish this example, you can go back to an dirty code (just for example) and commit.
+Your code might be linted in the commit (you can check if you use Github or anything else).
