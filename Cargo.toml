@@ -11,6 +11,7 @@ serde_yml = { version = "0.0" }
 colored = "2"
 schemars = "0"
 thiserror = "1"
+shellexpand = "3"
 
 [build-dependencies]
 schemars = "0"
