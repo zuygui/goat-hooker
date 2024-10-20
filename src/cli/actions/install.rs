@@ -1,7 +1,12 @@
-use std::{error::Error, fs::{create_dir_all, File}, io::Write, path::PathBuf};
+use std::{
+    error::Error, 
+    fs::{create_dir_all, File, set_permissions, Permissions}, 
+    io::Write, 
+    os::unix::fs::PermissionsExt, // Pour utiliser PermissionsExt et définir les permissions Unix
+    path::PathBuf,
+};
 
 use crate::config::config::HookType;
-
 
 pub fn install_hooks() -> Result<(), Box<dyn Error>> {
     let hooks_dir = PathBuf::from(".git/hooks");
@@ -29,13 +34,19 @@ pub fn install_hooks() -> Result<(), Box<dyn Error>> {
         let hook_path = hooks_dir.join(&hook_name);
 
         // Ouvre ou crée le fichier de hook
-        let mut file = File::create(hook_path)?;
+        let mut file = File::create(&hook_path)?;
 
         // Écrit la commande `hooker run <hook-name>` dans le fichier sans utiliser writeln!
         file.write_all(b"#!/bin/sh\n")?;
         let hook_command = format!("hooker run {}\n", hook_name);
         file.write_all(hook_command.as_bytes())?;
+
+        // Rendre le fichier exécutable (chmod 755)
+        let permissions = Permissions::from_mode(0o755);
+        set_permissions(&hook_path, permissions)?;
     }
+
+    println!("✅ Hooks installed successfully");
 
     Ok(())
 }
