@@ -1,14 +1,14 @@
 mod actions;
 mod commands;
 
-use std::process;
+use std::{error::Error, process};
 
 pub use commands::AppCli;
 use commands::AppCommands;
 
 use colored::Colorize;
 
-pub fn parse_commands(commands: &AppCli) {
+pub fn parse_commands(commands: &AppCli) -> Result<(), Box<dyn Error>>{
     match commands.cmd.clone() {
         AppCommands::Init { work_dir } => {
             if let Err(err) = actions::init::init_configuration(work_dir) {
@@ -16,7 +16,7 @@ pub fn parse_commands(commands: &AppCli) {
                 process::exit(1);
             }
         }
-        AppCommands::Install => {}
+        AppCommands::Install => actions::install::install_hooks()?,
         AppCommands::Completion { shell } => actions::generator::generate_completion(shell),
         AppCommands::Run { config_path, hook_type } => {
             if let Err(err) = actions::run::run_hooks(config_path, hook_type) {
@@ -25,4 +25,6 @@ pub fn parse_commands(commands: &AppCli) {
             }
         }
     };
+
+    Ok(())
 }
