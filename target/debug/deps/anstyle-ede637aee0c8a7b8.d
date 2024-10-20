@@ -1,0 +1,12 @@
+/home/zuygui/Documents/dev/goat-hooker/target/debug/deps/libanstyle-ede637aee0c8a7b8.rmeta: /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/lib.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/macros.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/color.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/effect.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/reset.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/style.rs
+
+/home/zuygui/Documents/dev/goat-hooker/target/debug/deps/libanstyle-ede637aee0c8a7b8.rlib: /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/lib.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/macros.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/color.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/effect.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/reset.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/style.rs
+
+/home/zuygui/Documents/dev/goat-hooker/target/debug/deps/anstyle-ede637aee0c8a7b8.d: /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/lib.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/macros.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/color.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/effect.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/reset.rs /home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/style.rs
+
+/home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/lib.rs:
+/home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/macros.rs:
+/home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/color.rs:
+/home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/effect.rs:
+/home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/reset.rs:
+/home/zuygui/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.8/src/style.rs:
