@@ -1,16 +1,22 @@
-use crate::config::loader::load_cfg;
+use std::path::Path;
 
 mod config;
 mod errors;
 
 fn main() {
-    match load_cfg() {
-        Ok(cfg) => {
-            println!("Configuration loaded successfully: {:?}", cfg);
+    let path = Path::new("hooker.config.json");
+
+    match config::Config::load_recursive(path) {
+        Ok(configs) => {
+            println!("✅ Loaded {} config(s)", configs.len());
+            for cfg in configs {
+                println!(
+                    "- Config at {:?} with {} hooks",
+                    cfg.base_dir,
+                    cfg.hooks.as_ref().map(|h| h.len()).unwrap_or(0)
+                );
+            }
         }
-        Err(e) => {
-            eprintln!("Error loading configuration: {}", e);
-            std::process::exit(1);
-        }
+        Err(e) => eprintln!("❌ Failed to load config: {}", e),
     }
 }
