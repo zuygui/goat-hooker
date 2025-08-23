@@ -21,44 +21,36 @@ impl<'a> Matcher<'a> {
         let file_path_abs = normalize_path(file_path);
 
         for config in self.configs {
-            // Base dir du projet
             let Some(base_dir) = config.base_dir.as_ref() else {
                 continue;
             };
             let base_dir_abs = normalize_path(base_dir);
 
-            // Vérifie que le fichier est bien dans le sous-projet
+            // Vérifie que le fichier est bien dans le projet
             if !file_path_abs.starts_with(&base_dir_abs) {
                 continue;
             }
 
             for hooks in config.hooks.iter() {
                 for hook in hooks.iter() {
-                    // Si pas de "include", le hook s'applique à tous les fichiers
+                    // Vérifie si exclu avant même d’inclure
+                    if is_excluded(hook, &file_path_abs, &base_dir_abs) {
+                        continue;
+                    }
+
+                    // Si pas d'include → hook sur tous les fichiers
                     if hook.include.as_ref().map_or(true, |v| v.is_empty()) {
                         matched_hooks.push(hook);
                         continue;
                     }
 
-                    // Sinon on check chaque pattern glob
+                    // Sinon on check include
                     if let Some(includes) = hook.include.as_ref() {
-                        for pattern in includes {
-                            let full_pattern = base_dir_abs.join(pattern);
-                            let full_pattern_str = match full_pattern.to_str() {
-                                Some(s) => s,
-                                None => continue, // skip si chemin invalide UTF-8
-                            };
-
-                            // Construire le pattern glob
-                            let glob_pattern = match Pattern::new(full_pattern_str) {
-                                Ok(p) => p,
-                                Err(_) => continue, // skip si pattern invalide
-                            };
-
-                            if glob_pattern.matches_path(&file_path_abs) {
-                                matched_hooks.push(hook);
-                                break; // un match suffit
-                            }
+                        if includes
+                            .iter()
+                            .any(|pattern| matches_glob(pattern, &file_path_abs, &base_dir_abs))
+                        {
+                            matched_hooks.push(hook);
                         }
                     }
                 }
@@ -67,6 +59,30 @@ impl<'a> Matcher<'a> {
 
         matched_hooks
     }
+}
+
+/// Vérifie si un fichier est exclu par le hook
+fn is_excluded(hook: &Hook, file_path: &Path, base_dir: &Path) -> bool {
+    if let Some(excludes) = hook.exclude.as_ref() {
+        excludes
+            .iter()
+            .any(|pattern| matches_glob(pattern, file_path, base_dir))
+    } else {
+        false
+    }
+}
+
+/// Vérifie un pattern glob vs fichier
+fn matches_glob(pattern: &str, file_path: &Path, base_dir: &Path) -> bool {
+    let full_pattern = base_dir.join(pattern);
+    let Some(full_pattern_str) = full_pattern.to_str() else {
+        return false;
+    };
+
+    let Ok(glob_pattern) = Pattern::new(full_pattern_str) else {
+        return false;
+    };
+    glob_pattern.matches_path(file_path)
 }
 
 /// Normalise un chemin (canonicalize si possible, sinon absolutize, sinon inchangé)
@@ -82,20 +98,22 @@ mod tests {
     use crate::config::{Config, Hook, Trigger};
 
     #[test]
-    fn test_match_hooks() {
+    fn test_match_hooks_with_exclude() {
         let hook = Hook {
             name: "Rust files".to_string(),
             trigger: Trigger::PreCommit,
             include: Some(vec!["src/**/*.rs".to_string()]),
+            exclude: Some(vec!["src/config/*.rs".to_string()]),
             cmd: Some("echo Rust file".to_string()),
             cmds: None,
             from: None,
             path: None,
         };
         let hook2 = Hook {
-            name: "Config rust files".to_string(),
+            name: "Only config rs".to_string(),
             trigger: Trigger::PreCommit,
             include: Some(vec!["src/config/*.rs".to_string()]),
+            exclude: None,
             cmd: Some("echo Config Rust file".to_string()),
             cmds: None,
             from: None,
@@ -110,18 +128,17 @@ mod tests {
         let configs = [config];
         let matcher = Matcher::new(&configs);
 
-        // match mod.rs -> doit matcher les deux hooks
+        // src/config/mod.rs doit matcher seulement hook2 (hook1 est exclu)
         let matched_hooks = matcher.match_hooks(Path::new("src/config/mod.rs"));
-        assert_eq!(matched_hooks.len(), 2);
-        assert!(matched_hooks.iter().any(|h| h.name == "Rust files"));
-        assert!(matched_hooks.iter().any(|h| h.name == "Config rust files"));
+        assert_eq!(matched_hooks.len(), 1);
+        assert_eq!(matched_hooks[0].name, "Only config rs");
 
-        // match main.rs -> doit matcher seulement "Rust files"
+        // src/main.rs doit matcher seulement hook1
         let matched_hooks = matcher.match_hooks(Path::new("src/main.rs"));
         assert_eq!(matched_hooks.len(), 1);
         assert_eq!(matched_hooks[0].name, "Rust files");
 
-        // fichier qui ne correspond à aucun pattern
+        // fichier inconnu → aucun hook
         let matched_hooks = matcher.match_hooks(Path::new("src/unknown.txt"));
         assert_eq!(matched_hooks.len(), 0);
     }

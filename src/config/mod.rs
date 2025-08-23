@@ -20,6 +20,7 @@ pub struct Hook {
     pub name: String,
     pub trigger: Trigger,
     pub include: Option<Vec<String>>,
+    pub exclude: Option<Vec<String>>,
     pub cmd: Option<String>,
     pub cmds: Option<Vec<String>>,
     pub from: Option<String>,
