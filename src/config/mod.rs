@@ -9,7 +9,7 @@ use crate::errors::GoatHookerError;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
-    pub includes: Option<Vec<String>>,
+    pub imports: Option<Vec<String>>,
     pub hooks: Option<Vec<Hook>>,
     #[serde(skip)]
     pub base_dir: Option<PathBuf>,
@@ -49,7 +49,7 @@ impl Config {
         let root = Config::load_from_file(path)?;
         let mut all_cfg = vec![root.clone()];
 
-        if let Some(includes) = root.includes.clone() {
+        if let Some(includes) = root.imports.clone() {
             for inc in includes {
                 let sub_path = root
                     .base_dir

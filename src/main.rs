@@ -2,6 +2,7 @@ use std::path::Path;
 
 mod config;
 mod errors;
+mod matcher;
 
 fn main() {
     let path = Path::new("hooker.config.json");
