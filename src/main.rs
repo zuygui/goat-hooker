@@ -7,17 +7,23 @@ mod matcher;
 fn main() {
     let path = Path::new("hooker.config.json");
 
-    match config::Config::load_recursive(path) {
+    match config::ConfigLoader::new().load_recursive(path) {
         Ok(configs) => {
-            println!("✅ Loaded {} config(s)", configs.len());
-            for cfg in configs {
-                println!(
-                    "- Config at {:?} with {} hooks",
-                    cfg.base_dir,
-                    cfg.hooks.as_ref().map(|h| h.len()).unwrap_or(0)
-                );
+            println!("Loaded {} configurations.", configs.len());
+            let matcher = matcher::Matcher::new(&configs);
+
+            // Exemple de test de matching
+            let test_path = Path::new("src/main.rs");
+            let matched_hooks = matcher.match_hooks(test_path);
+            println!(
+                "File {:?} matches {} hooks.",
+                test_path,
+                matched_hooks.len()
+            );
+            for hook in matched_hooks {
+                println!(" - Hook: {}", hook.name);
             }
         }
-        Err(e) => eprintln!("❌ Failed to load config: {}", e),
+        Err(e) => eprintln!("Error loading configurations: {}", e),
     }
 }
