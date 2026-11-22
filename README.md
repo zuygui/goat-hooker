@@ -101,6 +101,12 @@ Hooks show a spinner while running, then a summary. Only the output of the faile
 - run a hook, or the whole pre-commit, and read its output
 - add, edit and delete hooks without touching the JSON
 - install the Git hooks
+- **Graph** view: the hooks of a trigger as connected nodes, like in Blender
+  - nodes are laid out from the config (no positions to save): each node sits right of what it waits for
+  - drag from an output to a node to pass it as an input (`inputs`), or to its *waits for* row to add an order dependency (`needs`)
+  - `×` on a link removes it; cycles are refused
+  - run the trigger and see each node's result and duration
+  - edits are written to the `hooker.config.json` files, so the JSON stays the source of truth
 
 ## Configuration ⚙️
 

@@ -2,8 +2,10 @@
 
 mod app;
 mod assets;
+mod canvas;
 mod discover;
 mod editor;
+mod graph_view;
 mod recents;
 mod repo;
 
