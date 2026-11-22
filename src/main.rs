@@ -1,29 +1,19 @@
-use std::path::Path;
+use std::process;
 
+use clap::Parser;
+use colored::Colorize;
+
+mod cli;
 mod config;
 mod errors;
+mod git;
 mod matcher;
 
 fn main() {
-    let path = Path::new("hooker.config.json");
+    let opt = cli::AppCli::parse();
 
-    match config::ConfigLoader::new().load_recursive(path) {
-        Ok(configs) => {
-            println!("Loaded {} configurations.", configs.len());
-            let matcher = matcher::Matcher::new(&configs);
-
-            // Exemple de test de matching
-            let test_path = Path::new("src/main.rs");
-            let matched_hooks = matcher.match_hooks(test_path);
-            println!(
-                "File {:?} matches {} hooks.",
-                test_path,
-                matched_hooks.len()
-            );
-            for hook in matched_hooks {
-                println!(" - Hook: {}", hook.name);
-            }
-        }
-        Err(e) => eprintln!("Error loading configurations: {}", e),
+    if let Err(err) = cli::parse_commands(opt) {
+        eprintln!("{}", format!("❌ {err}").red());
+        process::exit(1);
     }
 }
