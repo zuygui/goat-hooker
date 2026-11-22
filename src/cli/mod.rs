@@ -1,5 +1,6 @@
 mod actions;
 mod commands;
+mod ui;
 
 pub use commands::AppCli;
 use commands::AppCommands;
@@ -7,7 +8,10 @@ use commands::AppCommands;
 use goat_hooker::errors::GoatHookerError;
 
 pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
-    match commands.cmd {
+    let Some(cmd) = commands.cmd else {
+        return actions::status::show_status();
+    };
+    match cmd {
         AppCommands::Init { work_dir } => actions::init::init_configuration(&work_dir),
         AppCommands::Install { force } => actions::install::install_hooks(force),
         AppCommands::Completion { shell } => {
@@ -18,8 +22,37 @@ pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
             hook_type,
             config_path,
             dry_run,
+            verbose,
+            from_git,
             args,
-        } => actions::run::run_hooks(hook_type, config_path, &args, dry_run),
+        } => actions::run::run_hooks(
+            hook_type,
+            config_path,
+            &args,
+            actions::run::RunFlags {
+                dry_run,
+                verbose,
+                from_git,
+            },
+        ),
+        AppCommands::Status => actions::status::show_status(),
+        AppCommands::Add {
+            name,
+            trigger,
+            commands,
+            include,
+            exclude,
+            stage_fixed,
+            project,
+        } => actions::add::add_hook(actions::add::AddArgs {
+            name,
+            trigger,
+            commands,
+            include,
+            exclude,
+            stage_fixed,
+            project,
+        }),
         AppCommands::List { config_path } => actions::list::list_hooks(config_path),
         AppCommands::Update { config_path } => actions::update::update_remotes(config_path),
         AppCommands::Schema => {

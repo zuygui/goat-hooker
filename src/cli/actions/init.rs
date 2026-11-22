@@ -21,12 +21,9 @@ pub fn init_configuration(dir: &Path) -> Result<(), GoatHookerError> {
 
     if dir.join(HOOK_CONFIG_FILENAME).exists() {
         println!(
-            "{}",
-            format!(
-                "🚀 {} file already exists. Skipping.",
-                HOOK_CONFIG_FILENAME.italic()
-            )
-            .blue()
+            "{} {} already exists",
+            "·".dimmed(),
+            HOOK_CONFIG_FILENAME.bold()
         );
         return Ok(());
     }
