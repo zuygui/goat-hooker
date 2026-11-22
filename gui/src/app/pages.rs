@@ -27,6 +27,8 @@ pub struct PagesState {
     pub untrusted: Vec<Untrusted>,
     /// Configs of other hooks managers found in a repository without hooker.config.json
     pub import: Option<Imported>,
+    /// The source card of the hook detail is expanded
+    pub show_source: bool,
     hub_query: Entity<InputState>,
     hub_loading: bool,
     hub_results: Option<SearchResult>,
@@ -57,6 +59,7 @@ impl PagesState {
             variables_error: None,
             untrusted: vec![],
             import: None,
+            show_source: false,
             hub_query,
             hub_loading: false,
             hub_results: None,

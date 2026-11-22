@@ -54,6 +54,7 @@ impl Filter {
 }
 
 mod pages;
+mod source;
 
 /// Un hook dans un projet
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1479,6 +1480,7 @@ impl HookerApp {
             {
                 body = body.child(remote);
             }
+            body = body.child(self.source_card(project, hook, cx));
             return self.wrap_detail(header, body);
         }
 
@@ -1539,6 +1541,7 @@ impl HookerApp {
         {
             body = body.child(card().child(section("ACCESS", cx)).child(access));
         }
+        body = body.child(self.source_card(project, hook, cx));
 
         // Dernier lancement
         let mut last_run = card().child(section("LAST RUN", cx));
