@@ -1,0 +1,318 @@
+//! Données affichées par l'app : le dépôt, ses projets et leurs hooks (sans UI)
+
+use std::path::{Path, PathBuf};
+
+use goat_hooker::{
+    config::{Config, ConfigLoader, HOOK_CONFIG_FILENAME, Hook, SCHEMA_URL, Trigger},
+    errors::GoatHookerError,
+    git, install,
+    matcher::{MatchedHook, Matcher},
+    runner::{self, HookInput, HookResult, Output},
+};
+
+/// Un projet du monorepo (un `hooker.config.json`)
+#[derive(Clone)]
+pub struct Project {
+    pub file: PathBuf,
+    /// Dossier relatif à la racine du dépôt (`.` pour la racine)
+    pub name: String,
+    /// Config telle qu'elle est écrite dans le fichier (sans les hooks `path` chargés)
+    pub raw: Config,
+}
+
+impl Project {
+    pub fn dir(&self) -> PathBuf {
+        self.file.parent().unwrap().to_path_buf()
+    }
+
+    pub fn hooks(&self) -> &[Hook] {
+        self.raw.hooks.as_deref().unwrap_or_default()
+    }
+
+    /// Ajoute (`index = None`) ou remplace un hook, puis enregistre le fichier
+    pub fn save_hook(&mut self, index: Option<usize>, hook: Hook) -> Result<(), GoatHookerError> {
+        let hooks = self.raw.hooks.get_or_insert_with(Vec::new);
+        match index {
+            Some(i) if i < hooks.len() => hooks[i] = hook,
+            _ => hooks.push(hook),
+        }
+        self.raw.write_to_file(&self.file)
+    }
+
+    pub fn delete_hook(&mut self, index: usize) -> Result<(), GoatHookerError> {
+        let hooks = self.raw.hooks.get_or_insert_with(Vec::new);
+        if index < hooks.len() {
+            hooks.remove(index);
+        }
+        self.raw.write_to_file(&self.file)
+    }
+}
+
+/// Hook qui se lancerait au prochain commit
+#[derive(Clone)]
+pub struct PreviewItem {
+    pub hook: String,
+    pub project_dir: PathBuf,
+    pub files: Vec<PathBuf>,
+}
+
+#[derive(Clone)]
+pub struct Repo {
+    pub root: PathBuf,
+    pub projects: Vec<Project>,
+    pub installed: bool,
+    pub branch: Option<String>,
+    pub staged_files: usize,
+}
+
+impl Repo {
+    pub fn config_file(&self) -> PathBuf {
+        self.root.join(HOOK_CONFIG_FILENAME)
+    }
+
+    /// Ouvre le dépôt git qui contient `dir`
+    pub fn open(dir: &Path) -> Result<Self, GoatHookerError> {
+        let root = git::repo_root(dir)?;
+        let mut repo = Self {
+            installed: install::is_installed(&root),
+            branch: None,
+            staged_files: 0,
+            root,
+            projects: vec![],
+        };
+        repo.reload()?;
+        Ok(repo)
+    }
+
+    /// Recharge les configs depuis le disque
+    pub fn reload(&mut self) -> Result<(), GoatHookerError> {
+        self.installed = install::is_installed(&self.root);
+        self.branch = git::current_branch(&self.root);
+        self.staged_files = git::staged_files(&self.root).map(|f| f.len()).unwrap_or(0);
+        self.projects.clear();
+
+        let config_file = self.config_file();
+        if !config_file.exists() {
+            return Ok(());
+        }
+
+        for config in ConfigLoader::new().load_recursive(&config_file)? {
+            let file = config.file.clone().unwrap();
+            let dir = file.parent().unwrap();
+            let name = project_name(&self.root.canonicalize()?, dir);
+            self.projects.push(Project {
+                raw: Config::load_from_file(&file)?,
+                file,
+                name,
+            });
+        }
+        Ok(())
+    }
+
+    /// Crée `hooker.config.json` à la racine (comme `hooker init`)
+    pub fn init_config(&mut self) -> Result<(), GoatHookerError> {
+        if !self.config_file().exists() {
+            Config {
+                schema: Some(SCHEMA_URL.to_string()),
+                hooks: Some(vec![]),
+                ..Default::default()
+            }
+            .write_to_dir(&self.root)?;
+        }
+        self.reload()
+    }
+
+    pub fn install(&mut self) -> Result<Vec<PathBuf>, GoatHookerError> {
+        let skipped = install::install_hooks(&self.root, false)?;
+        self.installed = install::is_installed(&self.root);
+        Ok(skipped)
+    }
+
+    fn load_configs(&self) -> Result<Vec<Config>, GoatHookerError> {
+        if !self.config_file().exists() {
+            return Ok(vec![]);
+        }
+        ConfigLoader::new().load_recursive(&self.config_file())
+    }
+
+    /// Hooks du pre-commit qui se lanceraient sur les fichiers stagés
+    pub fn preview_pre_commit(&self) -> Result<Vec<PreviewItem>, GoatHookerError> {
+        let configs = self.load_configs()?;
+        let matcher = Matcher::new(&configs)?;
+        let staged = git::staged_files(&self.root)?;
+        Ok(matcher
+            .hooks_to_run(Trigger::PreCommit, Some(&staged))
+            .into_iter()
+            .map(|matched| PreviewItem {
+                hook: matched.hook.name.clone(),
+                project_dir: matched.base_dir,
+                files: matched.files,
+            })
+            .collect())
+    }
+
+    /// Lance tous les hooks d'un trigger, comme Git le ferait
+    pub fn run_trigger(&self, trigger: Trigger) -> Result<Vec<HookResult>, GoatHookerError> {
+        let configs = self.load_configs()?;
+        runner::run_trigger(
+            &self.root,
+            &configs,
+            trigger,
+            &HookInput::default(),
+            Output::Capture,
+        )
+    }
+
+    /// Lance un seul hook d'un projet.
+    /// Pour un pre-commit, sur les fichiers stagés qui le concernent.
+    pub fn run_hook(
+        &self,
+        project: &Project,
+        hook_name: &str,
+    ) -> Result<HookResult, GoatHookerError> {
+        let configs = self.load_configs()?;
+        let project_dir = project.dir().canonicalize()?;
+
+        let Some(hook) = configs
+            .iter()
+            .filter(|c| c.base_dir.as_deref() == Some(project_dir.as_path()))
+            .flat_map(|c| c.hooks.iter().flatten())
+            .find(|h| h.name == hook_name)
+        else {
+            return Err(GoatHookerError::InvalidHook {
+                name: hook_name.to_string(),
+                reason: "hook not found".to_string(),
+            });
+        };
+
+        let files = if hook.trigger == Some(Trigger::PreCommit) {
+            let staged = git::staged_files(&self.root)?;
+            Matcher::new(&configs)?
+                .hooks_to_run(Trigger::PreCommit, Some(&staged))
+                .into_iter()
+                .find(|m| m.hook.name == hook_name && m.base_dir == project_dir)
+                .map(|m| m.files)
+                .unwrap_or_default()
+        } else {
+            vec![]
+        };
+
+        let matched = MatchedHook {
+            hook,
+            base_dir: project_dir,
+            files,
+        };
+        runner::run_hook(&matched, &HookInput::default(), Output::Capture)
+    }
+}
+
+fn project_name(root: &Path, dir: &Path) -> String {
+    match dir.strip_prefix(root) {
+        Ok(rel) if rel.as_os_str().is_empty() => ".".to_string(),
+        Ok(rel) => rel.display().to_string(),
+        Err(_) => dir.display().to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, process::Command};
+    use tempfile::tempdir;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    fn setup() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        git(&root, &["init", "-q"]);
+        fs::write(
+            root.join(HOOK_CONFIG_FILENAME),
+            r#"{ "imports": ["api"], "hooks": [ { "name": "root", "trigger": "pre-commit", "include": ["*.md"], "cmd": "echo root {files}" } ] }"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("api")).unwrap();
+        fs::write(
+            root.join("api").join(HOOK_CONFIG_FILENAME),
+            r#"{ "hooks": [ { "name": "api", "trigger": "pre-commit", "include": ["*.rs"], "cmd": "echo api {files}" } ] }"#,
+        )
+        .unwrap();
+        (dir, root)
+    }
+
+    #[test]
+    fn open_repo_lists_projects() {
+        let (_dir, root) = setup();
+        let repo = Repo::open(&root.join("api")).unwrap();
+
+        let names: Vec<&str> = repo.projects.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec![".", "api"]);
+        assert!(!repo.installed);
+    }
+
+    #[test]
+    fn edit_hooks() {
+        let (_dir, root) = setup();
+        let mut repo = Repo::open(&root).unwrap();
+
+        let hook = Hook {
+            name: "fmt".to_string(),
+            trigger: Some(Trigger::PreCommit),
+            cmd: Some("cargo fmt".to_string()),
+            ..Default::default()
+        };
+        repo.projects[1].save_hook(None, hook).unwrap();
+        repo.projects[1].delete_hook(0).unwrap();
+        repo.reload().unwrap();
+
+        let names: Vec<&str> = repo.projects[1]
+            .hooks()
+            .iter()
+            .map(|h| h.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["fmt"]);
+    }
+
+    #[test]
+    fn preview_and_run() {
+        let (_dir, root) = setup();
+        fs::write(root.join("api/lib.rs"), "").unwrap();
+        git(&root, &["add", "api/lib.rs"]);
+        let repo = Repo::open(&root).unwrap();
+
+        let preview = repo.preview_pre_commit().unwrap();
+        assert_eq!(preview.len(), 1);
+        assert_eq!(preview[0].hook, "api");
+        assert_eq!(preview[0].project_dir, root.join("api"));
+        assert_eq!(preview[0].files, vec![PathBuf::from("lib.rs")]);
+
+        let result = repo.run_hook(&repo.projects[1], "api").unwrap();
+        assert_eq!(result.commands[0].output, "api lib.rs\n");
+
+        let results = repo.run_trigger(Trigger::PreCommit).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].success);
+    }
+
+    #[test]
+    fn init_and_install() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        git(&root, &["init", "-q"]);
+
+        let mut repo = Repo::open(&root).unwrap();
+        assert!(repo.projects.is_empty());
+        repo.init_config().unwrap();
+        assert_eq!(repo.projects.len(), 1);
+
+        repo.install().unwrap();
+        assert!(repo.installed);
+    }
+}
