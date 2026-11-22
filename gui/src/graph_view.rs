@@ -32,6 +32,8 @@ pub struct ViewNode {
     pub reads: Vec<String>,
     pub writes: Vec<String>,
     pub after: Vec<usize>,
+    /// Why it isn't allowed to run (its lineage is cut)
+    pub denied: Option<String>,
     /// Hook écrit dans un `hooker.config.json` du dépôt (pas chargé depuis un fichier partagé)
     pub editable: bool,
     /// Colonne (niveau de dépendance) et ligne dans la colonne
@@ -104,6 +106,7 @@ impl Repo {
                     reads: node.reads.clone(),
                     writes: node.writes.clone(),
                     after: node.after.clone(),
+                    denied: node.denied.clone(),
                     editable: self.raw_hook(&node.base_dir, &node.hook.name).is_some(),
                     column: 0,
                     row: 0,

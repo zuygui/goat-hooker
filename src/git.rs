@@ -136,18 +136,24 @@ impl UnstagedStash {
             })
             .collect();
         fs::write(&manifest, lines.join("\n") + "\n")?;
-
-        // Remet ces fichiers au niveau de l'index
-        let mut args = vec!["checkout", "--"];
-        args.extend(paths.iter().copied());
-        git(root, &args)?;
-
-        Ok(Some(Self {
+        // From here, dropping it (error, panic) puts the changes back
+        let stash = Self {
             root: root.to_path_buf(),
             manifest,
             files,
             restored: false,
-        }))
+        };
+
+        // Remet ces fichiers au niveau de l'index, sans lancer les hooks de Git (post-checkout)
+        let no_hooks = format!(
+            "core.hooksPath={}",
+            git_path(root, "goat-hooker/no-hooks")?.display()
+        );
+        let mut args = vec!["-c", no_hooks.as_str(), "checkout", "--"];
+        args.extend(paths.iter().copied());
+        git(root, &args)?;
+
+        Ok(Some(stash))
     }
 
     /// Remet les modifs non stagées.
@@ -497,6 +503,31 @@ mod tests {
                 root.join("c.json")
             ]
         );
+    }
+
+    #[test]
+    fn stash_doesnt_run_git_hooks() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        init_repo(&root);
+        fs::write(root.join("a.rs"), "v1\n").unwrap();
+        git(&root, &["add", "."]).unwrap();
+        git(&root, &["commit", "-q", "-m", "init"]).unwrap();
+
+        // a post-checkout hook that fails (like a hooker missing from the PATH)
+        let hook = root.join(".git/hooks/post-checkout");
+        fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        fs::write(root.join("a.rs"), "v2\n").unwrap();
+        let mut stash = UnstagedStash::save(&root).unwrap().unwrap();
+        assert_eq!(fs::read_to_string(root.join("a.rs")).unwrap(), "v1\n");
+        stash.restore().unwrap();
+        assert_eq!(fs::read_to_string(root.join("a.rs")).unwrap(), "v2\n");
     }
 
     #[test]

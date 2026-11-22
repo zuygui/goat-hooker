@@ -38,6 +38,8 @@ pub struct Usage {
     pub readers: Vec<String>,
     /// Hooks using it without being allowed to
     pub violations: Vec<String>,
+    /// `project:hook` of each violation
+    pub denied: Vec<String>,
 }
 
 fn error(name: &str, reason: String) -> GoatHookerError {
@@ -111,14 +113,22 @@ pub fn allowed(
     })
 }
 
-/// Checks that each hook only uses declared variables it is allowed to use
-pub fn check(configs: &[Config]) -> Result<BTreeMap<String, Declared>, GoatHookerError> {
+/// Hooks using variables they aren't allowed to: `project:hook` → reason.
+/// They don't run, and neither do the hooks after them.
+pub fn denials(configs: &[Config]) -> Result<BTreeMap<String, String>, GoatHookerError> {
     let declared = declared(configs)?;
+    let mut denials = BTreeMap::new();
     for usage in usages(configs, &declared) {
-        if let Some(violation) = usage.violations.first() {
-            return Err(error(&usage.declared.name, violation.clone()));
+        for (reference, violation) in usage.denied.into_iter().zip(usage.violations) {
+            denials.entry(reference).or_insert(violation);
         }
     }
+    Ok(denials)
+}
+
+/// Checks that each hook only uses declared variables (permissions are checked by `denials`)
+pub fn check(configs: &[Config]) -> Result<BTreeMap<String, Declared>, GoatHookerError> {
+    let declared = declared(configs)?;
     let root = root_dir(configs);
     for config in configs {
         let project = graph::project_name(&root, config.base_dir.as_deref().unwrap_or(&root));
@@ -155,6 +165,7 @@ fn usages(configs: &[Config], declared: &BTreeMap<String, Declared>) -> Vec<Usag
                     writers: vec![],
                     readers: vec![],
                     violations: vec![],
+                    denied: vec![],
                 },
             )
         })
@@ -175,6 +186,7 @@ fn usages(configs: &[Config], declared: &BTreeMap<String, Declared>) -> Vec<Usag
                         variable.readers.as_ref()
                     };
                     if !allowed(list, &usage.declared.project, &project, &hook.name) {
+                        usage.denied.push(reference.clone());
                         usage.violations.push(format!(
                             "`{reference}` isn't allowed to {} `{name}` (allowed: {})",
                             if writing { "write" } else { "read" },

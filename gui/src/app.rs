@@ -70,6 +70,7 @@ enum RunStatus {
     Passed,
     Failed,
     Skipped,
+    Denied,
 }
 
 /// Formulaire ouvert dans le panneau de détail
@@ -279,6 +280,8 @@ impl HookerApp {
         };
         if results.is_empty() {
             None
+        } else if results.iter().any(|r| r.denied) {
+            Some(RunStatus::Denied)
         } else if results.iter().any(|r| r.failed()) {
             Some(RunStatus::Failed)
         } else if results.iter().all(|r| r.skipped) {
@@ -639,13 +642,21 @@ impl HookerApp {
                 this.graph_dirty = true;
                 match results {
                     Ok(results) => {
-                        let failed = results.iter().filter(|r| r.failed()).count();
+                        let denied = results.iter().filter(|r| r.denied).count();
+                        let failed = results.iter().filter(|r| r.failed()).count() - denied;
                         let skipped = results.iter().filter(|r| r.skipped).count();
                         let name = trigger.as_str();
-                        this.notice = Some(if failed == 0 {
+                        this.notice = Some(if failed == 0 && denied == 0 {
                             (format!("{name} passed ({} hooks)", results.len()), true)
                         } else {
-                            let mut message = format!("{name} failed: {failed} failed");
+                            let mut parts = Vec::new();
+                            if failed > 0 {
+                                parts.push(format!("{failed} failed"));
+                            }
+                            if denied > 0 {
+                                parts.push(format!("{denied} denied"));
+                            }
+                            let mut message = format!("{name} failed: {}", parts.join(", "));
                             if skipped > 0 {
                                 message.push_str(&format!(", {skipped} skipped"));
                             }
@@ -711,6 +722,7 @@ impl HookerApp {
                     NodeStatus {
                         success: result.success,
                         skipped: result.skipped,
+                        denied: result.denied,
                         duration: result.duration,
                     },
                 )
@@ -1146,6 +1158,7 @@ impl HookerApp {
                     RunStatus::Failed => Icon::new(IconName::CircleX)
                         .xsmall()
                         .text_color(theme.danger),
+                    RunStatus::Denied => lucide("shield-alert").xsmall().text_color(theme.danger),
                     RunStatus::Skipped => Icon::new(IconName::Minus)
                         .xsmall()
                         .text_color(theme.muted_foreground),
@@ -1563,7 +1576,9 @@ impl HookerApp {
                                     .text_color(theme.danger)
                             })
                             .child(if result.skipped {
-                                "Skipped (a hook it needs failed)"
+                                "Skipped (a hook before it failed or was denied)"
+                            } else if result.denied {
+                                "Denied: it did or needed what it isn't allowed to"
                             } else if result.success {
                                 "Passed"
                             } else {

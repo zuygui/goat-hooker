@@ -163,6 +163,9 @@ pub struct HookResult {
     pub success: bool,
     /// Pas lancé : un nœud attendu a échoué
     pub skipped: bool,
+    /// Not allowed: not run (not trusted, forbidden variable) or stopped for doing what it
+    /// may not do. The nodes after it (needs and variables) are skipped
+    pub denied: bool,
     pub duration: Duration,
     pub commands: Vec<CommandResult>,
     /// Fichiers ciblés, relatifs à `base_dir` (sortie `files`)
@@ -242,6 +245,7 @@ fn standalone_node<'a>(matched: &MatchedHook<'a>) -> Node<'a> {
         reads: matched.hook.reads.clone().unwrap_or_default(),
         writes: matched.hook.writes.clone().unwrap_or_default(),
         after: vec![],
+        denied: None,
     }
 }
 
@@ -278,6 +282,7 @@ pub fn run_graph(
         }
     }
     let mut ready: VecDeque<usize> = (0..count).filter(|&i| remaining[i] == 0).collect();
+    let mut cut = vec![false; count];
 
     // Les nœuds qui attendaient `index` sont peut-être prêts
     let release = |index: usize, remaining: &mut Vec<usize>, ready: &mut VecDeque<usize>| {
@@ -304,10 +309,13 @@ pub fn run_graph(
                 };
                 let node = &graph.nodes[index];
 
-                if node
-                    .needs
-                    .iter()
-                    .any(|&need| results[need].as_ref().is_some_and(|r| !r.success))
+                // A denied node cuts its whole lineage, through `needs` and variables
+                let cut_above = node.needs.iter().chain(&node.after).any(|&n| cut[n]);
+                if cut_above
+                    || node
+                        .needs
+                        .iter()
+                        .any(|&need| results[need].as_ref().is_some_and(|r| !r.success))
                 {
                     let result = HookResult {
                         name: node.label(),
@@ -316,6 +324,26 @@ pub fn run_graph(
                         files: node.files.clone(),
                         ..Default::default()
                     };
+                    cut[index] = cut_above;
+                    notify(Progress::Finished(index, &result));
+                    results[index] = Some(result);
+                    release(index, &mut remaining, &mut ready);
+                    continue;
+                }
+                if let Some(reason) = node.denied.as_ref() {
+                    let result = HookResult {
+                        name: node.label(),
+                        base_dir: node.base_dir.clone(),
+                        denied: true,
+                        files: node.files.clone(),
+                        commands: vec![CommandResult {
+                            cmd: "permissions".to_string(),
+                            success: false,
+                            output: format!("{reason}\n"),
+                        }],
+                        ..Default::default()
+                    };
+                    cut[index] = true;
                     notify(Progress::Finished(index, &result));
                     results[index] = Some(result);
                     release(index, &mut remaining, &mut ready);
@@ -338,6 +366,7 @@ pub fn run_graph(
             let (index, result) = receiver.recv().expect("hook thread stopped");
             running -= 1;
             let result = result?;
+            cut[index] = result.denied;
 
             if parallel && output == Output::Inherit {
                 let _guard = print_lock.lock().unwrap();
@@ -446,7 +475,6 @@ pub fn run_trigger(
     };
 
     let graph = graph::build(configs, trigger, &hooks)?;
-    crate::trust::check(root, graph.nodes.iter().map(|n| n.hook))?;
     let shared = Shared::load(root, configs)?;
     let results = run_graph(&graph, input, parallel, output, on_progress, &shared)?;
     // The values are kept only if the run passed (the commit or push happens)
@@ -584,18 +612,13 @@ fn run_node(
     let _ = std::fs::remove_file(&vars_file);
 
     // Permissions: the hook fails when it did what it isn't allowed to
-    let mut denied = Vec::new();
-    for (name, value) in written {
-        if node.writes.contains(&name) {
-            if result.success {
-                shared.set(&name, value);
-            }
-        } else {
-            denied.push(format!(
-                "wrote the variable `{name}` without declaring it in `writes`, it was ignored"
-            ));
-        }
-    }
+    let mut denied: Vec<String> = written
+        .keys()
+        .filter(|name| !node.writes.contains(name))
+        .map(|name| {
+            format!("wrote the variable `{name}` without declaring it in `writes`, it was ignored")
+        })
+        .collect();
     for (file, content) in &protected {
         if std::fs::read(file).ok().as_ref() != Some(content) {
             let _ = std::fs::write(file, content);
@@ -605,8 +628,15 @@ fn run_node(
             ));
         }
     }
+    // Its variables are kept only if it passed and did nothing it may not do
+    if result.success && denied.is_empty() {
+        for (name, value) in written {
+            shared.set(&name, value);
+        }
+    }
     if !denied.is_empty() {
         result.success = false;
+        result.denied = true;
         result.commands.push(CommandResult {
             cmd: "permissions".to_string(),
             success: false,
@@ -1266,22 +1296,34 @@ mod tests {
     }
 
     #[test]
-    fn variable_permissions_are_checked() {
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("hooker.config.json"),
-            r#"{ "variables": { "token": { "readers": ["deploy"] } },
-                 "hooks": [ { "name": "lint", "trigger": "pre-commit", "reads": ["token"], "cmd": "true" } ] }"#,
-        )
-        .unwrap();
-        let configs = crate::config::ConfigLoader::new()
-            .load_recursive(&dir.path().join("hooker.config.json"))
-            .unwrap();
-        let hooks = Matcher::new(&configs)
-            .unwrap()
-            .hooks_to_run(Trigger::PreCommit, None);
-        let err = graph::build(&configs, Trigger::PreCommit, &hooks).unwrap_err();
-        assert!(err.to_string().contains("isn't allowed to read"), "{err}");
+    fn denied_hooks_cut_their_lineage() {
+        for parallel in [false, true] {
+            let (_dir, results) = run_configs(
+                &[(
+                    ".",
+                    r#"{ "variables": { "token": { "readers": ["deploy"] }, "version": {} },
+                       "hooks": [
+                        { "name": "lint", "trigger": "pre-commit", "reads": ["token"], "cmd": "echo lint" },
+                        { "name": "after lint", "trigger": "pre-commit", "needs": ["lint"], "cmd": "echo after" },
+                        { "name": "bump", "trigger": "pre-commit", "writes": ["version"],
+                          "cmd": "echo version=2 >> $HOOKER_VARS; echo other=1 >> $HOOKER_VARS" },
+                        { "name": "changelog", "trigger": "pre-commit", "reads": ["version"], "cmd": "echo $version" },
+                        { "name": "independent", "trigger": "pre-commit", "cmd": "echo ok" }
+                    ] }"#,
+                )],
+                parallel,
+            );
+            // not allowed to read `token`: not run, and what waits for it is skipped
+            let lint = by_name(&results, "lint");
+            assert!(lint.denied && !lint.success);
+            assert!(lint.stdout().contains("isn't allowed to read"));
+            assert!(by_name(&results, "after lint").skipped);
+            // wrote an undeclared variable: denied, its readers are skipped too
+            assert!(by_name(&results, "bump").denied);
+            assert!(by_name(&results, "changelog").skipped);
+            // the others still run
+            assert!(by_name(&results, "independent").success);
+        }
     }
 
     #[test]

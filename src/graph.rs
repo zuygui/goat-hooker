@@ -48,6 +48,9 @@ pub struct Node<'a> {
     pub writes: Vec<String>,
     /// Nodes writing a variable this one reads: it runs after them, even if they fail
     pub after: Vec<usize>,
+    /// Why it isn't allowed to run (not trusted, forbidden variable): it and everything
+    /// after it are cut
+    pub denied: Option<String>,
 }
 
 impl Node<'_> {
@@ -144,6 +147,7 @@ pub fn build<'a>(
     }
 
     crate::variables::check(configs)?;
+    let denials = crate::variables::denials(configs)?;
     let resolver = Resolver {
         entries: &entries,
         trigger,
@@ -209,6 +213,10 @@ pub fn build<'a>(
                 reads: entry.hook.reads.clone().unwrap_or_default(),
                 writes: entry.hook.writes.clone().unwrap_or_default(),
                 after: vec![],
+                denied: denials
+                    .get(&format!("{}:{}", entry.project, entry.hook.name))
+                    .cloned()
+                    .or_else(|| untrusted(&root, entry.hook)),
             });
         }
     }
@@ -301,6 +309,20 @@ pub fn build<'a>(
     }
 
     sort(nodes)
+}
+
+/// Reason why a hook of another repository can't run yet
+fn untrusted(root: &Path, hook: &Hook) -> Option<String> {
+    let origin = hook.origin.as_ref()?;
+    if std::env::var_os(crate::trust::TRUST_ALL_ENV).is_some_and(|v| v == "1")
+        || crate::trust::is_trusted(root, origin)
+    {
+        return None;
+    }
+    Some(format!(
+        "{} ({}) isn't trusted yet: review it with `hooker trust`",
+        origin.path, origin.url
+    ))
 }
 
 /// Résout `hook.output` en (nœud, sortie)

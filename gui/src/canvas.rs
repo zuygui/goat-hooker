@@ -77,6 +77,7 @@ struct Wire {
 pub struct NodeStatus {
     pub success: bool,
     pub skipped: bool,
+    pub denied: bool,
     pub duration: Duration,
 }
 
@@ -647,6 +648,25 @@ impl GraphCanvas {
                         .text_color(theme.muted_foreground)
                         .child(node.project.clone()),
                 )
+                .when(node.denied.is_some(), |this| {
+                    this.child(
+                        div()
+                            .id(("denied", index))
+                            .px(s(4.))
+                            .rounded(s(3.))
+                            .text_size(s(10.))
+                            .bg(theme.danger.opacity(0.12))
+                            .text_color(theme.danger)
+                            .child("denied")
+                            .tooltip({
+                                let reason = node.denied.clone().unwrap_or_default();
+                                move |window, cx| {
+                                    gpui_kit::component::tooltip::Tooltip::new(reason.clone())
+                                        .build(window, cx)
+                                }
+                            }),
+                    )
+                })
                 .when(!node.editable, |this| {
                     this.child(
                         div()
@@ -658,6 +678,8 @@ impl GraphCanvas {
                 .children(status.map(|status| {
                     let (icon, color) = if status.skipped {
                         (IconName::Minus, theme.muted_foreground)
+                    } else if status.denied {
+                        (IconName::CircleX, theme.danger)
                     } else if status.success {
                         (IconName::CircleCheck, theme.success)
                     } else {
@@ -667,7 +689,7 @@ impl GraphCanvas {
                         .gap(s(3.))
                         .text_size(s(10.))
                         .text_color(theme.muted_foreground)
-                        .when(!status.skipped, |this| {
+                        .when(!status.skipped && !status.denied, |this| {
                             this.child(format!("{:.1}s", status.duration.as_secs_f32()))
                         })
                         .child(Icon::new(icon).size(s(14.)).text_color(color))
