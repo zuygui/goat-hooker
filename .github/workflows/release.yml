@@ -1,0 +1,163 @@
+name: Release
+
+on:
+  push:
+    branches: [ "main" ]
+  # Vérifie que les installeurs se construisent (artefacts du workflow, rien n'est publié)
+  pull_request:
+    branches: [ "main" ]
+  # Reconstruire les binaires et installeurs d'une release existante
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag of the release (e.g. v0.1.0)"
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Publie sur crates.io et crée le tag + la GitHub Release quand la version a changé
+  release:
+    name: Release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      releases: ${{ steps.release-plz.outputs.releases }}
+      releases_created: ${{ steps.release-plz.outputs.releases_created }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libx11-xcb-dev libxcb1-dev
+      - name: Run release-plz
+        id: release-plz
+        uses: release-plz/action@v0.5.139
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # Ouvre / met à jour la PR « chore: release » (version + CHANGELOG)
+  release-pr:
+    name: Release PR
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run release-plz
+        uses: release-plz/action@v0.5.139
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # Binaires de la CLI et installeurs de l'app, ajoutés à la GitHub Release
+  assets:
+    name: Assets (${{ matrix.target }})
+    needs: release
+    if: >-
+      always() && (
+        github.event_name != 'push' ||
+        needs.release.outputs.releases_created == 'true'
+      )
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            formats: deb,appimage
+          - target: aarch64-apple-darwin
+            os: macos-14
+            formats: dmg
+          - target: x86_64-apple-darwin
+            os: macos-14
+            formats: dmg
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            formats: nsis
+    runs-on: ${{ matrix.os }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag || fromJSON(needs.release.outputs.releases || '[{}]')[0].tag }}
+      # linuxdeploy (AppImage) sans FUSE
+      APPIMAGE_EXTRACT_AND_RUN: 1
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Sur une PR, le code de la PR ; sinon, le tag de la release
+          ref: ${{ env.TAG || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install GUI dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libx11-xcb-dev libxcb1-dev
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p goat-hooker -p goat-hooker-gui
+      - name: Archive the CLI
+        run: |
+          set -e
+          name="hooker-${TAG:-dev}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp README.md LICENSE "dist/$name/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/hooker.exe" "dist/$name/"
+            (cd dist && 7z a "$name.zip" "$name" > /dev/null)
+          else
+            cp "target/${{ matrix.target }}/release/hooker" "dist/$name/"
+            tar -czf "dist/$name.tar.gz" -C dist "$name"
+          fi
+          rm -rf "dist/$name"
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked
+      - name: Package the app
+        run: cargo packager -p goat-hooker-gui --release --target ${{ matrix.target }} --formats ${{ matrix.formats }} --out-dir "$PWD/dist"
+      - name: Upload as workflow artifacts
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: goat-hooker-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.dmg
+            dist/*.exe
+            dist/*.deb
+            dist/*.AppImage
+          if-no-files-found: error
+      - name: Upload to the release
+        if: github.event_name != 'pull_request'
+        run: |
+          set -e
+          shopt -s nullglob
+          files=(dist/*.tar.gz dist/*.zip dist/*.dmg dist/*.exe dist/*.deb dist/*.AppImage)
+          ls -la "${files[@]}"
+          gh release upload "$TAG" "${files[@]}" --clobber
