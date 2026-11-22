@@ -223,6 +223,28 @@ Hooks can be shared between projects in a hooks file (`{ "hooks": [...] }`), loa
 
 Loaded hooks run from the project that loads them. Repositories are cloned once, run `hooker update` to fetch their new version.
 
+A hooks file can declare `params`, used as `{{name}}` in its hooks, and set with `with` by the hook loading it. This makes reusable nodes:
+
+```json
+// eslint.json, in the repository acme/hooks
+{
+  "params": {
+    "files": { "description": "Files to lint" },
+    "config": { "default": ".eslintrc.json" }
+  },
+  "hooks": [
+    { "name": "eslint", "trigger": "pre-commit", "include": ["{{files}}"], "cmd": "eslint -c {{config}} {files}" }
+  ]
+}
+```
+
+```json
+{ "name": "lint", "from": "https://github.com/acme/hooks", "rev": "v1", "path": "eslint.json",
+  "with": { "files": ["src/**/*.ts", "src/**/*.tsx"] } }
+```
+
+`{{name}}` (two braces) is replaced when the config is loaded; `{files}` and the inputs (one brace) when the hook runs. A string that is exactly `{{name}}` takes the value as is, so a list fills an array.
+
 ## Thanks to all contributors 🧡
 <p align="center">
   <img src="https://contrib.rocks/image?repo=zuygui/goat-hooker" />

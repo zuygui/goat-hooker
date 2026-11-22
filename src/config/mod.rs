@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{errors::GoatHookerError, git, remote};
 
+mod template;
+
 pub const HOOK_CONFIG_FILENAME: &str = "hooker.config.json";
 
 /// URL du schéma, ajoutée par `hooker init` (autocomplétion dans les éditeurs)
@@ -22,6 +24,13 @@ pub struct Config {
     #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
     #[schemars(description = "JSON schema of the file")]
     pub schema: Option<String>,
+
+    /// Paramètres d'un fichier de hooks réutilisable (utilisés en `{{nom}}`)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Parameters of a reusable hooks file, used as `{{name}}` in its hooks and set with `with` by the hook loading it"
+    )]
+    pub params: Option<BTreeMap<String, Param>>,
 
     /// Dossiers des sous-projets (globs acceptés, ex: `packages/*`)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,6 +111,10 @@ pub struct Hook {
     pub path: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Values of the `params` of the hooks file loaded with `path`")]
+    pub with: Option<BTreeMap<String, serde_json::Value>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
         description = "Hooks this one waits for: `name`, `name/step` or `project:name` (same trigger)"
     )]
@@ -122,6 +135,19 @@ pub struct Hook {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Steps of this hook, each one can wait for the others")]
     pub steps: Option<Vec<Step>>,
+}
+
+// Paramètre d'un fichier de hooks réutilisable
+#[derive(Debug, Default, Serialize, Deserialize, Clone, JsonSchema)]
+#[schemars(description = "A parameter of a reusable hooks file")]
+pub struct Param {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "What the parameter is for")]
+    pub description: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Value used when `with` doesn't set it (required without it)")]
+    pub default: Option<serde_json::Value>,
 }
 
 // Une étape d'un hook (un nœud dans le graphe)
@@ -305,6 +331,9 @@ impl Hook {
         if self.rev.is_some() && self.from.is_none() {
             return Err(invalid("`rev` requires `from`"));
         }
+        if self.with.is_some() && self.path.is_none() {
+            return Err(invalid("`with` requires `path`"));
+        }
         if self.is_import() {
             if self.cmd.is_some() || self.cmds.is_some() {
                 return Err(invalid("`path` can't be used with `cmd` or `cmds`"));
@@ -365,12 +394,49 @@ pub fn json_schema() -> String {
 
 impl Config {
     pub fn load_from_file(path: &Path) -> Result<Config, GoatHookerError> {
+        Self::load_with(path, None, "")
+    }
+
+    /// Charge un fichier en remplissant ses `params` avec `with` (`importer` : hook qui le charge)
+    pub fn load_with(
+        path: &Path,
+        with: Option<&BTreeMap<String, serde_json::Value>>,
+        importer: &str,
+    ) -> Result<Config, GoatHookerError> {
         let content = fs::read_to_string(path).map_err(GoatHookerError::ReadError)?;
-        let mut cfg: Config =
-            serde_json::from_str(&content).map_err(|source| GoatHookerError::ParseError {
-                path: path.to_path_buf(),
-                source,
-            })?;
+        let parse_error = |source| GoatHookerError::ParseError {
+            path: path.to_path_buf(),
+            source,
+        };
+        let mut value: serde_json::Value = serde_json::from_str(&content).map_err(parse_error)?;
+
+        // Paramètres : remplacés dans les hooks avant de les lire
+        if let Some(params) = value.get("params").cloned() {
+            let params: BTreeMap<String, Param> =
+                serde_json::from_value(params).map_err(parse_error)?;
+            if let Some(hooks) = value.get_mut("hooks") {
+                template::apply(hooks, &params, with).map_err(|reason| {
+                    GoatHookerError::InvalidHook {
+                        name: if importer.is_empty() {
+                            path.display().to_string()
+                        } else {
+                            importer.to_string()
+                        },
+                        reason,
+                    }
+                })?;
+            }
+        } else if let Some((name, _)) = with.and_then(|w| w.iter().next()) {
+            return Err(GoatHookerError::InvalidHook {
+                name: importer.to_string(),
+                reason: format!(
+                    "`with` sets `{name}`, but {} has no `params`",
+                    path.display()
+                ),
+            });
+        }
+
+        let mut cfg: Config = serde_json::from_value(value).map_err(parse_error)?;
 
         for hook in cfg.hooks.iter().flatten() {
             hook.validate()?;
@@ -500,7 +566,7 @@ impl ConfigLoader {
                 return Err(GoatHookerError::ConfigNotFound(file));
             }
 
-            let shared = Config::load_from_file(&file)?;
+            let shared = Config::load_with(&file, hook.with.as_ref(), &hook.name)?;
             let shared_dir = shared.base_dir.clone().unwrap();
             let shared_hooks = shared.hooks.unwrap_or_default();
 
@@ -902,6 +968,48 @@ mod tests {
         assert_eq!(
             current, expected,
             "schema.json is outdated, run `cargo run -- schema > schema.json`"
+        );
+    }
+
+    #[test]
+    fn load_reusable_hooks_with_params() {
+        let dir = tempdir().unwrap();
+        let root_path = dir.path().join(HOOK_CONFIG_FILENAME);
+        write_json(
+            &root_path,
+            r#"{ "hooks": [
+                { "name": "front lint", "path": "eslint.json", "with": { "files": ["web/**/*.ts"], "name": "front" } },
+                { "name": "default lint", "path": "eslint.json", "with": { "files": "*.ts" } }
+            ] }"#,
+        );
+        write_json(
+            &dir.path().join("eslint.json"),
+            r#"{
+                "params": { "files": {}, "name": { "default": "lint" }, "config": { "default": ".eslintrc.json" } },
+                "hooks": [ { "name": "eslint {{name}}", "trigger": "pre-commit", "include": ["{{files}}"],
+                             "cmd": "eslint -c {{config}} {files}" } ]
+            }"#,
+        );
+
+        let cfgs = ConfigLoader::new().load_recursive(&root_path).unwrap();
+        let hooks = cfgs[0].hooks.clone().unwrap();
+        assert_eq!(hooks[0].name, "eslint front");
+        assert_eq!(hooks[0].include, Some(vec!["web/**/*.ts".to_string()]));
+        assert_eq!(
+            hooks[0].cmd.as_deref(),
+            Some("eslint -c .eslintrc.json {files}")
+        );
+        assert_eq!(hooks[1].name, "eslint lint");
+
+        // paramètre requis manquant
+        write_json(
+            &root_path,
+            r#"{ "hooks": [ { "name": "lint", "path": "eslint.json" } ] }"#,
+        );
+        let err = ConfigLoader::new().load_recursive(&root_path).unwrap_err();
+        assert!(
+            err.to_string().contains("parameter `files` is required"),
+            "{err}"
         );
     }
 }
