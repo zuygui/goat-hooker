@@ -25,12 +25,43 @@
 
 ## Installation 📦
 
+**CLI** (`hooker`):
+
+```sh
+cargo install goat-hooker
+```
+
+or download the archive of your platform from the [latest release](https://github.com/zuygui/goat-hooker/releases/latest).
+
+**Desktop app**: download the installer of your platform from the [latest release](https://github.com/zuygui/goat-hooker/releases/latest):
+
+| Platform | Installer | CLI included |
+|----------|-----------|--------------|
+| macOS (Apple Silicon / Intel) | `.dmg` | `Goat Hooker.app/Contents/MacOS/hooker` |
+| Windows | `-setup.exe` | `hooker.exe` next to the app |
+| Linux | `.deb` / `.AppImage` | `/usr/bin/hooker` (`.deb`) |
+
+> [!NOTE]
+> The installers aren't signed yet: on macOS, right click on the app → Open the first time; on Windows, SmartScreen → More info → Run anyway.
+
+From the sources:
+
 ```sh
 cargo install --path .        # the `hooker` CLI
 cargo install --path gui      # the `goat-hooker-gui` desktop app
 ```
 
 On Linux, the desktop app needs `libxkbcommon`, `wayland`, `vulkan`, `fontconfig` and `xcb` development packages to build.
+
+## Releasing 🚀
+
+Releases are automatic, from the [conventional commits](https://www.conventionalcommits.org):
+
+1. every push on `main` opens or updates a `chore: release` pull request, with the new version and the `CHANGELOG.md`
+2. merging it publishes `goat-hooker` on crates.io, creates the `vX.Y.Z` tag and the GitHub release
+3. the CLI archives and the app installers are built for every platform and added to the release
+
+The repository needs a `CARGO_REGISTRY_TOKEN` secret (crates.io token with the `publish-new` and `publish-update` scopes), and GitHub Actions allowed to create pull requests (Settings → Actions → General).
 
 ## Usage 🐐
 
