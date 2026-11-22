@@ -105,6 +105,9 @@ pub struct HookerApp {
     /// Le graphe doit être recalculé (config ou résultats changés)
     graph_dirty: bool,
     pages: pages::PagesState,
+    /// Config files before the last changes, and the undone ones
+    undo_stack: Vec<Vec<(PathBuf, Option<String>)>>,
+    redo_stack: Vec<Vec<(PathBuf, Option<String>)>>,
     /// JSON editor of a config, in place of the detail
     json_editor: Option<Entity<crate::json_editor::JsonEditor>>,
     _subscriptions: Vec<Subscription>,
@@ -184,11 +187,15 @@ impl HookerApp {
             }
         });
 
-        let graph = cx.new(|_| GraphCanvas::new());
-        let graph_subscription = cx.subscribe(&graph, |this, _, event: &CanvasEvent, cx| {
-            this.on_canvas_event(event, cx);
-            cx.notify();
-        });
+        let graph = cx.new(GraphCanvas::new);
+        let graph_subscription = cx.subscribe_in(
+            &graph,
+            window,
+            |this, _, event: &CanvasEvent, window, cx| {
+                this.on_canvas_event(event, window, cx);
+                cx.notify();
+            },
+        );
 
         let mut app = Self {
             repo: None,
@@ -209,6 +216,8 @@ impl HookerApp {
             graph,
             graph_dirty: true,
             pages: pages::PagesState::new(window, cx),
+            undo_stack: vec![],
+            redo_stack: vec![],
             json_editor: None,
             _subscriptions: vec![subscription, graph_subscription],
         };
@@ -532,7 +541,11 @@ impl HookerApp {
             .and_then(|i| self.hook(HookRef { project, hook: i }))
             .map(|(_, hook)| hook.clone());
 
-        let view = cx.new(|cx| HookEditor::new(index, hook.as_ref(), window, cx));
+        let compact = self.graph_mode;
+        let view = cx.new(|cx| {
+            let editor = HookEditor::new(index, hook.as_ref(), window, cx);
+            if compact { editor.compact() } else { editor }
+        });
         let subscription = cx.subscribe(&view, |this, _, event: &EditorEvent, cx| {
             match event {
                 EditorEvent::Save { index, hook } => this.save_hook(*index, (**hook).clone(), cx),
@@ -549,6 +562,7 @@ impl HookerApp {
         let Some(project_index) = self.editor.as_ref().map(|e| e.project) else {
             return;
         };
+        self.checkpoint();
         let Some(project) = self
             .repo
             .as_mut()
@@ -575,6 +589,7 @@ impl HookerApp {
     }
 
     fn delete_hook(&mut self, hook_ref: HookRef, cx: &mut Context<Self>) {
+        self.checkpoint();
         let Some(project) = self
             .repo
             .as_mut()
@@ -736,17 +751,42 @@ impl HookerApp {
             .collect();
         let running = self.running_all;
         let projects: Vec<String> = repo.projects.iter().map(|p| p.name.clone()).collect();
+        let (can_undo, can_redo) = (!self.undo_stack.is_empty(), !self.redo_stack.is_empty());
         self.graph.update(cx, |graph, cx| {
+            graph.set_history(can_undo, can_redo);
             graph.set_projects(projects);
             graph.trigger = trigger;
             graph.set_data(triggers, nodes, statuses, running, cx);
         });
     }
 
-    fn on_canvas_event(&mut self, event: &CanvasEvent, cx: &mut Context<Self>) {
+    fn on_canvas_event(
+        &mut self,
+        event: &CanvasEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let nodes: Vec<ViewNode> = self.graph.read(cx).nodes().to_vec();
         let trigger = self.graph.read(cx).trigger;
+        if matches!(
+            event,
+            CanvasEvent::Link { .. }
+                | CanvasEvent::RemoveNeed { .. }
+                | CanvasEvent::RemoveInput { .. }
+                | CanvasEvent::Create { .. }
+                | CanvasEvent::Delete(_)
+        ) {
+            self.checkpoint();
+        }
         let result = match event {
+            CanvasEvent::Undo => {
+                self.undo(false);
+                Ok(())
+            }
+            CanvasEvent::Redo => {
+                self.undo(true);
+                Ok(())
+            }
             CanvasEvent::SetTrigger(trigger) => {
                 let trigger = *trigger;
                 self.graph.update(cx, |graph, _| graph.trigger = trigger);
@@ -757,7 +797,12 @@ impl HookerApp {
                 Ok(())
             }
             CanvasEvent::Select(index) => {
-                self.select_node(&nodes[*index], cx);
+                // Edited next to the graph
+                if let Some(hook_ref) = self.node_hook(&nodes[*index]) {
+                    self.selected = Some(hook_ref);
+                    self.json_editor = None;
+                    self.open_editor(hook_ref.project, Some(hook_ref.hook), window, cx);
+                }
                 Ok(())
             }
             CanvasEvent::Link {
@@ -836,6 +881,81 @@ impl HookerApp {
         cx.notify();
     }
 
+    /// Panel next to the graph: the node being edited
+    fn render_graph_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let selected = self.selected;
+        let body: AnyElement = match (self.json_editor.as_ref(), self.editor.as_ref()) {
+            (Some(json), _) => div().size_full().child(json.clone()).into_any_element(),
+            (None, Some(editor)) => div()
+                .size_full()
+                .overflow_y_scrollbar()
+                .child(div().p_4().child(editor.view.clone()))
+                .into_any_element(),
+            _ => div().into_any_element(),
+        };
+        v_flex()
+            .w(px(if self.json_editor.is_some() {
+                560.
+            } else {
+                420.
+            }))
+            .h_full()
+            .flex_shrink_0()
+            .border_l_1()
+            .border_color(theme.border)
+            .bg(theme.background)
+            .child(
+                h_flex()
+                    .px_3()
+                    .py_2()
+                    .gap_1()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(div().flex_1())
+                    .when_some(
+                        selected.filter(|_| self.json_editor.is_none()),
+                        |this, s| {
+                            this.child(
+                                Button::new("panel-json")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(lucide("pencil"))
+                                    .label("JSON")
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.open_json(s.project, window, cx)
+                                    })),
+                            )
+                        },
+                    )
+                    .child(
+                        Button::new("panel-list")
+                            .ghost()
+                            .xsmall()
+                            .icon(lucide("list"))
+                            .label("Open in the list")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.graph_mode = false;
+                                this.filter = Filter::All;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("panel-close")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Close)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.editor = None;
+                                this.json_editor = None;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(div().flex_1().min_h_0().child(body))
+            .into_any_element()
+    }
+
     /// Hook created on the canvas, linked to the node its wire comes from
     fn create_from_canvas(
         &mut self,
@@ -870,16 +990,14 @@ impl HookerApp {
         Ok(())
     }
 
-    /// Ouvre le hook d'un nœud dans la vue liste
-    fn select_node(&mut self, node: &ViewNode, cx: &mut Context<Self>) {
-        let Some(repo) = self.repo.as_ref() else {
-            return;
-        };
+    /// Hook of the list a node belongs to
+    fn node_hook(&self, node: &ViewNode) -> Option<HookRef> {
+        let repo = self.repo.as_ref()?;
         let dir = node
             .project_dir
             .canonicalize()
             .unwrap_or(node.project_dir.clone());
-        let found = repo.projects.iter().enumerate().find_map(|(p, project)| {
+        repo.projects.iter().enumerate().find_map(|(p, project)| {
             let project_dir = project.dir();
             if project_dir.canonicalize().unwrap_or(project_dir) != dir {
                 return None;
@@ -893,14 +1011,56 @@ impl HookerApp {
                     project: p,
                     hook: h,
                 })
-        });
-        if let Some(hook_ref) = found {
-            self.graph_mode = false;
-            self.filter = Filter::All;
-            self.editor = None;
-            self.selected = Some(hook_ref);
-            cx.notify();
+        })
+    }
+
+    // MARK: undo
+
+    /// Content of the config files
+    fn snapshot(&self) -> Vec<(PathBuf, Option<String>)> {
+        self.repo
+            .iter()
+            .flat_map(|r| r.projects.iter())
+            .map(|p| (p.file.clone(), std::fs::read_to_string(&p.file).ok()))
+            .collect()
+    }
+
+    /// Before a change: it can be undone
+    fn checkpoint(&mut self) {
+        let snapshot = self.snapshot();
+        self.undo_stack.push(snapshot);
+        if self.undo_stack.len() > 50 {
+            self.undo_stack.remove(0);
         }
+        self.redo_stack.clear();
+    }
+
+    /// Undo (or redo) the last change of the config files
+    fn undo(&mut self, redo: bool) {
+        let (from, to) = if redo {
+            (&mut self.redo_stack, &mut self.undo_stack)
+        } else {
+            (&mut self.undo_stack, &mut self.redo_stack)
+        };
+        let Some(snapshot) = from.pop() else {
+            return;
+        };
+        let current: Vec<(PathBuf, Option<String>)> = snapshot
+            .iter()
+            .map(|(file, _)| (file.clone(), std::fs::read_to_string(file).ok()))
+            .collect();
+        to.push(current);
+        for (file, content) in snapshot {
+            let result = match content {
+                Some(content) => std::fs::write(&file, content),
+                None => std::fs::remove_file(&file),
+            };
+            if let Err(err) = result {
+                self.notice = Some((err.to_string(), false));
+            }
+        }
+        self.editor = None;
+        self.reload();
     }
 
     // MARK: rendu
@@ -2129,9 +2289,13 @@ impl Render for HookerApp {
                         .child(self.render_page(window, cx)),
                 )
                 .into_any_element(),
-            Some(_) if self.graph_mode => div()
+            Some(_) if self.graph_mode => h_flex()
                 .size_full()
-                .child(self.graph.clone())
+                .child(div().flex_1().h_full().min_w_0().child(self.graph.clone()))
+                .when(
+                    self.editor.is_some() || self.json_editor.is_some(),
+                    |this| this.child(self.render_graph_panel(cx)),
+                )
                 .into_any_element(),
             Some(_) => h_flex()
                 .size_full()

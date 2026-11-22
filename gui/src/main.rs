@@ -29,6 +29,7 @@ fn main() {
         .with_assets(assets::Assets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            canvas::bind_keys(cx);
             cx.on_window_closed(|cx, _| cx.quit()).detach();
 
             let bounds = Bounds::centered(None, size(px(1180.), px(760.)), cx);

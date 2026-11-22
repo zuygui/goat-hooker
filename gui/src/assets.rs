@@ -36,6 +36,8 @@ const ICONS: &[(&str, &[u8])] = icons![
     "sun",
     "terminal",
     "trash",
+    "undo",
+    "redo",
     "upload",
     "variable",
     "workflow",

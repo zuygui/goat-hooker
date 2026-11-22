@@ -33,6 +33,19 @@ const SOCKET: f32 = 10.;
 /// Prise « done » de l'en-tête : le fil tiré depuis elle crée une attente (`needs`)
 const DONE: usize = usize::MAX;
 
+gpui_kit::actions!(graph_canvas, [UndoGraph, RedoGraph]);
+
+/// Shortcuts of the canvas (when it has the focus)
+pub fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("cmd-z", UndoGraph, Some("GraphCanvas")),
+        KeyBinding::new("ctrl-z", UndoGraph, Some("GraphCanvas")),
+        KeyBinding::new("cmd-shift-z", RedoGraph, Some("GraphCanvas")),
+        KeyBinding::new("ctrl-shift-z", RedoGraph, Some("GraphCanvas")),
+        KeyBinding::new("ctrl-y", RedoGraph, Some("GraphCanvas")),
+    ]);
+}
+
 pub enum CanvasEvent {
     Link {
         target: usize,
@@ -57,6 +70,8 @@ pub enum CanvasEvent {
         link: Option<(usize, Link)>,
     },
     Delete(usize),
+    Undo,
+    Redo,
     SetTrigger(Trigger),
     Run(Trigger),
 }
@@ -113,6 +128,10 @@ pub struct GraphCanvas {
     new_hook: Option<NewHook>,
     hovered: Option<usize>,
     show_help: bool,
+    focus: FocusHandle,
+    /// Changes can be undone / redone
+    can_undo: bool,
+    can_redo: bool,
     _subscriptions: Vec<Subscription>,
     triggers: Vec<Trigger>,
     nodes: Vec<ViewNode>,
@@ -212,8 +231,11 @@ fn input_name(target: &ViewNode, source: &ViewNode, output: &str) -> String {
 }
 
 impl GraphCanvas {
-    pub fn new() -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
+            focus: cx.focus_handle(),
+            can_undo: false,
+            can_redo: false,
             trigger: Trigger::PreCommit,
             projects: vec![],
             new_hook: None,
@@ -234,6 +256,11 @@ impl GraphCanvas {
 
     pub fn nodes(&self) -> &[ViewNode] {
         &self.nodes
+    }
+
+    pub fn set_history(&mut self, can_undo: bool, can_redo: bool) {
+        self.can_undo = can_undo;
+        self.can_redo = can_redo;
     }
 
     pub fn set_projects(&mut self, projects: Vec<String>) {
@@ -385,6 +412,7 @@ impl GraphCanvas {
             return;
         }
         self.new_hook = None;
+        window.focus(&self.focus, cx);
         self.drag = Some(Drag::Pan {
             mouse: event.position,
             offset: self.offset,
@@ -1126,6 +1154,28 @@ impl GraphCanvas {
             .child(tabs)
             .child(div().flex_1())
             .child(
+                Button::new("undo")
+                    .ghost()
+                    .small()
+                    .icon(Icon::empty().path("icons/undo.svg"))
+                    .tooltip("Undo (⌘/Ctrl+Z)")
+                    .when(!self.can_undo, |b| {
+                        gpui_kit::component::Disableable::disabled(b, true)
+                    })
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(CanvasEvent::Undo))),
+            )
+            .child(
+                Button::new("redo")
+                    .ghost()
+                    .small()
+                    .icon(Icon::empty().path("icons/redo.svg"))
+                    .tooltip("Redo (⌘/Ctrl+Shift+Z)")
+                    .when(!self.can_redo, |b| {
+                        gpui_kit::component::Disableable::disabled(b, true)
+                    })
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(CanvasEvent::Redo))),
+            )
+            .child(
                 Button::new("add-hook")
                     .ghost()
                     .small()
@@ -1190,6 +1240,10 @@ impl Render for GraphCanvas {
 
         div()
             .id("graph-canvas")
+            .key_context("GraphCanvas")
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|_, _: &UndoGraph, _, cx| cx.emit(CanvasEvent::Undo)))
+            .on_action(cx.listener(|_, _: &RedoGraph, _, cx| cx.emit(CanvasEvent::Redo)))
             .relative()
             .size_full()
             .overflow_hidden()
