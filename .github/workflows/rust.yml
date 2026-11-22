@@ -26,3 +26,11 @@ jobs:
       run: cargo fmt --all --check
     - name: Clippy
       run: cargo clippy --workspace --all-targets -- -D warnings
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Run the tests of the CLI
+      run: cargo test -p goat-hooker

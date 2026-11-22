@@ -771,7 +771,7 @@ fn parse_outputs(content: &str) -> BTreeMap<String, String> {
 /// The note says when it couldn't be blocked.
 fn sandboxed_shell(network: bool) -> (Command, Option<&'static str>) {
     if network {
-        return (Command::new("sh"), None);
+        return (Command::new(shell()), None);
     }
     static UNSHARE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if cfg!(target_os = "linux")
@@ -798,14 +798,55 @@ fn sandboxed_shell(network: bool) -> (Command, Option<&'static str>) {
         return (command, None);
     }
     (
-        Command::new("sh"),
+        Command::new(shell()),
         Some("goat-hooker: the network can't be blocked on this system\n"),
     )
 }
 
+/// The shell running the commands: `sh`, or on Windows the one of Git for Windows
+/// (found next to git when it isn't in the PATH)
+pub fn shell() -> PathBuf {
+    static SHELL: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    SHELL
+        .get_or_init(|| {
+            if !cfg!(windows) {
+                return PathBuf::from("sh");
+            }
+            let in_path = Command::new("sh")
+                .args(["-c", "exit 0"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success());
+            if in_path {
+                return PathBuf::from("sh");
+            }
+            // git --exec-path: <Git>/mingw64/libexec/git-core → <Git>/bin/sh.exe
+            let exec_path = Command::new("git")
+                .arg("--exec-path")
+                .output()
+                .ok()
+                .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()));
+            exec_path
+                .iter()
+                .flat_map(|p| p.ancestors().skip(1).take(4))
+                .flat_map(|dir| [dir.join("bin/sh.exe"), dir.join("usr/bin/sh.exe")])
+                .find(|sh| sh.is_file())
+                .unwrap_or_else(|| PathBuf::from("sh"))
+        })
+        .clone()
+}
+
 /// Échappe un chemin pour le shell (`it's.rs` → `'it'\''s.rs'`)
 fn shell_quote(path: &Path) -> String {
-    format!("'{}'", path.to_string_lossy().replace('\'', r"'\''"))
+    let path = path.to_string_lossy();
+    // The shell of Git for Windows prefers `/`
+    let path = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    };
+    format!("'{}'", path.replace('\'', r"'\''"))
 }
 
 /// Exécute une commande shell depuis `dir`.
