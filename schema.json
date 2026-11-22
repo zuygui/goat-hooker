@@ -17,38 +17,15 @@
         "null"
       ]
     },
-    "discover": {
-      "description": "Load every hooker.config.json of the repository (files ignored by git are skipped)",
-      "type": [
-        "boolean",
-        "null"
-      ]
-    },
-    "hooks": {
-      "description": "Hooks of this project",
-      "type": [
-        "array",
-        "null"
-      ],
-      "items": {
-        "$ref": "#/$defs/Hook"
-      }
-    },
-    "imports": {
-      "description": "Sub-projects folders, each one with its own hooker.config.json. Globs are supported (packages/*)",
-      "type": [
-        "array",
-        "null"
-      ],
-      "items": {
-        "type": "string"
-      }
-    },
-    "parallel": {
-      "description": "Run hooks in parallel (root config only)",
-      "type": [
-        "boolean",
-        "null"
+    "share": {
+      "description": "Share hooks files of this repository: `hooker search` finds the root configs with this field on GitHub (root config only)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Share"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "params": {
@@ -61,31 +38,161 @@
         "$ref": "#/$defs/Param"
       }
     },
-    "share": {
-      "description": "Share hooks files of this repository: `hooker search` finds the root configs with this field on GitHub (root config only)",
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Share"
-        },
-        {
-          "type": "null"
-        }
+    "imports": {
+      "description": "Sub-projects folders, each one with its own hooker.config.json. Globs are supported (packages/*)",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
+    "discover": {
+      "description": "Load every hooker.config.json of the repository (files ignored by git are skipped)",
+      "type": [
+        "boolean",
+        "null"
       ]
+    },
+    "parallel": {
+      "description": "Run hooks in parallel (root config only)",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "variables": {
+      "description": "Variables shared between hooks: a hook declares the ones it `writes` (`echo \"name=value\" >> $HOOKER_VARS`) and `reads` (`$name`). Their values are kept between runs",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Variable"
+      }
+    },
+    "hooks": {
+      "description": "Hooks of this project",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/Hook"
+      }
     }
   },
   "$defs": {
-    "Hook": {
+    "Share": {
+      "description": "Hooks files shared by this repository",
       "type": "object",
       "properties": {
-        "cmd": {
-          "description": "Shell command, run from the config folder. {files} is replaced by the targeted files",
+        "description": {
+          "description": "What these hooks are for",
           "type": [
             "string",
             "null"
           ]
         },
-        "cmds": {
-          "description": "Shell commands, run in order",
+        "tags": {
+          "description": "Keywords to find them (rust, lint, commits...)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "hooks": {
+          "description": "Shared hooks files, relative to the repository root. Globs are supported (hooks/*.json)",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "hooks"
+      ]
+    },
+    "Param": {
+      "description": "A parameter of a reusable hooks file",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "What the parameter is for",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "default": {
+          "description": "Value used when `with` doesn't set it (required without it)"
+        }
+      }
+    },
+    "Variable": {
+      "description": "A variable shared between hooks",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "What the variable holds",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "default": {
+          "description": "Value before any hook writes it",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "writers": {
+          "description": "Hooks allowed to write it: `name`, `project:name` or `*` (default: every hook)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "readers": {
+          "description": "Hooks allowed to read it: `name`, `project:name` or `*` (default: every hook)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Hook": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Hook name",
+          "type": "string"
+        },
+        "trigger": {
+          "description": "Git hook that runs this hook (not used with `path`)",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trigger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "include": {
+          "description": "Glob patterns, relative to the config folder. Without it, the hook targets all files",
           "type": [
             "array",
             "null"
@@ -104,6 +211,30 @@
             "type": "string"
           }
         },
+        "cmd": {
+          "description": "Shell command, run from the config folder. {files} is replaced by the targeted files",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cmds": {
+          "description": "Shell commands, run in order",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "stage_fixed": {
+          "description": "Re-stage the targeted files after the hook (for formatters)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "from": {
           "description": "Git repository URL to load the hooks file from (requires `path`)",
           "type": [
@@ -111,8 +242,30 @@
             "null"
           ]
         },
-        "include": {
-          "description": "Glob patterns, relative to the config folder. Without it, the hook targets all files",
+        "rev": {
+          "description": "Branch or tag of `from` (default branch if missing)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "Hooks file to load, relative to the config folder (or to the root of `from`)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "with": {
+          "description": "Values of the `params` of the hooks file loaded with `path`",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "needs": {
+          "description": "Hooks this one waits for: `name`, `name/step` or `project:name` (same trigger)",
           "type": [
             "array",
             "null"
@@ -131,20 +284,6 @@
             "type": "string"
           }
         },
-        "name": {
-          "description": "Hook name",
-          "type": "string"
-        },
-        "needs": {
-          "description": "Hooks this one waits for: `name`, `name/step` or `project:name` (same trigger)",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "string"
-          }
-        },
         "outputs": {
           "description": "Outputs this hook writes with `echo \"name=value\" >> $HOOKER_OUTPUT`",
           "type": [
@@ -154,27 +293,6 @@
           "items": {
             "type": "string"
           }
-        },
-        "path": {
-          "description": "Hooks file to load, relative to the config folder (or to the root of `from`)",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "rev": {
-          "description": "Branch or tag of `from` (default branch if missing)",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "stage_fixed": {
-          "description": "Re-stage the targeted files after the hook (for formatters)",
-          "type": [
-            "boolean",
-            "null"
-          ]
         },
         "steps": {
           "description": "Steps of this hook, each one can wait for the others",
@@ -186,125 +304,40 @@
             "$ref": "#/$defs/Step"
           }
         },
-        "trigger": {
-          "description": "Git hook that runs this hook (not used with `path`)",
+        "reads": {
+          "description": "Variables this hook reads, available as `$name` (it runs after the hooks writing them)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "writes": {
+          "description": "Variables this hook writes with `echo \"name=value\" >> $HOOKER_VARS`",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "permissions": {
+          "description": "What this hook is allowed to do. Without it, a hook of the repository can do everything and a hook loaded with `from` can only read files",
           "anyOf": [
             {
-              "$ref": "#/$defs/Trigger"
+              "$ref": "#/$defs/Permissions"
             },
             {
               "type": "null"
             }
           ]
-        },
-        "with": {
-          "description": "Values of the `params` of the hooks file loaded with `path`",
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": true
         }
       },
       "required": [
         "name"
-      ]
-    },
-    "Param": {
-      "description": "A parameter of a reusable hooks file",
-      "type": "object",
-      "properties": {
-        "default": {
-          "description": "Value used when `with` doesn't set it (required without it)"
-        },
-        "description": {
-          "description": "What the parameter is for",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      }
-    },
-    "Share": {
-      "description": "Hooks files shared by this repository",
-      "type": "object",
-      "properties": {
-        "description": {
-          "description": "What these hooks are for",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "hooks": {
-          "description": "Shared hooks files, relative to the repository root. Globs are supported (hooks/*.json)",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "tags": {
-          "description": "Keywords to find them (rust, lint, commits...)",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "hooks"
-      ]
-    },
-    "Step": {
-      "description": "A step of a hook: a node of the graph",
-      "type": "object",
-      "properties": {
-        "cmd": {
-          "description": "Shell command of the step",
-          "type": "string"
-        },
-        "id": {
-          "description": "Step id, unique in the hook",
-          "type": "string"
-        },
-        "inputs": {
-          "description": "Values from other steps or hooks: `{ \"name\": \"step.output\" }`",
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "needs": {
-          "description": "Steps (or hooks) this one waits for",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "string"
-          }
-        },
-        "outputs": {
-          "description": "Outputs this step writes to $HOOKER_OUTPUT",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "id",
-        "cmd"
       ]
     },
     "Trigger": {
@@ -324,6 +357,103 @@
         "pre-auto-gc",
         "post-checkout",
         "post-merge"
+      ]
+    },
+    "Step": {
+      "description": "A step of a hook: a node of the graph",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Step id, unique in the hook",
+          "type": "string"
+        },
+        "cmd": {
+          "description": "Shell command of the step",
+          "type": "string"
+        },
+        "needs": {
+          "description": "Steps (or hooks) this one waits for",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "inputs": {
+          "description": "Values from other steps or hooks: `{ \"name\": \"step.output\" }`",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "outputs": {
+          "description": "Outputs this step writes to $HOOKER_OUTPUT",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "cmd"
+      ]
+    },
+    "Permissions": {
+      "description": "What a hook is allowed to do",
+      "type": "object",
+      "properties": {
+        "files": {
+          "description": "`read`: the targeted files can't be modified (changes are reverted and the hook fails), `write`: they can",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FileAccess"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "network": {
+          "description": "Network access. When false, it is blocked where the system allows it (Linux user namespaces, macOS sandbox)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "env": {
+          "description": "Environment variables the hook gets, besides the basic ones (PATH, HOME, GIT_*...). Without it, a hook of the repository gets all of them",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "FileAccess": {
+      "description": "Access of a hook to the files of the repository",
+      "oneOf": [
+        {
+          "description": "The files may not be modified (checked after the hook, changes are reverted)",
+          "type": "string",
+          "const": "read"
+        },
+        {
+          "description": "The hook may modify files (formatters)",
+          "type": "string",
+          "const": "write"
+        }
       ]
     }
   }

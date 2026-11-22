@@ -2,30 +2,56 @@
   "$schema": "https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json",
   "description": "Common checks: merge conflict markers, large files, trailing whitespace, no direct commits on protected branches",
   "params": {
-    "max_kb": { "description": "Largest file allowed in a commit, in KB", "default": 500 },
-    "protected": { "description": "Branches that don't accept direct commits, separated by |", "default": "main|master" }
+    "max_kb": {
+      "description": "Largest file allowed in a commit, in KB",
+      "default": 500
+    },
+    "protected": {
+      "description": "Branches that don't accept direct commits, separated by |",
+      "default": "main|master"
+    }
   },
   "hooks": [
     {
       "name": "conflict markers",
       "trigger": "pre-commit",
-      "cmd": "! grep -nHIE '^(<<<<<<< |>>>>>>> |=======$)' {files}"
+      "cmd": "! grep -nHIE '^(<<<<<<< |>>>>>>> |=======$)' {files}",
+      "permissions": {
+        "files": "read",
+        "network": false
+      }
     },
     {
       "name": "large files",
       "trigger": "pre-commit",
-      "cmd": "status=0; for f in {files}; do [ -f \"$f\" ] || continue; kb=$(( $(wc -c < \"$f\") / 1024 )); if [ \"$kb\" -gt {{max_kb}} ]; then echo \"$f: ${kb} KB (max {{max_kb}} KB)\"; status=1; fi; done; exit $status"
+      "cmd": "status=0; for f in {files}; do [ -f \"$f\" ] || continue; kb=$(( $(wc -c < \"$f\") / 1024 )); if [ \"$kb\" -gt {{max_kb}} ]; then echo \"$f: ${kb} KB (max {{max_kb}} KB)\"; status=1; fi; done; exit $status",
+      "permissions": {
+        "files": "read",
+        "network": false
+      }
     },
     {
       "name": "trailing whitespace",
       "trigger": "pre-commit",
-      "exclude": ["**/*.md", "**/*.diff", "**/*.patch"],
-      "cmd": "! grep -nHIE '[[:blank:]]+$' {files}"
+      "exclude": [
+        "**/*.md",
+        "**/*.diff",
+        "**/*.patch"
+      ],
+      "cmd": "! grep -nHIE '[[:blank:]]+$' {files}",
+      "permissions": {
+        "files": "read",
+        "network": false
+      }
     },
     {
       "name": "protected branch",
       "trigger": "pre-commit",
-      "cmd": "branch=$(git branch --show-current); if echo \"$branch\" | grep -qxE '{{protected}}'; then echo \"Direct commits on $branch are not allowed, use a branch\"; exit 1; fi"
+      "cmd": "branch=$(git branch --show-current); if echo \"$branch\" | grep -qxE '{{protected}}'; then echo \"Direct commits on $branch are not allowed, use a branch\"; exit 1; fi",
+      "permissions": {
+        "files": "read",
+        "network": false
+      }
     }
   ]
 }

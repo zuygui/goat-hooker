@@ -3,14 +3,18 @@ use std::{
     io::Write,
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Mutex, mpsc},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 
 use colored::Colorize;
 
 use crate::{
-    config::{Config, Trigger},
+    config::{Config, FileAccess, Trigger},
     errors::GoatHookerError,
     git::{self, UnstagedStash},
     graph::{self, Graph, Node},
@@ -19,6 +23,87 @@ use crate::{
 
 /// Remplacé dans les commandes par les fichiers concernés (échappés pour le shell)
 pub const FILES_PLACEHOLDER: &str = "{files}";
+
+/// Values of the variables during a run, shared by all the hooks
+#[derive(Debug, Default)]
+pub struct Shared {
+    values: Mutex<BTreeMap<String, String>>,
+    changed: AtomicBool,
+}
+
+impl Shared {
+    /// Values stored for the repository (or the defaults)
+    pub fn load(root: &Path, configs: &[Config]) -> Result<Self, GoatHookerError> {
+        let declared = crate::variables::declared(configs)?;
+        Ok(Self {
+            values: Mutex::new(crate::variables::load(root, &declared)),
+            changed: AtomicBool::new(false),
+        })
+    }
+
+    /// Saves the values if a hook wrote one
+    pub fn save(&self, root: &Path) -> Result<(), GoatHookerError> {
+        if self.changed.load(Ordering::Relaxed) {
+            crate::variables::save(root, &self.values.lock().unwrap())?;
+        }
+        Ok(())
+    }
+
+    pub fn get(&self, name: &str) -> Option<String> {
+        self.values.lock().unwrap().get(name).cloned()
+    }
+
+    fn set(&self, name: &str, value: String) {
+        self.values.lock().unwrap().insert(name.to_string(), value);
+        self.changed.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Environment and restrictions of a command
+#[derive(Debug, Clone)]
+struct Sandbox {
+    /// More environment variables (`$HOOKER_VARS`, variables read by the hook)
+    extra_env: Vec<(String, String)>,
+    /// `Some`: only these environment variables besides the basic ones
+    env: Option<Vec<String>>,
+    network: bool,
+}
+
+impl Default for Sandbox {
+    fn default() -> Self {
+        Self {
+            extra_env: vec![],
+            env: None,
+            network: true,
+        }
+    }
+}
+
+/// Environment variables every hook gets, even with `permissions.env`
+const BASIC_ENV: [&str; 22] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TERM",
+    "COLORTERM",
+    "NO_COLOR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+];
 
 /// Ce que Git donne au hook
 #[derive(Debug, Clone, Default)]
@@ -133,7 +218,14 @@ pub fn run_all(
     let graph = Graph {
         nodes: hooks.iter().map(standalone_node).collect(),
     };
-    run_graph(&graph, input, parallel, output, on_progress)
+    run_graph(
+        &graph,
+        input,
+        parallel,
+        output,
+        on_progress,
+        &Shared::default(),
+    )
 }
 
 /// Nœud sans liens pour un hook seul
@@ -147,6 +239,9 @@ fn standalone_node<'a>(matched: &MatchedHook<'a>) -> Node<'a> {
         needs: vec![],
         inputs: vec![],
         outputs: vec![],
+        reads: matched.hook.reads.clone().unwrap_or_default(),
+        writes: matched.hook.writes.clone().unwrap_or_default(),
+        after: vec![],
     }
 }
 
@@ -160,6 +255,7 @@ pub fn run_graph(
     parallel: bool,
     output: Output,
     on_progress: Option<OnProgress>,
+    shared: &Shared,
 ) -> Result<Vec<HookResult>, GoatHookerError> {
     let notify = |progress: Progress| {
         if let Some(on_progress) = on_progress {
@@ -170,10 +266,14 @@ pub fn run_graph(
 
     let count = graph.nodes.len();
     let mut results: Vec<Option<HookResult>> = (0..count).map(|_| None).collect();
-    let mut remaining: Vec<usize> = graph.nodes.iter().map(|n| n.needs.len()).collect();
+    let mut remaining: Vec<usize> = graph
+        .nodes
+        .iter()
+        .map(|n| n.needs.len() + n.after.len())
+        .collect();
     let mut dependents = vec![Vec::new(); count];
     for (index, node) in graph.nodes.iter().enumerate() {
-        for &need in &node.needs {
+        for &need in node.needs.iter().chain(&node.after) {
             dependents[need].push(index);
         }
     }
@@ -227,7 +327,7 @@ pub fn run_graph(
                 running += 1;
                 let sender = sender.clone();
                 scope.spawn(move || {
-                    let result = run_node(node, input, &values, node_output);
+                    let result = run_node(node, input, &values, node_output, shared);
                     let _ = sender.send((index, result));
                 });
             }
@@ -346,7 +446,13 @@ pub fn run_trigger(
     };
 
     let graph = graph::build(configs, trigger, &hooks)?;
-    let results = run_graph(&graph, input, parallel, output, on_progress)?;
+    crate::trust::check(root, graph.nodes.iter().map(|n| n.hook))?;
+    let shared = Shared::load(root, configs)?;
+    let results = run_graph(&graph, input, parallel, output, on_progress, &shared)?;
+    // The values are kept only if the run passed (the commit or push happens)
+    if results.iter().all(|r| r.success) {
+        shared.save(root)?;
+    }
 
     // Re-stage les fichiers corrigés (formateurs) avant de remettre les modifs non stagées
     let files_to_stage: Vec<PathBuf> = results
@@ -382,8 +488,9 @@ pub fn run_hook(
     matched: &MatchedHook,
     input: &HookInput,
     output: Output,
+    shared: &Shared,
 ) -> Result<HookResult, GoatHookerError> {
-    run_node(&standalone_node(matched), input, &[], output)
+    run_node(&standalone_node(matched), input, &[], output, shared)
 }
 
 /// Lance les commandes d'un nœud, avec les valeurs de ses entrées
@@ -392,6 +499,7 @@ fn run_node(
     input: &HookInput,
     values: &[(String, Value)],
     output: Output,
+    shared: &Shared,
 ) -> Result<HookResult, GoatHookerError> {
     if output == Output::Inherit {
         println!("{}", format!("🐐 Running hook `{}`", node.label()).bold());
@@ -404,6 +512,35 @@ fn run_node(
         OUTPUT_FILES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::write(&output_file, "")?;
+    // Variables written by the node (`echo "name=value" >> $HOOKER_VARS`)
+    let vars_file = output_file.with_extension("vars");
+    std::fs::write(&vars_file, "")?;
+
+    let granted = node.hook.granted();
+    let mut sandbox = Sandbox {
+        extra_env: vec![(
+            "HOOKER_VARS".to_string(),
+            vars_file.to_string_lossy().to_string(),
+        )],
+        env: granted.env.clone(),
+        network: granted.network,
+    };
+    for name in &node.reads {
+        sandbox
+            .extra_env
+            .push((name.clone(), shared.get(name).unwrap_or_default()));
+    }
+
+    // Read-only files: kept to check (and revert) them after the hook
+    let protected: Vec<(PathBuf, Vec<u8>)> = if granted.files == FileAccess::Read {
+        node.files
+            .iter()
+            .map(|f| node.base_dir.join(f))
+            .filter_map(|f| std::fs::read(&f).ok().map(|content| (f, content)))
+            .collect()
+    } else {
+        vec![]
+    };
 
     let start = Instant::now();
     let mut result = HookResult {
@@ -415,7 +552,7 @@ fn run_node(
     };
 
     for cmd in node.commands() {
-        let cmd_result = execute_command(
+        let cmd_result = execute_in(
             cmd,
             &node.base_dir,
             input,
@@ -423,11 +560,13 @@ fn run_node(
             values,
             Some(&output_file),
             output,
+            &sandbox,
         );
         let cmd_result = match cmd_result {
             Ok(r) => r,
             Err(err) => {
                 let _ = std::fs::remove_file(&output_file);
+                let _ = std::fs::remove_file(&vars_file);
                 return Err(err);
             }
         };
@@ -440,7 +579,40 @@ fn run_node(
     }
     result.duration = start.elapsed();
     result.outputs = parse_outputs(&std::fs::read_to_string(&output_file).unwrap_or_default());
+    let written = parse_outputs(&std::fs::read_to_string(&vars_file).unwrap_or_default());
     let _ = std::fs::remove_file(&output_file);
+    let _ = std::fs::remove_file(&vars_file);
+
+    // Permissions: the hook fails when it did what it isn't allowed to
+    let mut denied = Vec::new();
+    for (name, value) in written {
+        if node.writes.contains(&name) {
+            if result.success {
+                shared.set(&name, value);
+            }
+        } else {
+            denied.push(format!(
+                "wrote the variable `{name}` without declaring it in `writes`, it was ignored"
+            ));
+        }
+    }
+    for (file, content) in &protected {
+        if std::fs::read(file).ok().as_ref() != Some(content) {
+            let _ = std::fs::write(file, content);
+            denied.push(format!(
+                "modified {} without the permission to modify files, the change was reverted",
+                file.strip_prefix(&node.base_dir).unwrap_or(file).display()
+            ));
+        }
+    }
+    if !denied.is_empty() {
+        result.success = false;
+        result.commands.push(CommandResult {
+            cmd: "permissions".to_string(),
+            success: false,
+            output: denied.join("\n") + "\n",
+        });
+    }
 
     if result.success && node.hook.stage_fixed.unwrap_or(false) {
         result.files_to_stage = node
@@ -467,6 +639,43 @@ fn parse_outputs(content: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// `sh`, without network when it isn't allowed and the system can block it:
+/// `unshare` (Linux user namespaces) or `sandbox-exec` (macOS).
+/// The note says when it couldn't be blocked.
+fn sandboxed_shell(network: bool) -> (Command, Option<&'static str>) {
+    if network {
+        return (Command::new("sh"), None);
+    }
+    static UNSHARE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if cfg!(target_os = "linux")
+        && *UNSHARE.get_or_init(|| {
+            Command::new("unshare")
+                .args(["--user", "--map-root-user", "--net", "true"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+        })
+    {
+        let mut command = Command::new("unshare");
+        command.args(["--user", "--map-root-user", "--net", "sh"]);
+        return (command, None);
+    }
+    if cfg!(target_os = "macos") && Path::new("/usr/bin/sandbox-exec").exists() {
+        let mut command = Command::new("/usr/bin/sandbox-exec");
+        command.args([
+            "-p",
+            "(version 1)(allow default)(deny network-outbound (remote ip))",
+            "sh",
+        ]);
+        return (command, None);
+    }
+    (
+        Command::new("sh"),
+        Some("goat-hooker: the network can't be blocked on this system\n"),
+    )
+}
+
 /// Échappe un chemin pour le shell (`it's.rs` → `'it'\''s.rs'`)
 fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', r"'\''"))
@@ -477,6 +686,7 @@ fn shell_quote(path: &Path) -> String {
 /// - `{files}` est remplacé par les fichiers concernés, aussi dispo dans `$HOOKER_FILES` (un par ligne)
 /// - stdin est redonné à la commande (refs du pre-push)
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn execute_command(
     cmd: &str,
     dir: &Path,
@@ -485,6 +695,30 @@ fn execute_command(
     values: &[(String, Value)],
     output_file: Option<&Path>,
     output: Output,
+) -> Result<CommandResult, GoatHookerError> {
+    execute_in(
+        cmd,
+        dir,
+        input,
+        files,
+        values,
+        output_file,
+        output,
+        &Sandbox::default(),
+    )
+}
+
+/// Like `execute_command`, with the environment and restrictions of the hook
+#[allow(clippy::too_many_arguments)]
+fn execute_in(
+    cmd: &str,
+    dir: &Path,
+    input: &HookInput,
+    files: &[PathBuf],
+    values: &[(String, Value)],
+    output_file: Option<&Path>,
+    output: Output,
+    sandbox: &Sandbox,
 ) -> Result<CommandResult, GoatHookerError> {
     if output == Output::Inherit {
         println!("🚧 Executing command: `{cmd}`");
@@ -520,7 +754,21 @@ fn execute_command(
         .map(|f| f.to_string_lossy().to_string())
         .collect();
 
-    let mut command = Command::new("sh");
+    let (mut command, network_note) = sandboxed_shell(sandbox.network);
+    if let Some(allowed) = sandbox.env.as_ref() {
+        command.env_clear();
+        for (name, value) in std::env::vars_os() {
+            let name_str = name.to_string_lossy();
+            if BASIC_ENV.contains(&name_str.as_ref())
+                || name_str.starts_with("GIT_")
+                || name_str.starts_with("HOOKER_")
+                || allowed.iter().any(|a| *a == name_str)
+            {
+                command.env(name, value);
+            }
+        }
+    }
+    command.envs(sandbox.extra_env.iter().cloned());
     command
         .arg("-c")
         // stderr redirigé dans stdout pour garder l'ordre des messages en mode capture
@@ -572,7 +820,11 @@ fn execute_command(
         }
     }
 
-    let mut captured = String::from_utf8_lossy(&out.stdout).to_string();
+    let mut captured = String::new();
+    if let Some(note) = network_note {
+        captured.push_str(note);
+    }
+    captured.push_str(&String::from_utf8_lossy(&out.stdout));
     captured.push_str(&String::from_utf8_lossy(&out.stderr));
 
     Ok(CommandResult {
@@ -787,7 +1039,13 @@ mod tests {
             files: vec![PathBuf::from("a.rs"), PathBuf::from("deleted.rs")],
         };
 
-        let result = run_hook(&matched, &input(&[], None), Output::Capture).unwrap();
+        let result = run_hook(
+            &matched,
+            &input(&[], None),
+            Output::Capture,
+            &Shared::default(),
+        )
+        .unwrap();
         assert_eq!(result.files_to_stage, vec![dir.path().join("a.rs")]);
     }
 
@@ -871,8 +1129,15 @@ mod tests {
         let matcher = Matcher::new(&configs).unwrap();
         let hooks = matcher.hooks_to_run(Trigger::PreCommit, None);
         let graph = graph::build(&configs, Trigger::PreCommit, &hooks).unwrap();
-        let results =
-            run_graph(&graph, &input(&[], None), parallel, Output::Capture, None).unwrap();
+        let results = run_graph(
+            &graph,
+            &input(&[], None),
+            parallel,
+            Output::Capture,
+            None,
+            &Shared::default(),
+        )
+        .unwrap();
         (dir, results)
     }
 
@@ -973,5 +1238,107 @@ mod tests {
         assert_eq!(outputs.get("a").unwrap(), "2");
         assert_eq!(outputs.get("b").unwrap(), "x=y");
         assert_eq!(outputs.len(), 2);
+    }
+
+    #[test]
+    fn variables_flow_between_hooks() {
+        for parallel in [false, true] {
+            let (_dir, results) = run_configs(
+                &[(
+                    ".",
+                    r#"{ "variables": { "version": { "default": "0.0.0", "writers": ["bump"] } },
+                       "hooks": [
+                        { "name": "changelog", "trigger": "pre-commit", "reads": ["version"], "cmd": "echo \"v$version\"" },
+                        { "name": "bump", "trigger": "pre-commit", "writes": ["version"],
+                          "cmd": "echo version=1.2.0 >> $HOOKER_VARS" },
+                        { "name": "sneaky", "trigger": "pre-commit", "cmd": "echo other=1 >> $HOOKER_VARS" }
+                    ] }"#,
+                )],
+                parallel,
+            );
+            // the reader runs after the writer, even if it comes first in the file
+            assert_eq!(by_name(&results, "changelog").stdout(), "v1.2.0");
+            // writing an undeclared variable fails the hook
+            let sneaky = by_name(&results, "sneaky");
+            assert!(!sneaky.success);
+            assert!(sneaky.stdout().contains("without declaring it"));
+        }
+    }
+
+    #[test]
+    fn variable_permissions_are_checked() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("hooker.config.json"),
+            r#"{ "variables": { "token": { "readers": ["deploy"] } },
+                 "hooks": [ { "name": "lint", "trigger": "pre-commit", "reads": ["token"], "cmd": "true" } ] }"#,
+        )
+        .unwrap();
+        let configs = crate::config::ConfigLoader::new()
+            .load_recursive(&dir.path().join("hooker.config.json"))
+            .unwrap();
+        let hooks = Matcher::new(&configs)
+            .unwrap()
+            .hooks_to_run(Trigger::PreCommit, None);
+        let err = graph::build(&configs, Trigger::PreCommit, &hooks).unwrap_err();
+        assert!(err.to_string().contains("isn't allowed to read"), "{err}");
+    }
+
+    #[test]
+    fn read_only_files_are_reverted() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "original\n").unwrap();
+        let hook = Hook {
+            name: "formatter".into(),
+            trigger: Some(Trigger::PreCommit),
+            cmd: Some("echo changed > a.txt".into()),
+            permissions: Some(crate::config::Permissions {
+                files: Some(FileAccess::Read),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let matched = MatchedHook {
+            hook: &hook,
+            base_dir: dir.path().to_path_buf(),
+            files: vec![PathBuf::from("a.txt")],
+        };
+        let result = run_hook(
+            &matched,
+            &input(&[], None),
+            Output::Capture,
+            &Shared::default(),
+        )
+        .unwrap();
+        assert!(!result.success);
+        assert!(result.stdout().contains("reverted"));
+        assert_eq!(read(dir.path(), "a.txt"), "original\n");
+    }
+
+    #[test]
+    fn environment_is_restricted() {
+        let dir = tempdir().unwrap();
+        let sandbox = Sandbox {
+            extra_env: vec![],
+            env: Some(vec!["HOOKER_TEST_ALLOWED".into()]),
+            network: true,
+        };
+        // SAFETY: tests of this module don't read these variables concurrently
+        unsafe {
+            std::env::set_var("HOOKER_TEST_ALLOWED", "yes");
+            std::env::set_var("SECRET_TOKEN_FOR_TEST", "leak");
+        }
+        let res = execute_in(
+            "echo \"[$HOOKER_TEST_ALLOWED][$SECRET_TOKEN_FOR_TEST]\"",
+            dir.path(),
+            &input(&[], None),
+            &[],
+            &[],
+            None,
+            Output::Capture,
+            &sandbox,
+        )
+        .unwrap();
+        assert_eq!(res.output.trim(), "[yes][]");
     }
 }

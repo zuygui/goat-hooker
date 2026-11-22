@@ -2,30 +2,82 @@
   "$schema": "https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json",
   "description": "Rust: rustfmt and clippy on commit, tests before a push",
   "params": {
-    "edition": { "description": "Rust edition used by rustfmt", "default": "2024" },
-    "clippy_args": { "description": "Arguments of cargo clippy", "default": "--workspace --all-targets" },
-    "test_args": { "description": "Arguments of cargo test", "default": "--workspace" }
+    "edition": {
+      "description": "Rust edition used by rustfmt",
+      "default": "2024"
+    },
+    "clippy_args": {
+      "description": "Arguments of cargo clippy",
+      "default": "--workspace --all-targets"
+    },
+    "test_args": {
+      "description": "Arguments of cargo test",
+      "default": "--workspace"
+    }
   },
   "hooks": [
     {
       "name": "rustfmt",
       "trigger": "pre-commit",
-      "include": ["**/*.rs"],
+      "include": [
+        "**/*.rs"
+      ],
       "cmd": "rustfmt --edition {{edition}} {files}",
-      "stage_fixed": true
+      "stage_fixed": true,
+      "permissions": {
+        "files": "write",
+        "network": false,
+        "env": [
+          "CARGO_HOME",
+          "RUSTUP_HOME",
+          "RUSTUP_TOOLCHAIN",
+          "CARGO_TARGET_DIR",
+          "RUSTFLAGS"
+        ]
+      }
     },
     {
       "name": "clippy",
       "trigger": "pre-commit",
-      "needs": ["rustfmt"],
-      "include": ["**/*.rs", "**/Cargo.toml"],
-      "cmd": "cargo clippy {{clippy_args}} -q -- -D warnings"
+      "needs": [
+        "rustfmt"
+      ],
+      "include": [
+        "**/*.rs",
+        "**/Cargo.toml"
+      ],
+      "cmd": "cargo clippy {{clippy_args}} -q -- -D warnings",
+      "permissions": {
+        "files": "read",
+        "network": true,
+        "env": [
+          "CARGO_HOME",
+          "RUSTUP_HOME",
+          "RUSTUP_TOOLCHAIN",
+          "CARGO_TARGET_DIR",
+          "RUSTFLAGS"
+        ]
+      }
     },
     {
       "name": "cargo test",
       "trigger": "pre-push",
-      "include": ["**/*.rs", "**/Cargo.toml"],
-      "cmd": "cargo test {{test_args}} -q"
+      "include": [
+        "**/*.rs",
+        "**/Cargo.toml"
+      ],
+      "cmd": "cargo test {{test_args}} -q",
+      "permissions": {
+        "files": "read",
+        "network": true,
+        "env": [
+          "CARGO_HOME",
+          "RUSTUP_HOME",
+          "RUSTUP_TOOLCHAIN",
+          "CARGO_TARGET_DIR",
+          "RUSTFLAGS"
+        ]
+      }
     }
   ]
 }

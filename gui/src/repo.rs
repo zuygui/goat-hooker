@@ -203,7 +203,13 @@ impl Repo {
             base_dir: project_dir,
             files,
         };
-        runner::run_hook(&matched, &HookInput::default(), Output::Capture)
+        goat_hooker::trust::check(&self.root, [hook])?;
+        let shared = runner::Shared::load(&self.root, &configs)?;
+        let result = runner::run_hook(&matched, &HookInput::default(), Output::Capture, &shared)?;
+        if result.success {
+            shared.save(&self.root)?;
+        }
+        Ok(result)
     }
 }
 

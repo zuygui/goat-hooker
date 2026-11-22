@@ -2,8 +2,14 @@
   "$schema": "https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json",
   "description": "Conventional commit messages (type(scope): subject), used by changelog and release tools",
   "params": {
-    "types": { "description": "Allowed types, separated by |", "default": "feat|fix|chore|docs|refactor|perf|test|ci|build|style|revert" },
-    "max_length": { "description": "Maximum length of the first line", "default": 100 }
+    "types": {
+      "description": "Allowed types, separated by |",
+      "default": "feat|fix|chore|docs|refactor|perf|test|ci|build|style|revert"
+    },
+    "max_length": {
+      "description": "Maximum length of the first line",
+      "default": 100
+    }
   },
   "hooks": [
     {
@@ -12,7 +18,11 @@
       "cmds": [
         "head -n1 \"$1\" | grep -qE '^(({{types}})(\\(.+\\))?!?: .+|Merge .+|Revert .+|fixup! .+|squash! .+)' || { echo 'The commit message must look like \"type(scope): subject\", with type in {{types}}'; exit 1; }",
         "[ \"$(head -n1 \"$1\" | wc -c)\" -le $(({{max_length}} + 1)) ] || { echo 'The first line of the commit message is longer than {{max_length}} characters'; exit 1; }"
-      ]
+      ],
+      "permissions": {
+        "files": "read",
+        "network": false
+      }
     }
   ]
 }

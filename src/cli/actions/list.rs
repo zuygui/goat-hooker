@@ -46,6 +46,42 @@ pub fn list_hooks(config_path: Option<PathBuf>) -> Result<(), GoatHookerError> {
                     source.dimmed()
                 );
             }
+            if let Some(reads) = hook.reads.as_ref() {
+                println!("      reads: {}", reads.join(", ").dimmed());
+            }
+            if let Some(writes) = hook.writes.as_ref() {
+                println!("      writes: {}", writes.join(", ").dimmed());
+            }
+            if let Some(origin) = hook.origin.as_ref() {
+                println!(
+                    "      from: {}",
+                    format!("{} ({})", origin.path, origin.url).dimmed()
+                );
+            }
+            if hook.permissions.is_some() || hook.origin.is_some() {
+                let granted = hook.granted();
+                println!(
+                    "      permissions: {}",
+                    format!(
+                        "files {}, {}, {}",
+                        match granted.files {
+                            goat_hooker::config::FileAccess::Read => "read",
+                            goat_hooker::config::FileAccess::Write => "write",
+                        },
+                        if granted.network {
+                            "network"
+                        } else {
+                            "no network"
+                        },
+                        match &granted.env {
+                            None => "whole env".to_string(),
+                            Some(env) if env.is_empty() => "basic env".to_string(),
+                            Some(env) => format!("env {}", env.join(" ")),
+                        }
+                    )
+                    .dimmed()
+                );
+            }
             if let Some(outputs) = hook.outputs.as_ref() {
                 println!("      outputs: {}", outputs.join(", ").dimmed());
             }

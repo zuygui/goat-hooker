@@ -38,6 +38,12 @@ pub enum GoatHookerError {
     #[error("Hook `{0}` failed")]
     HookFailed(String),
 
+    #[error("Hooks from other repositories aren't trusted yet: {}", .0.join(", "))]
+    Untrusted(Vec<String>),
+
+    #[error("{0}")]
+    Network(String),
+
     #[error("Cancelled")]
     Cancelled,
 }

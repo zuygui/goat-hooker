@@ -54,6 +54,10 @@ fn hint(err: &GoatHookerError) -> Option<String> {
             "check the `from` URL and your access to it, then {}",
             cmd("hooker update")
         )),
+        GoatHookerError::Untrusted(_) => Some(format!(
+            "review their commands and permissions with {} (or set HOOKER_TRUST_ALL=1 in CI)",
+            cmd("hooker trust")
+        )),
         _ => None,
     }
 }

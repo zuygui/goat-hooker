@@ -9,3 +9,5 @@ pub mod install;
 pub mod matcher;
 pub mod remote;
 pub mod runner;
+pub mod trust;
+pub mod variables;

@@ -56,6 +56,8 @@ pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
         AppCommands::List { config_path } => actions::list::list_hooks(config_path),
         AppCommands::Update { config_path } => actions::update::update_remotes(config_path),
         AppCommands::Import { force, dry_run } => actions::import::import_configs(force, dry_run),
+        AppCommands::Trust { all } => actions::trust::trust_hooks(all),
+        AppCommands::Vars { reset } => actions::vars::variables(reset),
         AppCommands::Schema => {
             print!("{}", goat_hooker::config::json_schema());
             Ok(())

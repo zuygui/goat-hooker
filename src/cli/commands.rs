@@ -135,6 +135,22 @@ pub enum AppCommands {
         dry_run: bool,
     },
 
+    /// Review the hooks loaded from other repositories (`from`) and trust them
+    #[command()]
+    Trust {
+        /// Trust all of them without asking
+        #[arg(long)]
+        all: bool,
+    },
+
+    /// List the variables shared between hooks: value, writers, readers
+    #[command()]
+    Vars {
+        /// Forget the value of a variable (back to its default)
+        #[arg(long, value_name = "NAME")]
+        reset: Option<String>,
+    },
+
     /// Print the JSON schema of the configuration file
     #[command()]
     Schema,

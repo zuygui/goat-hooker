@@ -2,26 +2,81 @@
   "$schema": "https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json",
   "description": "JavaScript / TypeScript: Prettier then ESLint on the staged files",
   "params": {
-    "runner": { "description": "Command running the local binaries (npx, pnpm exec, yarn, bunx)", "default": "npx" },
-    "eslint_args": { "description": "Arguments of ESLint", "default": "--fix" }
+    "runner": {
+      "description": "Command running the local binaries (npx, pnpm exec, yarn, bunx)",
+      "default": "npx"
+    },
+    "eslint_args": {
+      "description": "Arguments of ESLint",
+      "default": "--fix"
+    }
   },
   "hooks": [
     {
       "name": "prettier",
       "trigger": "pre-commit",
-      "include": ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs", "**/*.json", "**/*.css", "**/*.md"],
-      "exclude": ["**/node_modules/**"],
+      "include": [
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.mjs",
+        "**/*.cjs",
+        "**/*.json",
+        "**/*.css",
+        "**/*.md"
+      ],
+      "exclude": [
+        "**/node_modules/**"
+      ],
       "cmd": "{{runner}} prettier --write --ignore-unknown {files}",
-      "stage_fixed": true
+      "stage_fixed": true,
+      "permissions": {
+        "files": "write",
+        "network": true,
+        "env": [
+          "NODE_OPTIONS",
+          "NODE_ENV",
+          "NPM_CONFIG_REGISTRY",
+          "npm_config_registry",
+          "PNPM_HOME",
+          "COREPACK_HOME",
+          "NVM_DIR"
+        ]
+      }
     },
     {
       "name": "eslint",
       "trigger": "pre-commit",
-      "needs": ["prettier"],
-      "include": ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs"],
-      "exclude": ["**/node_modules/**"],
+      "needs": [
+        "prettier"
+      ],
+      "include": [
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.mjs",
+        "**/*.cjs"
+      ],
+      "exclude": [
+        "**/node_modules/**"
+      ],
       "cmd": "{{runner}} eslint {{eslint_args}} {files}",
-      "stage_fixed": true
+      "stage_fixed": true,
+      "permissions": {
+        "files": "write",
+        "network": true,
+        "env": [
+          "NODE_OPTIONS",
+          "NODE_ENV",
+          "NPM_CONFIG_REGISTRY",
+          "npm_config_registry",
+          "PNPM_HOME",
+          "COREPACK_HOME",
+          "NVM_DIR"
+        ]
+      }
     }
   ]
 }

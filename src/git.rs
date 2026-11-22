@@ -361,6 +361,11 @@ fn split_paths(root: &Path, output: &str) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Folder of goat-hooker's own data in `.git` (variables, trusted hooks)
+pub fn data_dir(root: &Path) -> Result<PathBuf, GoatHookerError> {
+    git_path(root, "goat-hooker")
+}
+
 /// `core.hooksPath` when set (husky and other managers set it)
 pub fn hooks_path_setting(root: &Path) -> Option<String> {
     git(root, &["config", "--get", "core.hooksPath"])
