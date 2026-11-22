@@ -41,7 +41,19 @@ enum Filter {
     NextCommit,
     Trigger(Trigger),
     Project(usize),
+    /// Pages that replace the list and the detail
+    Variables,
+    Browse,
+    Review,
 }
+
+impl Filter {
+    fn is_page(self) -> bool {
+        matches!(self, Filter::Variables | Filter::Browse | Filter::Review)
+    }
+}
+
+mod pages;
 
 /// Un hook dans un projet
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -90,6 +102,7 @@ pub struct HookerApp {
     graph: Entity<GraphCanvas>,
     /// Le graphe doit être recalculé (config ou résultats changés)
     graph_dirty: bool,
+    pages: pages::PagesState,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -191,6 +204,7 @@ impl HookerApp {
             graph_mode: false,
             graph,
             graph_dirty: true,
+            pages: pages::PagesState::new(window, cx),
             _subscriptions: vec![subscription, graph_subscription],
         };
         if let Some(dir) = dir {
@@ -221,6 +235,7 @@ impl HookerApp {
         }
         self.refresh_preview();
         self.graph_dirty = true;
+        self.refresh_pages();
     }
 
     fn reload(&mut self) {
@@ -230,6 +245,7 @@ impl HookerApp {
         self.error = repo.reload().err().map(|e| e.to_string());
         self.refresh_preview();
         self.graph_dirty = true;
+        self.refresh_pages();
     }
 
     fn refresh_preview(&mut self) {
@@ -322,6 +338,7 @@ impl HookerApp {
                     Filter::Project(i) => i == p,
                     Filter::Trigger(trigger) => hook.trigger == Some(trigger),
                     Filter::NextCommit => self.runs_next_commit(project, hook),
+                    Filter::Variables | Filter::Browse | Filter::Review => false,
                 };
                 let matches_search = query.is_empty()
                     || hook.name.to_lowercase().contains(&query)
@@ -350,6 +367,9 @@ impl HookerApp {
     fn set_filter(&mut self, filter: Filter, cx: &mut Context<Self>) {
         self.filter = filter;
         self.editor = None;
+        if filter == Filter::Browse {
+            self.open_browse(cx);
+        }
         if filter == Filter::NextCommit {
             self.reload();
         }
@@ -891,7 +911,7 @@ impl HookerApp {
         icon: impl Into<Icon>,
         icon_color: Option<Hsla>,
         label: impl Into<SharedString>,
-        count: usize,
+        count: Option<usize>,
         filter: Filter,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -922,7 +942,7 @@ impl HookerApp {
                 div()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child(count.to_string()),
+                    .children(count.map(|c| c.to_string())),
             )
             .on_click(cx.listener(move |this, _, _, cx| this.set_filter(filter, cx)))
     }
@@ -941,7 +961,7 @@ impl HookerApp {
                     lucide("layers"),
                     None,
                     "All hooks",
-                    total,
+                    Some(total),
                     Filter::All,
                     cx,
                 ))
@@ -950,7 +970,7 @@ impl HookerApp {
                     lucide("list-checks"),
                     None,
                     "Next commit",
-                    self.hooks_for(Filter::NextCommit, cx).len(),
+                    Some(self.hooks_for(Filter::NextCommit, cx).len()),
                     Filter::NextCommit,
                     cx,
                 ));
@@ -968,7 +988,7 @@ impl HookerApp {
                         trigger_icon(Some(trigger)),
                         Some(trigger_color(Some(trigger), cx)),
                         trigger.as_str(),
-                        count,
+                        Some(count),
                         Filter::Trigger(trigger),
                         cx,
                     ));
@@ -981,7 +1001,7 @@ impl HookerApp {
                     IconName::Folder,
                     None,
                     project_label(project),
-                    project.hooks().len(),
+                    Some(project.hooks().len()),
                     Filter::Project(i),
                     cx,
                 ));
@@ -1026,6 +1046,12 @@ impl HookerApp {
                                 .gap_1()
                                 .child(div().px_2().child(section("PROJECTS", cx)))
                                 .child(projects),
+                        )
+                        .child(
+                            v_flex()
+                                .gap_1()
+                                .child(div().px_2().child(section("TOOLS", cx)))
+                                .child(self.tools_rows(cx)),
                         ),
                 ),
             )
@@ -1036,6 +1062,9 @@ impl HookerApp {
             Filter::All => "All hooks".to_string(),
             Filter::NextCommit => "Next commit".to_string(),
             Filter::Trigger(trigger) => trigger.as_str().to_string(),
+            Filter::Variables => "Variables".to_string(),
+            Filter::Browse => "Browse hooks".to_string(),
+            Filter::Review => "Review".to_string(),
             Filter::Project(i) => self
                 .repo
                 .as_ref()
@@ -1440,6 +1469,11 @@ impl HookerApp {
             );
         }
         body = body.child(card().child(section("COMMANDS", cx)).child(commands));
+        if !hook.is_import()
+            && let Some(access) = self.hook_access(hook, cx)
+        {
+            body = body.child(card().child(section("ACCESS", cx)).child(access));
+        }
 
         // Dernier lancement
         let mut last_run = card().child(section("LAST RUN", cx));
@@ -1941,7 +1975,7 @@ impl HookerApp {
 }
 
 impl Render for HookerApp {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         if self.graph_mode && self.graph_dirty {
             self.refresh_graph(cx);
@@ -1950,17 +1984,35 @@ impl Render for HookerApp {
         let body = match self.repo.as_ref() {
             None => self.render_welcome(cx),
             Some(repo) if repo.projects.is_empty() => {
-                let action = Button::new("init")
-                    .primary()
+                let create = Button::new("init")
                     .label("Create hooker.config.json")
-                    .on_click(cx.listener(|this, _, _, cx| this.init_config(cx)))
-                    .into_any_element();
+                    .on_click(cx.listener(|this, _, _, cx| this.init_config(cx)));
+                let action = match self.import_action(cx) {
+                    Some(import) => v_flex()
+                        .items_center()
+                        .gap_3()
+                        .child(import)
+                        .child(create.ghost())
+                        .into_any_element(),
+                    None => create.primary().into_any_element(),
+                };
                 self.render_placeholder(
                     "This repository has no goat-hooker configuration yet",
                     Some(action),
                     cx,
                 )
             }
+            Some(_) if self.filter.is_page() => h_flex()
+                .size_full()
+                .child(self.render_sidebar(cx))
+                .child(
+                    div()
+                        .flex_1()
+                        .h_full()
+                        .overflow_hidden()
+                        .child(self.render_page(window, cx)),
+                )
+                .into_any_element(),
             Some(_) if self.graph_mode => div()
                 .size_full()
                 .child(self.graph.clone())

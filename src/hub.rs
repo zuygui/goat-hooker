@@ -36,6 +36,8 @@ pub struct SharedRepo {
     pub name: String,
     /// URL to use in `from`
     pub url: String,
+    /// Branch read (`owner/name@branch`), used as `rev`
+    pub rev: Option<String>,
     pub description: Option<String>,
     pub tags: Vec<String>,
     pub files: Vec<SharedFile>,
@@ -56,6 +58,8 @@ pub struct SharedHook {
     pub name: String,
     pub trigger: Option<Trigger>,
     pub commands: Vec<String>,
+    /// The hook as loaded from another repository (for its permissions)
+    pub hook: crate::config::Hook,
 }
 
 impl SharedFile {
@@ -241,6 +245,7 @@ pub fn search(query: &str) -> Result<(Vec<SharedRepo>, Option<String>), GoatHook
             if words.is_empty() {
                 return Some(repo);
             }
+            let matches = |text: &str| words.iter().all(|w| text.contains(w));
             let repo_text = format!(
                 "{} {} {}",
                 repo.name,
@@ -248,9 +253,11 @@ pub fn search(query: &str) -> Result<(Vec<SharedRepo>, Option<String>), GoatHook
                 repo.tags.join(" ")
             )
             .to_lowercase();
+            let all_files = repo.files.clone();
             repo.files.retain(|file| {
                 let text = format!(
-                    "{repo_text} {} {} {}",
+                    "{} {} {} {}",
+                    repo.name,
                     file.path,
                     file.description.clone().unwrap_or_default(),
                     file.hooks
@@ -260,8 +267,12 @@ pub fn search(query: &str) -> Result<(Vec<SharedRepo>, Option<String>), GoatHook
                         .join(" ")
                 )
                 .to_lowercase();
-                words.iter().all(|w| text.contains(w))
+                matches(&text)
             });
+            // Nothing in the files, but the repository itself matches (its tags)
+            if repo.files.is_empty() && matches(&repo_text) {
+                repo.files = all_files;
+            }
             (!repo.files.is_empty()).then_some(repo)
         })
         .collect();
@@ -345,6 +356,15 @@ pub fn read_repo(name: &str, token: Option<&str>) -> Result<Option<SharedRepo>, 
                     name: h.name.clone(),
                     trigger: h.trigger,
                     commands: h.commands().iter().map(|c| c.to_string()).collect(),
+                    hook: crate::config::Hook {
+                        origin: Some(crate::config::Origin {
+                            url: format!("https://github.com/{name}"),
+                            rev: rev.map(str::to_string),
+                            path: String::new(),
+                            hash: String::new(),
+                        }),
+                        ..h.clone()
+                    },
                 })
                 .collect(),
         });
@@ -353,6 +373,7 @@ pub fn read_repo(name: &str, token: Option<&str>) -> Result<Option<SharedRepo>, 
     Ok(Some(SharedRepo {
         name: name.to_string(),
         url: format!("https://github.com/{name}"),
+        rev: rev.map(str::to_string),
         description: share.description,
         tags: share.tags.unwrap_or_default(),
         files,
@@ -379,6 +400,7 @@ pub fn add(
     let hook = crate::config::Hook {
         name: name.to_string(),
         from: Some(repo.url.clone()),
+        rev: repo.rev.clone(),
         path: Some(file.path.clone()),
         with: (!with.is_empty()).then_some(with),
         ..Default::default()

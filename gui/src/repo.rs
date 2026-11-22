@@ -323,3 +323,76 @@ mod tests {
         assert!(repo.installed);
     }
 }
+
+/// Hooks of another repository waiting to be trusted
+#[derive(Clone)]
+pub struct Untrusted {
+    pub origin: goat_hooker::config::Origin,
+    pub hooks: Vec<Hook>,
+}
+
+impl Repo {
+    /// Variables with their writers, readers and value
+    pub fn variables(&self) -> Result<Vec<goat_hooker::variables::Usage>, GoatHookerError> {
+        let configs = self.load_configs()?;
+        goat_hooker::variables::usage(&self.root, &configs)
+    }
+
+    pub fn reset_variable(&self, name: &str) -> Result<(), GoatHookerError> {
+        goat_hooker::variables::reset(&self.root, name)
+    }
+
+    /// Hooks files of other repositories that must be reviewed before they run
+    pub fn untrusted(&self) -> Vec<Untrusted> {
+        let Ok(configs) = self.load_configs() else {
+            return vec![];
+        };
+        let hooks: Vec<&Hook> = configs
+            .iter()
+            .flat_map(|c| c.hooks.iter().flatten())
+            .collect();
+        goat_hooker::trust::untrusted(&self.root, hooks.iter().copied())
+            .into_iter()
+            .map(|origin| Untrusted {
+                hooks: hooks
+                    .iter()
+                    .filter(|h| h.origin.as_ref() == Some(&origin))
+                    .map(|h| (*h).clone())
+                    .collect(),
+                origin,
+            })
+            .collect()
+    }
+
+    pub fn trust(&self, origin: &goat_hooker::config::Origin) -> Result<(), GoatHookerError> {
+        goat_hooker::trust::trust(&self.root, std::slice::from_ref(origin))
+    }
+
+    /// Adds a hooks file found on GitHub to a project
+    pub fn add_shared(
+        &mut self,
+        project: usize,
+        name: &str,
+        repo: &goat_hooker::hub::SharedRepo,
+        file: &goat_hooker::hub::SharedFile,
+        with: std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Result<(), GoatHookerError> {
+        let config_file = self.projects[project].file.clone();
+        goat_hooker::hub::add(&self.root, &config_file, name, repo, file, with)?;
+        self.reload()
+    }
+
+    /// Configs of husky, lint-staged, lefthook or pre-commit found in the repository
+    pub fn import_preview(&self) -> Option<goat_hooker::import::Imported> {
+        goat_hooker::import::detect(&self.root)
+            .ok()
+            .filter(|i| !i.is_empty())
+    }
+
+    pub fn import(&mut self) -> Result<goat_hooker::import::Imported, GoatHookerError> {
+        let imported = goat_hooker::import::detect(&self.root)?;
+        goat_hooker::import::write(&self.root, &imported, true)?;
+        self.reload()?;
+        Ok(imported)
+    }
+}
