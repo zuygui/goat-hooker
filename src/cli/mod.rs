@@ -23,6 +23,7 @@ pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
             config_path,
             dry_run,
             verbose,
+            no_cache,
             from_git,
             args,
         } => actions::run::run_hooks(
@@ -33,6 +34,7 @@ pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
                 dry_run,
                 verbose,
                 from_git,
+                no_cache,
             },
         ),
         AppCommands::Status => actions::status::show_status(),
@@ -61,9 +63,18 @@ pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
         }
         AppCommands::Trust { all } => actions::trust::trust_hooks(all),
         AppCommands::Vars { reset } => actions::vars::variables(reset),
+        AppCommands::CacheClear => {
+            goat_hooker::cache::clear(&cli_root()?)?;
+            println!("✔ Cache cleared");
+            Ok(())
+        }
         AppCommands::Schema => {
             print!("{}", goat_hooker::config::json_schema());
             Ok(())
         }
     }
+}
+
+fn cli_root() -> Result<std::path::PathBuf, GoatHookerError> {
+    goat_hooker::git::repo_root(&std::env::current_dir()?)
 }

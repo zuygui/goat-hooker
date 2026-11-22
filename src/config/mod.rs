@@ -169,6 +169,12 @@ pub struct Hook {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
+        description = "Skip the hook when it already passed with the same files, commands, inputs and variables. Default: true for hooks with `include`"
+    )]
+    pub cache: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
         description = "What this hook is allowed to do. Without it, a hook of the repository can do everything and a hook loaded with `from` can only read files"
     )]
     pub permissions: Option<Permissions>,

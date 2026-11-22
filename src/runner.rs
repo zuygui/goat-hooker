@@ -29,6 +29,8 @@ pub const FILES_PLACEHOLDER: &str = "{files}";
 pub struct Shared {
     values: Mutex<BTreeMap<String, String>>,
     changed: AtomicBool,
+    /// Results of the hooks that passed (`None`: no cache)
+    pub cache: Option<crate::cache::Cache>,
 }
 
 impl Shared {
@@ -38,6 +40,7 @@ impl Shared {
         Ok(Self {
             values: Mutex::new(crate::variables::load(root, &declared)),
             changed: AtomicBool::new(false),
+            cache: None,
         })
     }
 
@@ -114,6 +117,8 @@ pub struct HookInput {
     pub stdin: Option<String>,
     /// Garde les couleurs des outils même quand leur sortie est capturée
     pub force_color: bool,
+    /// Runs every hook, even the ones that passed with the same files
+    pub no_cache: bool,
 }
 
 /// Avancement d'un lancement (pour afficher des spinners)
@@ -166,6 +171,8 @@ pub struct HookResult {
     /// Not allowed: not run (not trusted, forbidden variable) or stopped for doing what it
     /// may not do. The nodes after it (needs and variables) are skipped
     pub denied: bool,
+    /// Not run: it already passed with the same files (its output is replayed)
+    pub cached: bool,
     pub duration: Duration,
     pub commands: Vec<CommandResult>,
     /// Fichiers ciblés, relatifs à `base_dir` (sortie `files`)
@@ -475,8 +482,14 @@ pub fn run_trigger(
     };
 
     let graph = graph::build(configs, trigger, &hooks)?;
-    let shared = Shared::load(root, configs)?;
+    let mut shared = Shared::load(root, configs)?;
+    if !input.no_cache {
+        shared.cache = Some(crate::cache::Cache::load(root)?);
+    }
     let results = run_graph(&graph, input, parallel, output, on_progress, &shared)?;
+    if let Some(cache) = shared.cache.as_ref() {
+        cache.save()?;
+    }
     // The values are kept only if the run passed (the commit or push happens)
     if results.iter().all(|r| r.success) {
         shared.save(root)?;
@@ -553,10 +566,54 @@ fn run_node(
         env: granted.env.clone(),
         network: granted.network,
     };
-    for name in &node.reads {
-        sandbox
-            .extra_env
-            .push((name.clone(), shared.get(name).unwrap_or_default()));
+    let read_variables: Vec<(String, String)> = node
+        .reads
+        .iter()
+        .map(|name| (name.clone(), shared.get(name).unwrap_or_default()))
+        .collect();
+    sandbox.extra_env.extend(read_variables.iter().cloned());
+
+    // Already passed with the same files, commands, inputs and variables: replayed
+    let inputs_text: Vec<(String, String)> = values
+        .iter()
+        .map(|(name, value)| {
+            let text = match value {
+                Value::Text(text) => text.clone(),
+                Value::List(items) => items.join("\n"),
+            };
+            (name.clone(), text)
+        })
+        .collect();
+    let cache_key = |shared: &Shared| -> Option<String> {
+        shared.cache.as_ref()?;
+        if !crate::cache::cacheable(node) {
+            return None;
+        }
+        crate::cache::key(node, &inputs_text, &read_variables, &input.args).ok()
+    };
+    let key_before = cache_key(shared);
+    if let (Some(cache), Some(key)) = (shared.cache.as_ref(), key_before.as_ref())
+        && let Some(entry) = cache.get(key)
+    {
+        let _ = std::fs::remove_file(&output_file);
+        let _ = std::fs::remove_file(&vars_file);
+        for (name, value) in &entry.variables {
+            shared.set(name, value.clone());
+        }
+        return Ok(HookResult {
+            name: node.label(),
+            base_dir: node.base_dir.clone(),
+            success: true,
+            cached: true,
+            files: node.files.clone(),
+            outputs: entry.outputs.clone(),
+            commands: vec![CommandResult {
+                cmd: "cached".to_string(),
+                success: true,
+                output: entry.stdout.clone(),
+            }],
+            ..Default::default()
+        });
     }
 
     // Read-only files: kept to check (and revert) them after the hook
@@ -630,6 +687,21 @@ fn run_node(
     }
     // Its variables are kept only if it passed and did nothing it may not do
     if result.success && denied.is_empty() {
+        // Cached with the files as they are after it (a formatter changed them: the next
+        // run on the fixed files is skipped, a run on unformatted files isn't)
+        if let (Some(cache), Some(_)) = (shared.cache.as_ref(), key_before)
+            && let Some(after) = cache_key(shared)
+        {
+            cache.put(
+                after,
+                crate::cache::Entry {
+                    at: 0,
+                    outputs: result.outputs.clone(),
+                    variables: written.clone(),
+                    stdout: result.stdout(),
+                },
+            );
+        }
         for (name, value) in written {
             shared.set(&name, value);
         }
@@ -879,6 +951,7 @@ mod tests {
             args: args.iter().map(|a| a.to_string()).collect(),
             stdin: stdin.map(String::from),
             force_color: false,
+            no_cache: false,
         }
     }
 
@@ -1382,5 +1455,53 @@ mod tests {
         )
         .unwrap();
         assert_eq!(res.output.trim(), "[yes][]");
+    }
+
+    #[test]
+    fn cache_skips_hooks_that_passed() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .unwrap()
+        };
+        git(&["init", "-q"]);
+        std::fs::write(
+            root.join("hooker.config.json"),
+            r#"{ "hooks": [
+                { "name": "upper", "trigger": "pre-commit", "include": ["*.txt"], "stage_fixed": true,
+                  "cmd": "for f in {files}; do tr a-z A-Z < $f > $f.tmp && mv $f.tmp $f; done" }
+            ] }"#,
+        )
+        .unwrap();
+        let configs = crate::config::ConfigLoader::new()
+            .load_recursive(&root.join("hooker.config.json"))
+            .unwrap();
+        let run = || {
+            run_trigger(
+                &root,
+                &configs,
+                Trigger::PreCommit,
+                &input(&[], None),
+                Output::Capture,
+                None,
+            )
+            .unwrap()
+        };
+
+        std::fs::write(root.join("a.txt"), "hello\n").unwrap();
+        git(&["add", "a.txt"]);
+        assert!(!run()[0].cached);
+        assert_eq!(read(&root, "a.txt"), "HELLO\n");
+        // same (fixed) files: skipped
+        assert!(run()[0].cached);
+        // unformatted again: the formatter runs, it isn't skipped
+        std::fs::write(root.join("a.txt"), "hello\n").unwrap();
+        git(&["add", "a.txt"]);
+        assert!(!run()[0].cached);
+        assert_eq!(read(&root, "a.txt"), "HELLO\n");
     }
 }

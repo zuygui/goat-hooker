@@ -723,6 +723,7 @@ impl HookerApp {
                         success: result.success,
                         skipped: result.skipped,
                         denied: result.denied,
+                        cached: result.cached,
                         duration: result.duration,
                     },
                 )
@@ -1579,6 +1580,8 @@ impl HookerApp {
                                 "Skipped (a hook before it failed or was denied)"
                             } else if result.denied {
                                 "Denied: it did or needed what it isn't allowed to"
+                            } else if result.cached {
+                                "Passed (cached: same files as a run that passed)"
                             } else if result.success {
                                 "Passed"
                             } else {

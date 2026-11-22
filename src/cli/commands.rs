@@ -62,6 +62,10 @@ pub enum AppCommands {
         #[arg(short, long)]
         verbose: bool,
 
+        /// Run every hook, even the ones that already passed with the same files
+        #[arg(long)]
+        no_cache: bool,
+
         /// Run by Git (stays quiet when there is nothing to run)
         #[arg(long, hide = true)]
         from_git: bool,
@@ -161,6 +165,10 @@ pub enum AppCommands {
         #[arg(long, value_name = "NAME")]
         reset: Option<String>,
     },
+
+    /// Forget the results of the hooks that passed (they all run again)
+    #[command(name = "cache-clear")]
+    CacheClear,
 
     /// Print the JSON schema of the configuration file
     #[command()]

@@ -78,6 +78,7 @@ pub struct NodeStatus {
     pub success: bool,
     pub skipped: bool,
     pub denied: bool,
+    pub cached: bool,
     pub duration: Duration,
 }
 
@@ -690,7 +691,11 @@ impl GraphCanvas {
                         .text_size(s(10.))
                         .text_color(theme.muted_foreground)
                         .when(!status.skipped && !status.denied, |this| {
-                            this.child(format!("{:.1}s", status.duration.as_secs_f32()))
+                            this.child(if status.cached {
+                                "cached".to_string()
+                            } else {
+                                format!("{:.1}s", status.duration.as_secs_f32())
+                            })
                         })
                         .child(Icon::new(icon).size(s(14.)).text_color(color))
                 }))

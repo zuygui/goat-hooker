@@ -33,6 +33,7 @@ pub struct RunFlags {
     pub verbose: bool,
     /// Lancé par Git : rien à afficher s'il n'y a pas de hooks
     pub from_git: bool,
+    pub no_cache: bool,
 }
 
 pub fn run_hooks(
@@ -45,6 +46,7 @@ pub fn run_hooks(
         dry_run,
         verbose,
         from_git,
+        no_cache,
     } = flags;
     // `HOOKER_SKIP=1 git commit` pour passer les hooks
     if std::env::var(git::SKIP_ENV).is_ok_and(|v| !v.is_empty() && v != "0") {
@@ -75,6 +77,7 @@ pub fn run_hooks(
         args: args.to_vec(),
         stdin: read_stdin(trigger)?,
         force_color: std::io::stderr().is_terminal(),
+        no_cache,
     };
 
     if dry_run {
@@ -197,7 +200,12 @@ impl Reporter {
             }
             Progress::Finished(index, result) => {
                 let (name, project) = state.labels[index].clone();
-                let (glyph, extra) = if result.skipped {
+                let (glyph, extra) = if result.cached {
+                    (
+                        OK.green().dimmed().to_string(),
+                        "cached".dimmed().to_string(),
+                    )
+                } else if result.skipped {
                     ("–".dimmed().to_string(), "skipped".to_string())
                 } else if result.denied {
                     ("⛔".to_string(), "denied".red().to_string())
