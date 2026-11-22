@@ -1,0 +1,48 @@
+[package]
+name = "goat-hooker-gui"
+description = "Desktop app of Goat Hooker, an open-source Git hooks manager"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+# Distribuée avec les installeurs (dmg, msi, deb...), pas sur crates.io
+publish = false
+
+[[bin]]
+name = "goat-hooker-gui"
+path = "src/main.rs"
+
+[dependencies]
+goat-hooker = { path = "..", version = "0.1.0" }
+gpui-kit = "0.10"
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3.6"
+
+# Empaquetage de l'app (cargo-packager) : .app/.dmg, .exe (NSIS), .deb/.AppImage
+# Les binaires doivent être compilés avant : `cargo build --release -p goat-hooker -p goat-hooker-gui`
+[package.metadata.packager]
+product-name = "Goat Hooker"
+identifier = "com.zuygui.goat-hooker"
+publisher = "Zuygui"
+category = "DeveloperTool"
+copyright = "Copyright © 2024 Zuygui"
+license-file = "../LICENSE"
+icons = [
+    "packaging/32x32.png",
+    "packaging/128x128.png",
+    "packaging/128x128@2x.png",
+    "packaging/icon@2x.png",
+    "packaging/icon.ico",
+]
+# L'app, et la CLI `hooker` à côté
+binaries = [{ path = "goat-hooker-gui", main = true }, { path = "hooker" }]
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"
+
+[package.metadata.packager.nsis]
+installer-icon = "packaging/icon.ico"

@@ -37,4 +37,7 @@ pub enum GoatHookerError {
 
     #[error("Hook `{0}` failed")]
     HookFailed(String),
+
+    #[error("Cancelled")]
+    Cancelled,
 }

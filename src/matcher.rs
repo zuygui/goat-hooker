@@ -81,7 +81,7 @@ impl<'a> Matcher<'a> {
 
         self.hooks
             .iter()
-            .filter(|compiled| compiled.hook.trigger == trigger)
+            .filter(|compiled| compiled.hook.trigger == Some(trigger))
             .filter_map(|compiled| {
                 let matched_files = match files_abs.as_ref() {
                     Some(files) => {
@@ -176,13 +176,11 @@ mod tests {
     fn hook(name: &str, include: Option<Vec<&str>>, exclude: Option<Vec<&str>>) -> Hook {
         Hook {
             name: name.to_string(),
-            trigger: Trigger::PreCommit,
+            trigger: Some(Trigger::PreCommit),
             include: include.map(|v| v.into_iter().map(String::from).collect()),
             exclude: exclude.map(|v| v.into_iter().map(String::from).collect()),
             cmd: Some(format!("echo {name}")),
-            cmds: None,
-            from: None,
-            path: None,
+            ..Default::default()
         }
     }
 
@@ -195,10 +193,9 @@ mod tests {
         );
         let hook2 = hook("Only config rs", Some(vec!["src/config/*.rs"]), None);
         let config = Config {
-            imports: None,
-            discover: None,
             hooks: Some(vec![hook1, hook2]),
             base_dir: Some(PathBuf::from(".")),
+            ..Default::default()
         };
 
         let configs = [config];
@@ -222,10 +219,9 @@ mod tests {
     #[test]
     fn star_does_not_cross_directories() {
         let config = Config {
-            imports: None,
-            discover: None,
             hooks: Some(vec![hook("Top level", Some(vec!["src/*.rs"]), None)]),
             base_dir: Some(PathBuf::from(".")),
+            ..Default::default()
         };
         let configs = [config];
         let matcher = Matcher::new(&configs).unwrap();
@@ -243,10 +239,9 @@ mod tests {
         std::fs::write(dir.path().join("lib.rs"), "").unwrap();
 
         let config = Config {
-            imports: None,
-            discover: None,
             hooks: Some(vec![hook("Sub rust", Some(vec!["./src/*.rs"]), None)]),
             base_dir: Some(sub.clone()),
+            ..Default::default()
         };
         let configs = [config];
         let matcher = Matcher::new(&configs).unwrap();
@@ -264,15 +259,14 @@ mod tests {
     #[test]
     fn hooks_to_run_filters_by_trigger_and_files() {
         let mut push_hook = hook("Push", None, None);
-        push_hook.trigger = Trigger::PrePush;
+        push_hook.trigger = Some(Trigger::PrePush);
         let config = Config {
-            imports: None,
-            discover: None,
             hooks: Some(vec![
                 hook("Rust", Some(vec!["src/**/*.rs"]), None),
                 push_hook,
             ]),
             base_dir: Some(PathBuf::from(".")),
+            ..Default::default()
         };
         let configs = [config];
         let matcher = Matcher::new(&configs).unwrap();
@@ -299,10 +293,9 @@ mod tests {
     #[test]
     fn invalid_pattern_is_an_error() {
         let config = Config {
-            imports: None,
-            discover: None,
             hooks: Some(vec![hook("Broken", Some(vec!["src/[.rs"]), None)]),
             base_dir: Some(PathBuf::from(".")),
+            ..Default::default()
         };
         let configs = [config];
 

@@ -2,8 +2,8 @@ use std::{io, path::Path};
 
 use colored::Colorize;
 
-use crate::{
-    config::{Config, HOOK_CONFIG_FILENAME},
+use goat_hooker::{
+    config::{Config, HOOK_CONFIG_FILENAME, SCHEMA_URL},
     errors::GoatHookerError,
 };
 
@@ -21,17 +21,15 @@ pub fn init_configuration(dir: &Path) -> Result<(), GoatHookerError> {
 
     if dir.join(HOOK_CONFIG_FILENAME).exists() {
         println!(
-            "{}",
-            format!(
-                "🚀 {} file already exists. Skipping.",
-                HOOK_CONFIG_FILENAME.italic()
-            )
-            .blue()
+            "{} {} already exists",
+            "·".dimmed(),
+            HOOK_CONFIG_FILENAME.bold()
         );
         return Ok(());
     }
 
     let new_config = Config {
+        schema: Some(SCHEMA_URL.to_string()),
         hooks: Some(vec![]),
         ..Default::default()
     };
@@ -52,7 +50,7 @@ pub fn init_configuration(dir: &Path) -> Result<(), GoatHookerError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ConfigLoader;
+    use goat_hooker::config::ConfigLoader;
     use tempfile::tempdir;
 
     #[test]
