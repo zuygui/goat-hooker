@@ -259,19 +259,21 @@ pub struct Origin {
     pub rev: Option<String>,
     /// Hooks file in that repository
     pub path: String,
-    /// Hash of the hooks file and of the `with` values: changes when the hooks change
+    /// Hash of the hooks file (and of the files it loads) and of the `with` values:
+    /// changes when the hooks change
     pub hash: String,
+    /// The hooks file in the cache
+    pub file: PathBuf,
+    /// `with` values, as JSON
+    pub with: String,
+    /// Commit of the repository in the cache
+    pub commit: Option<String>,
 }
 
 impl Origin {
-    /// Key in the trust store
+    /// Key in the trust store (the same for every version of the file)
     pub fn key(&self) -> String {
-        format!(
-            "{}#{}:{}",
-            self.url,
-            self.rev.as_deref().unwrap_or_default(),
-            self.path
-        )
+        format!("{}:{}", self.url, self.path)
     }
 }
 
@@ -773,6 +775,9 @@ impl ConfigLoader {
                     rev: hook.rev.clone(),
                     path: path.clone(),
                     hash: content_hash(&file, hook.with.as_ref())?,
+                    file: file.clone(),
+                    with: serde_json::to_string(&hook.with).unwrap_or_default(),
+                    commit: remote::head(file.parent().unwrap_or(&file)),
                 }),
                 (None, None) => None,
             };
@@ -797,7 +802,7 @@ fn content_hash(
 ) -> Result<String, GoatHookerError> {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
-    hasher.update(fs::read(file)?);
+    hash_file(&mut hasher, file, 0)?;
     hasher.update(b"\0");
     hasher.update(serde_json::to_string(&with).unwrap_or_default());
     Ok(hasher
@@ -805,6 +810,25 @@ fn content_hash(
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect())
+}
+
+/// Adds a hooks file and the files it loads with `path` to a hash
+fn hash_file(hasher: &mut sha2::Sha256, file: &Path, depth: usize) -> Result<(), GoatHookerError> {
+    use sha2::Digest;
+    let content = fs::read(file)?;
+    hasher.update((content.len() as u64).to_le_bytes());
+    hasher.update(&content);
+    if depth >= MAX_HOOKS_FILES_DEPTH {
+        return Ok(());
+    }
+    let value: serde_json::Value = serde_json::from_slice(&content).unwrap_or_default();
+    let dir = file.parent().unwrap_or(Path::new("."));
+    for hook in value["hooks"].as_array().into_iter().flatten() {
+        if let (Some(path), None) = (hook["path"].as_str(), hook["from"].as_str()) {
+            hash_file(hasher, &dir.join(path), depth + 1)?;
+        }
+    }
+    Ok(())
 }
 
 /// Résout un import en chemins de configs.

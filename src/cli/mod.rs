@@ -61,6 +61,8 @@ pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
         AppCommands::Search { query, project } => {
             actions::search::search_hooks(&query.join(" "), project)
         }
+        AppCommands::Outdated => actions::remotes::outdated(),
+        AppCommands::Pin { name } => actions::remotes::pin(name),
         AppCommands::Trust { all } => actions::trust::trust_hooks(all),
         AppCommands::Vars { reset } => actions::vars::variables(reset),
         AppCommands::Ci {

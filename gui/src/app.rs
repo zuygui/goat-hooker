@@ -1471,9 +1471,14 @@ impl HookerApp {
                     .child(section("SHARED HOOKS", cx))
                     .child(div().text_sm().child(format!("Loads the hooks of {source}.")))
                     .child(div().text_xs().text_color(theme.muted_foreground).child(
-                        "They run from this project. Use `hooker update` to refresh hooks loaded from a repository.",
+                        "They run from this project, with the permissions of hooks from other repositories.",
                     )),
             );
+            if let Some(selected) = self.selected
+                && let Some(remote) = self.remote_card(selected, hook, cx)
+            {
+                body = body.child(remote);
+            }
             return self.wrap_detail(header, body);
         }
 

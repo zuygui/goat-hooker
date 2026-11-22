@@ -150,6 +150,17 @@ pub enum AppCommands {
         project: Option<PathBuf>,
     },
 
+    /// Show the hooks loaded from other repositories that have a newer version
+    #[command()]
+    Outdated,
+
+    /// Pin the hooks loaded from other repositories to the commit in use
+    #[command()]
+    Pin {
+        /// Only this hook (the one loading the hooks file)
+        name: Option<String>,
+    },
+
     /// Review the hooks loaded from other repositories (`from`) and trust them
     #[command()]
     Trust {

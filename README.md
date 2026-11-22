@@ -85,6 +85,8 @@ hooker search rust # find hooks shared on GitHub and add them
 hooker ci          # run the hooks on the files changed by a pull request (CI)
 hooker cache-clear # forget the results of the hooks that passed
 hooker trust       # review and trust the hooks loaded from other repositories
+hooker outdated    # hooks of other repositories with a newer version
+hooker pin         # pin them to the commit in use
 hooker vars        # variables shared between hooks: value, writers, readers
 hooker import      # convert a husky / lint-staged, lefthook or pre-commit config
 hooker schema      # print the JSON schema of the configuration
@@ -252,7 +254,7 @@ Hooks can be shared between projects in a hooks file (`{ "hooks": [...] }`), loa
 }
 ```
 
-Loaded hooks run from the project that loads them. Repositories are cloned once, run `hooker update` to fetch their new version.
+Loaded hooks run from the project that loads them. Repositories are cloned once: `hooker outdated` shows the ones with a newer version, `hooker update` fetches it (you review what changed with `hooker trust` before it runs), and `hooker pin` sets `rev` to the commit in use so it never changes. `rev` can be a branch, a tag or a commit.
 
 A hooks file can declare `params`, used as `{{name}}` in its hooks, and set with `with` by the hook loading it. This makes reusable nodes:
 

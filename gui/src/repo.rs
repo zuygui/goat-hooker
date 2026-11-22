@@ -329,6 +329,8 @@ mod tests {
 pub struct Untrusted {
     pub origin: goat_hooker::config::Origin,
     pub hooks: Vec<Hook>,
+    /// What changed since the trusted version (`None`: never trusted)
+    pub changes: Option<Vec<String>>,
 }
 
 impl Repo {
@@ -354,6 +356,7 @@ impl Repo {
         goat_hooker::trust::untrusted(&self.root, hooks.iter().copied())
             .into_iter()
             .map(|origin| Untrusted {
+                changes: goat_hooker::trust::changes(&self.root, &origin),
                 hooks: hooks
                     .iter()
                     .filter(|h| h.origin.as_ref() == Some(&origin))
@@ -394,5 +397,28 @@ impl Repo {
         goat_hooker::import::write(&self.root, &imported, true)?;
         self.reload()?;
         Ok(imported)
+    }
+}
+
+impl Repo {
+    /// Fetches the last version of a repository of hooks (to review before it runs)
+    pub fn update_remote(&mut self, url: &str, rev: Option<&str>) -> Result<(), GoatHookerError> {
+        let repo = goat_hooker::remote::fetch(url, rev)?;
+        goat_hooker::remote::update(&repo, rev)?;
+        self.reload()
+    }
+
+    /// Pins a hook loading another repository to the commit in use
+    pub fn pin_hook(&mut self, project: usize, index: usize) -> Result<(), GoatHookerError> {
+        let mut hook = self.projects[project].hooks()[index].clone();
+        let Some(url) = hook.from.clone() else {
+            return Ok(());
+        };
+        let repo = goat_hooker::remote::fetch(&url, hook.rev.as_deref())?;
+        if let Some(commit) = goat_hooker::remote::head(&repo) {
+            hook.rev = Some(commit);
+            self.projects[project].save_hook(Some(index), hook)?;
+        }
+        self.reload()
     }
 }

@@ -81,13 +81,145 @@ pub fn check<'a>(
     ))
 }
 
-/// Trusts hooks files in their current version
+/// Trusts hooks files in their current version (kept, to show what changes next time)
 pub fn trust(root: &Path, origins: &[Origin]) -> Result<(), GoatHookerError> {
     let mut trusted = load(root);
+    let snapshots = git::data_dir(root)?.join("trusted");
+    fs::create_dir_all(&snapshots)?;
     for origin in origins {
         trusted.insert(origin.key(), origin.hash.clone());
+        if let Ok(content) = fs::read_to_string(&origin.file) {
+            let snapshot = serde_json::json!({ "content": content, "with": origin.with });
+            fs::write(
+                snapshots.join(format!("{}.json", origin.hash)),
+                snapshot.to_string(),
+            )?;
+        }
     }
     save(root, &trusted)
+}
+
+/// Hooks of a version of a hooks file, as they run (parameters filled, remote permissions)
+fn hooks_of(content: &str, with: &str, origin: &Origin) -> Option<Vec<Hook>> {
+    let with: Option<std::collections::BTreeMap<String, serde_json::Value>> =
+        serde_json::from_str(with).ok().flatten();
+    let tmp = std::env::temp_dir().join(format!(
+        "goat-hooker-trust-{}-{}.json",
+        std::process::id(),
+        origin.hash
+    ));
+    fs::write(&tmp, content).ok()?;
+    let config = crate::config::Config::load_with(&tmp, with.as_ref(), "");
+    let _ = fs::remove_file(&tmp);
+    Some(
+        config
+            .ok()?
+            .hooks
+            .unwrap_or_default()
+            .into_iter()
+            .map(|mut h| {
+                h.origin = Some(origin.clone());
+                h
+            })
+            .collect(),
+    )
+}
+
+/// What changed since the trusted version of a hooks file (`None`: never trusted)
+pub fn changes(root: &Path, origin: &Origin) -> Option<Vec<String>> {
+    let previous_hash = load(root).get(&origin.key())?.clone();
+    let snapshot: serde_json::Value = git::data_dir(root)
+        .ok()
+        .and_then(|d| {
+            fs::read_to_string(d.join("trusted").join(format!("{previous_hash}.json"))).ok()
+        })
+        .and_then(|c| serde_json::from_str(&c).ok())?;
+    let before = hooks_of(
+        snapshot["content"].as_str()?,
+        snapshot["with"].as_str().unwrap_or("null"),
+        origin,
+    )?;
+    let after = hooks_of(
+        &fs::read_to_string(&origin.file).ok()?,
+        &origin.with,
+        origin,
+    )?;
+
+    let mut changes = Vec::new();
+    for hook in &after {
+        let Some(old) = before.iter().find(|h| h.name == hook.name) else {
+            changes.push(format!(
+                "+ new hook `{}`: {}",
+                hook.name,
+                hook.commands().join(" && ")
+            ));
+            continue;
+        };
+        if old.commands() != hook.commands() {
+            changes.push(format!(
+                "~ `{}` runs `{}` (was `{}`)",
+                hook.name,
+                hook.commands().join(" && "),
+                old.commands().join(" && ")
+            ));
+        }
+        if old.trigger != hook.trigger {
+            changes.push(format!(
+                "~ `{}` runs on {} (was {})",
+                hook.name,
+                hook.trigger.map(|t| t.as_str()).unwrap_or("-"),
+                old.trigger.map(|t| t.as_str()).unwrap_or("-")
+            ));
+        }
+        let (was, now) = (old.granted(), hook.granted());
+        if was.files != now.files {
+            changes.push(format!(
+                "! `{}` may now {} files",
+                hook.name,
+                match now.files {
+                    crate::config::FileAccess::Write => "modify",
+                    crate::config::FileAccess::Read => "only read",
+                }
+            ));
+        }
+        if was.network != now.network {
+            changes.push(format!(
+                "! `{}` {} the network",
+                hook.name,
+                if now.network {
+                    "now uses"
+                } else {
+                    "no longer uses"
+                }
+            ));
+        }
+        if was.env != now.env {
+            changes.push(format!(
+                "! `{}` environment: {}",
+                hook.name,
+                match &now.env {
+                    None => "the whole environment".to_string(),
+                    Some(env) if env.is_empty() => "basic".to_string(),
+                    Some(env) => env.join(", "),
+                }
+            ));
+        }
+        if old.writes != hook.writes || old.reads != hook.reads {
+            changes.push(format!("~ `{}` uses other variables", hook.name));
+        }
+        if old.include != hook.include || old.exclude != hook.exclude {
+            changes.push(format!("~ `{}` targets other files", hook.name));
+        }
+    }
+    for hook in &before {
+        if !after.iter().any(|h| h.name == hook.name) {
+            changes.push(format!("- removed hook `{}`", hook.name));
+        }
+    }
+    if changes.is_empty() {
+        changes.push("same hooks (their file or its parameters changed)".to_string());
+    }
+    Some(changes)
 }
 
 /// Stops trusting a hooks file
