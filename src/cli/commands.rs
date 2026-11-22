@@ -123,6 +123,18 @@ pub enum AppCommands {
         config_path: Option<PathBuf>,
     },
 
+    /// Convert the configs of husky / lint-staged, lefthook and pre-commit to hooker.config.json
+    #[command()]
+    Import {
+        /// Replace the existing hooker.config.json files
+        #[arg(short, long)]
+        force: bool,
+
+        /// Show the converted hooks without writing them
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Print the JSON schema of the configuration file
     #[command()]
     Schema,

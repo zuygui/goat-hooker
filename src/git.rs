@@ -361,6 +361,14 @@ fn split_paths(root: &Path, output: &str) -> Vec<PathBuf> {
         .collect()
 }
 
+/// `core.hooksPath` when set (husky and other managers set it)
+pub fn hooks_path_setting(root: &Path) -> Option<String> {
+    git(root, &["config", "--get", "core.hooksPath"])
+        .ok()
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
