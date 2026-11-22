@@ -2154,6 +2154,7 @@ dependencies = [
  "anyhow",
  "goat-hooker",
  "gpui-kit",
+ "serde_json",
  "tempfile",
 ]
 

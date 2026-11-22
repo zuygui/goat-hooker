@@ -2,7 +2,9 @@
 
 mod app;
 mod assets;
+mod discover;
 mod editor;
+mod recents;
 mod repo;
 
 use std::path::PathBuf;
@@ -11,11 +13,13 @@ use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
 fn main() {
-    // Dossier du dépôt : premier argument, sinon le dossier courant
-    let dir = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    // Dépôt à ouvrir : le premier argument, sinon le dossier courant s'il est dans un dépôt git.
+    // Lancée depuis le Dock ou le menu Démarrer, l'app s'ouvre sur la page d'accueil.
+    let dir = std::env::args().nth(1).map(PathBuf::from).or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .filter(|dir| goat_hooker::git::repo_root(dir).is_ok())
+    });
 
     gpui_kit::application()
         .with_assets(assets::Assets)
