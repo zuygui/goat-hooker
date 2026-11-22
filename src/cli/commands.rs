@@ -135,6 +135,17 @@ pub enum AppCommands {
         dry_run: bool,
     },
 
+    /// Search hooks shared on GitHub and add them
+    #[command()]
+    Search {
+        /// Words to look for (rust, eslint, commits...); empty lists everything
+        query: Vec<String>,
+
+        /// Project folder to add the hooks to (default: the root)
+        #[arg(short, long, value_hint = clap::ValueHint::DirPath)]
+        project: Option<PathBuf>,
+    },
+
     /// Review the hooks loaded from other repositories (`from`) and trust them
     #[command()]
     Trust {

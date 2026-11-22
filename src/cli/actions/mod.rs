@@ -5,6 +5,7 @@ pub mod init;
 pub mod install;
 pub mod list;
 pub mod run;
+pub mod search;
 pub mod status;
 pub mod trust;
 pub mod update;
