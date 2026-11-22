@@ -24,6 +24,7 @@ use goat_hooker::{
 };
 
 use crate::{
+    discover::{self, FoundRepo},
     editor::{EditorEvent, HookEditor},
     recents,
     repo::{PreviewItem, Project, Repo},
@@ -72,6 +73,9 @@ pub struct HookerApp {
     running_all: bool,
     /// Dépôts ouverts récemment (page d'accueil)
     recents: Vec<PathBuf>,
+    /// Dépôts trouvés sur l'ordinateur (`None` pendant la recherche)
+    found: Option<Vec<FoundRepo>>,
+    show_all_found: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -157,12 +161,15 @@ impl HookerApp {
             running: HashSet::new(),
             running_all: false,
             recents: recents::load(),
+            found: None,
+            show_all_found: false,
             _subscriptions: vec![subscription],
         };
         if let Some(dir) = dir {
             app.open(dir);
             app.select_first(cx);
         }
+        app.scan_repositories(cx);
         app
     }
 
@@ -337,6 +344,49 @@ impl HookerApp {
         self.selected = None;
         self.recents = recents::load();
         cx.notify();
+    }
+
+    /// Cherche les dépôts git de l'ordinateur en tâche de fond
+    fn scan_repositories(&mut self, cx: &mut Context<Self>) {
+        self.found = None;
+        let mut roots = discover::default_roots();
+        roots.extend(recents::load_scan_roots());
+        cx.spawn(async move |this, cx| {
+            let found = cx
+                .background_spawn(async move { discover::find_repositories(&roots) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.found = Some(found);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Ajoute un dossier aux dossiers scannés (ex : Documents, que l'app évite par défaut)
+    fn pick_scan_folder(&mut self, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Scan this folder".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else {
+                return;
+            };
+            let Some(dir) = paths.into_iter().next() else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                recents::add_scan_root(dir);
+                this.scan_repositories(cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn open_recent(&mut self, dir: PathBuf, cx: &mut Context<Self>) {
@@ -1251,69 +1301,84 @@ impl HookerApp {
             .into_any_element()
     }
 
+    /// Une ligne de dépôt sur la page d'accueil (clic : l'ouvre)
+    fn repo_row(
+        &self,
+        id: impl Into<ElementId>,
+        path: &std::path::Path,
+        configured: bool,
+        removable: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let id: ElementId = id.into();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.display().to_string());
+        let open_path = path.to_path_buf();
+        let remove_path = path.to_path_buf();
+
+        h_flex()
+            .id(id.clone())
+            .px_3()
+            .py_2()
+            .gap_3()
+            .rounded_md()
+            .cursor_pointer()
+            .hover(|this| this.bg(theme.accent))
+            .child(
+                lucide("folder-git-2")
+                    .small()
+                    .text_color(theme.muted_foreground),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(name))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .truncate()
+                            .child(path.display().to_string()),
+                    ),
+            )
+            .child(if configured {
+                chip("configured", theme.success)
+            } else {
+                chip("not set up", theme.muted_foreground)
+            })
+            .when(removable, |this| {
+                this.child(
+                    Button::new(ElementId::NamedChild(
+                        std::sync::Arc::new(id),
+                        "remove".into(),
+                    ))
+                    .ghost()
+                    .xsmall()
+                    .icon(lucide("x"))
+                    .tooltip("Remove from the list")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.recents = recents::remove(&remove_path);
+                        cx.notify();
+                    })),
+                )
+            })
+            .on_click(cx.listener(move |this, _, _, cx| this.open_recent(open_path.clone(), cx)))
+    }
+
     /// Page d'accueil : ouvrir un dépôt, dépôts récents, premiers pas
     fn render_welcome(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
 
         let mut recent = v_flex().gap_0p5();
         for (i, path) in self.recents.iter().enumerate() {
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.display().to_string());
             let configured = path
                 .join(goat_hooker::config::HOOK_CONFIG_FILENAME)
                 .exists();
-            let open_path = path.clone();
-            let remove_path = path.clone();
-
-            recent = recent.child(
-                h_flex()
-                    .id(("recent", i))
-                    .px_3()
-                    .py_2()
-                    .gap_3()
-                    .rounded_md()
-                    .cursor_pointer()
-                    .hover(|this| this.bg(theme.accent))
-                    .child(
-                        lucide("folder-git-2")
-                            .small()
-                            .text_color(theme.muted_foreground),
-                    )
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .overflow_hidden()
-                            .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(name))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .truncate()
-                                    .child(path.display().to_string()),
-                            ),
-                    )
-                    .child(if configured {
-                        chip("configured", theme.success)
-                    } else {
-                        chip("not set up", theme.muted_foreground)
-                    })
-                    .child(
-                        Button::new(("remove-recent", i))
-                            .ghost()
-                            .xsmall()
-                            .icon(lucide("x"))
-                            .tooltip("Remove from the list")
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.recents = recents::remove(&remove_path);
-                                cx.notify();
-                            })),
-                    )
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.open_recent(open_path.clone(), cx)),
-                    ),
-            );
+            recent = recent.child(self.repo_row(("recent", i), path, configured, true, cx));
         }
         if self.recents.is_empty() {
             recent = recent.child(
@@ -1324,6 +1389,62 @@ impl HookerApp {
                     .text_color(theme.muted_foreground)
                     .child("The repositories you open will appear here"),
             );
+        }
+
+        // Dépôts trouvés sur l'ordinateur (sans ceux déjà dans les récents)
+        let mut on_computer = v_flex().gap_0p5();
+        match self.found.as_ref() {
+            None => {
+                on_computer = on_computer.child(
+                    h_flex()
+                        .px_3()
+                        .py_2()
+                        .gap_2()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(Icon::new(IconName::LoaderCircle).small())
+                        .child("Looking for git repositories…"),
+                );
+            }
+            Some(found) => {
+                let found: Vec<&FoundRepo> = found
+                    .iter()
+                    .filter(|r| !self.recents.contains(&r.path))
+                    .collect();
+                let shown = if self.show_all_found { found.len() } else { 6 };
+                for (i, repo) in found.iter().take(shown).enumerate() {
+                    on_computer = on_computer.child(self.repo_row(
+                        ("found", i),
+                        &repo.path,
+                        repo.configured,
+                        false,
+                        cx,
+                    ));
+                }
+                if found.is_empty() {
+                    on_computer = on_computer.child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child("No other git repository found, scan a folder where you keep your projects"),
+                    );
+                } else if found.len() > shown {
+                    on_computer = on_computer.child(
+                        div().px_1().child(
+                            Button::new("show-all-found")
+                                .ghost()
+                                .small()
+                                .label(format!("Show all ({})", found.len()))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.show_all_found = true;
+                                    cx.notify();
+                                })),
+                        ),
+                    );
+                }
+            }
         }
 
         let step = |n: &'static str, title: &'static str, text: &'static str| {
@@ -1410,6 +1531,39 @@ impl HookerApp {
                                 .gap_2()
                                 .child(section("RECENT", cx))
                                 .child(recent),
+                        )
+                        // Dépôts de l'ordinateur
+                        .child(
+                            v_flex()
+                                .gap_2()
+                                .child(
+                                    h_flex()
+                                        .gap_1()
+                                        .child(section("ON THIS COMPUTER", cx))
+                                        .child(div().flex_1())
+                                        .child(
+                                            Button::new("rescan")
+                                                .ghost()
+                                                .xsmall()
+                                                .icon(IconName::RefreshCw)
+                                                .tooltip("Search again")
+                                                .loading(self.found.is_none())
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.scan_repositories(cx)
+                                                })),
+                                        )
+                                        .child(
+                                            Button::new("scan-folder")
+                                                .ghost()
+                                                .xsmall()
+                                                .icon(IconName::FolderOpen)
+                                                .label("Scan a folder…")
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.pick_scan_folder(cx)
+                                                })),
+                                        ),
+                                )
+                                .child(on_computer),
                         )
                         // Premiers pas
                         .child(

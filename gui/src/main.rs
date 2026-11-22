@@ -2,6 +2,7 @@
 
 mod app;
 mod assets;
+mod discover;
 mod editor;
 mod recents;
 mod repo;

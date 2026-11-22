@@ -70,6 +70,33 @@ pub fn remove(repo: &PathBuf) -> Vec<PathBuf> {
     recents
 }
 
+/// Dossiers ajoutés avec « Scan a folder… »
+pub fn load_scan_roots() -> Vec<PathBuf> {
+    let Some(content) = config_dir().and_then(|d| fs::read_to_string(d.join("scan.json")).ok())
+    else {
+        return vec![];
+    };
+    serde_json::from_str::<Vec<PathBuf>>(&content)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|p| p.is_dir())
+        .collect()
+}
+
+pub fn add_scan_root(dir: PathBuf) -> Vec<PathBuf> {
+    let mut roots = load_scan_roots();
+    if !roots.contains(&dir) {
+        roots.push(dir);
+    }
+    if let Some(config) = config_dir() {
+        let _ = fs::create_dir_all(&config);
+        if let Ok(content) = serde_json::to_string_pretty(&roots) {
+            let _ = fs::write(config.join("scan.json"), content);
+        }
+    }
+    roots
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
