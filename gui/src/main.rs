@@ -6,6 +6,8 @@ mod canvas;
 mod discover;
 mod editor;
 mod graph_view;
+mod json_complete;
+mod json_editor;
 mod recents;
 mod repo;
 

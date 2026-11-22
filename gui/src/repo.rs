@@ -422,3 +422,41 @@ impl Repo {
         self.reload()
     }
 }
+
+impl Repo {
+    /// Names the JSON editor of a project suggests: hooks, variables, outputs
+    pub fn known(&self, project: usize) -> crate::json_complete::Known {
+        let mut known = crate::json_complete::Known::default();
+        let current = self.projects.get(project).map(|p| p.name.clone());
+        for p in &self.projects {
+            let prefix = if Some(&p.name) == current.as_ref() {
+                String::new()
+            } else if p.name == "." {
+                "root:".to_string()
+            } else {
+                format!("{}:", p.name)
+            };
+            for hook in p.hooks() {
+                known.hooks.push(format!("{prefix}{}", hook.name));
+                for output in hook.outputs.iter().flatten() {
+                    known
+                        .outputs
+                        .push(format!("{prefix}{}.{output}", hook.name));
+                }
+                for step in hook.steps.iter().flatten() {
+                    known
+                        .hooks
+                        .push(format!("{prefix}{}/{}", hook.name, step.id));
+                }
+            }
+            known.variables.extend(
+                p.raw
+                    .variables
+                    .iter()
+                    .flatten()
+                    .map(|(name, _)| name.clone()),
+            );
+        }
+        known
+    }
+}

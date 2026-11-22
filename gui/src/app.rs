@@ -105,6 +105,8 @@ pub struct HookerApp {
     /// Le graphe doit être recalculé (config ou résultats changés)
     graph_dirty: bool,
     pages: pages::PagesState,
+    /// JSON editor of a config, in place of the detail
+    json_editor: Option<Entity<crate::json_editor::JsonEditor>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -207,6 +209,7 @@ impl HookerApp {
             graph,
             graph_dirty: true,
             pages: pages::PagesState::new(window, cx),
+            json_editor: None,
             _subscriptions: vec![subscription, graph_subscription],
         };
         if let Some(dir) = dir {
@@ -371,6 +374,7 @@ impl HookerApp {
     fn set_filter(&mut self, filter: Filter, cx: &mut Context<Self>) {
         self.filter = filter;
         self.editor = None;
+        self.json_editor = None;
         if filter == Filter::Browse {
             self.open_browse(cx);
         }
@@ -795,6 +799,41 @@ impl HookerApp {
             self.notice = None;
         }
         self.reload();
+    }
+
+    /// Opens a config file in the JSON editor
+    fn open_json(&mut self, project: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(repo) = self.repo.as_ref() else {
+            return;
+        };
+        let Some(p) = repo.projects.get(project) else {
+            return;
+        };
+        let file = p.file.clone();
+        let label = file
+            .strip_prefix(&repo.root)
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+        let known = repo.known(project);
+        let view = cx.new(|cx| crate::json_editor::JsonEditor::new(file, label, known, window, cx));
+        let subscription = cx.subscribe(
+            &view,
+            |this, _, event: &crate::json_editor::JsonEditorEvent, cx| {
+                match event {
+                    crate::json_editor::JsonEditorEvent::Saved => {
+                        this.notice = Some(("Saved".into(), true));
+                        this.reload();
+                    }
+                    crate::json_editor::JsonEditorEvent::Close => this.json_editor = None,
+                }
+                cx.notify();
+            },
+        );
+        self._subscriptions.push(subscription);
+        self.editor = None;
+        self.json_editor = Some(view);
+        cx.notify();
     }
 
     /// Hook created on the canvas, linked to the node its wire comes from
@@ -1224,6 +1263,7 @@ impl HookerApp {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.selected = Some(hook_ref);
+                        this.json_editor = None;
                         this.editor = None;
                         cx.notify();
                     })),
@@ -1296,6 +1336,10 @@ impl HookerApp {
 
     fn render_detail(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
+
+        if let Some(json) = self.json_editor.as_ref() {
+            return div().size_full().child(json.clone()).into_any_element();
+        }
 
         if let Some(editor) = self.editor.as_ref() {
             return div()

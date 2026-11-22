@@ -108,8 +108,158 @@ fn github_url(url: &str, rev: Option<&str>, path: &str) -> Option<String> {
     ))
 }
 
+/// Kind of a token, for its color
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Token {
+    Key,
+    String,
+    Number,
+    Keyword,
+    Comment,
+    Variable,
+    Punctuation,
+}
+
+/// Tokens of a line of JSON: (byte range, kind)
+fn json_tokens(line: &str) -> Vec<(std::ops::Range<usize>, Token)> {
+    let bytes = line.as_bytes();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                let start = i;
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i = (i + 1).min(bytes.len());
+                let rest = line[i..].trim_start();
+                let kind = if rest.starts_with(':') {
+                    Token::Key
+                } else {
+                    Token::String
+                };
+                tokens.push((start..i, kind));
+            }
+            b'0'..=b'9' | b'-' => {
+                let start = i;
+                while i < bytes.len() && (bytes[i].is_ascii_digit() || b".-eE+".contains(&bytes[i]))
+                {
+                    i += 1;
+                }
+                tokens.push((start..i, Token::Number));
+            }
+            b't' | b'f' | b'n' => {
+                let word = ["true", "false", "null"]
+                    .into_iter()
+                    .find(|w| line[i..].starts_with(w));
+                match word {
+                    Some(w) => {
+                        tokens.push((i..i + w.len(), Token::Keyword));
+                        i += w.len();
+                    }
+                    None => i += 1,
+                }
+            }
+            b'{' | b'}' | b'[' | b']' | b':' | b',' => {
+                tokens.push((i..i + 1, Token::Punctuation));
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    tokens
+}
+
+/// Tokens of a line of shell
+fn shell_tokens(line: &str) -> Vec<(std::ops::Range<usize>, Token)> {
+    const KEYWORDS: [&str; 16] = [
+        "if", "then", "else", "elif", "fi", "for", "in", "do", "done", "while", "case", "esac",
+        "exit", "echo", "return", "export",
+    ];
+    let bytes = line.as_bytes();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'#' if i == 0 || bytes[i - 1].is_ascii_whitespace() => {
+                tokens.push((i..bytes.len(), Token::Comment));
+                break;
+            }
+            quote @ (b'"' | b'\'') => {
+                let start = i;
+                i += 1;
+                while i < bytes.len() && bytes[i] != quote {
+                    i += if bytes[i] == b'\\' && quote == b'"' {
+                        2
+                    } else {
+                        1
+                    };
+                }
+                i = (i + 1).min(bytes.len());
+                tokens.push((start..i, Token::String));
+            }
+            b'$' => {
+                let start = i;
+                i += 1;
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_alphanumeric() || b"_{}@?#".contains(&bytes[i]))
+                {
+                    i += 1;
+                }
+                tokens.push((start..i, Token::Variable));
+            }
+            c if c.is_ascii_alphabetic() => {
+                let start = i;
+                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                let separated = start == 0 || !bytes[start - 1].is_ascii_alphanumeric();
+                if separated && KEYWORDS.contains(&&line[start..i]) {
+                    tokens.push((start..i, Token::Keyword));
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    tokens
+}
+
 impl HookerApp {
+    /// A line with colors
+    fn colored_line(line: &str, json: bool, cx: &App) -> StyledText {
+        let theme = cx.theme();
+        let tokens = if json {
+            json_tokens(line)
+        } else {
+            shell_tokens(line)
+        };
+        let highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = tokens
+            .into_iter()
+            .map(|(range, token)| {
+                let color = match token {
+                    Token::Key => theme.blue,
+                    Token::String => theme.green,
+                    Token::Number | Token::Keyword => theme.magenta,
+                    Token::Comment | Token::Punctuation => theme.muted_foreground,
+                    Token::Variable => theme.cyan,
+                };
+                (
+                    range,
+                    HighlightStyle {
+                        color: Some(color),
+                        font_style: (token == Token::Comment).then_some(FontStyle::Italic),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        StyledText::new(line.to_string()).with_highlights(highlights)
+    }
+
     fn code_view(&self, content: &str, first_line: usize, cx: &App) -> Div {
+        let json = content.trim_start().starts_with(['{', '[']);
         let theme = cx.theme();
         let mut code = v_flex()
             .p_3()
@@ -131,7 +281,11 @@ impl HookerApp {
                             .text_color(theme.muted_foreground.opacity(0.6))
                             .child(format!("{:>3}", first_line + i)),
                     )
-                    .child(div().whitespace_nowrap().child(line.replace('\t', "    "))),
+                    .child(div().whitespace_nowrap().child(Self::colored_line(
+                        &line.replace('\t', "    "),
+                        json,
+                        cx,
+                    ))),
             );
         }
         if lines.len() > MAX_LINES {
@@ -201,7 +355,26 @@ impl HookerApp {
             .border_color(theme.border)
             .child(
                 h_flex()
+                    .gap_1()
                     .child(div().flex_1().child(section("SOURCE", cx)))
+                    .child(
+                        Button::new("edit-json")
+                            .ghost()
+                            .xsmall()
+                            .icon(lucide("pencil"))
+                            .label("Edit the JSON")
+                            .on_click({
+                                let file = project.file.clone();
+                                cx.listener(move |this, _, window, cx| {
+                                    let index = this.repo.as_ref().and_then(|r| {
+                                        r.projects.iter().position(|p| p.file == file)
+                                    });
+                                    if let Some(index) = index {
+                                        this.open_json(index, window, cx);
+                                    }
+                                })
+                            }),
+                    )
                     .child(
                         Button::new("toggle-source")
                             .ghost()
@@ -307,7 +480,7 @@ impl HookerApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{github_url, line_of, raw_object, scripts};
+    use super::{github_url, json_tokens, line_of, raw_object, scripts, shell_tokens};
     use goat_hooker::config::Hook;
 
     #[test]
@@ -329,6 +502,27 @@ mod tests {
                 dir.path().join("lint.py")
             ]
         );
+        let tokens = json_tokens(r#"  "cmd": "echo", "n": 12, "ok": true"#);
+        use super::Token::*;
+        assert_eq!(
+            tokens.iter().map(|(_, t)| *t).collect::<Vec<_>>(),
+            vec![
+                Key,
+                Punctuation,
+                String,
+                Punctuation,
+                Key,
+                Punctuation,
+                Number,
+                Punctuation,
+                Key,
+                Punctuation,
+                Keyword
+            ]
+        );
+        let shell = shell_tokens(r#"if [ "$x" -gt 1 ]; then echo 'a'; fi # done"#);
+        assert!(shell.contains(&(0..2, Keyword)));
+        assert!(shell.iter().any(|(_, t)| *t == Comment));
         assert_eq!(
             line_of("{\n  \"hooks\": [\n    { \"name\": \"x\" }", "x"),
             Some(3)
