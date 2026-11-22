@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Goat Hooker config",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "JSON schema of the file",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "discover": {
+      "description": "Load every hooker.config.json of the repository (files ignored by git are skipped)",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "hooks": {
+      "description": "Hooks of this project",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/Hook"
+      }
+    },
+    "imports": {
+      "description": "Sub-projects folders, each one with its own hooker.config.json. Globs are supported (packages/*)",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
+    "parallel": {
+      "description": "Run hooks in parallel (root config only)",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "$defs": {
+    "Hook": {
+      "type": "object",
+      "properties": {
+        "cmd": {
+          "description": "Shell command, run from the config folder. {files} is replaced by the targeted files",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cmds": {
+          "description": "Shell commands, run in order",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "description": "Glob patterns of files to ignore",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "from": {
+          "description": "Git repository URL to load the hooks file from (requires `path`)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "include": {
+          "description": "Glob patterns, relative to the config folder. Without it, the hook targets all files",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "description": "Hook name",
+          "type": "string"
+        },
+        "path": {
+          "description": "Hooks file to load, relative to the config folder (or to the root of `from`)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rev": {
+          "description": "Branch or tag of `from` (default branch if missing)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage_fixed": {
+          "description": "Re-stage the targeted files after the hook (for formatters)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "trigger": {
+          "description": "Git hook that runs this hook (not used with `path`)",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trigger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "Trigger": {
+      "description": "Client-side Git hook",
+      "type": "string",
+      "enum": [
+        "pre-commit",
+        "prepare-commit-msg",
+        "commit-msg",
+        "post-commit",
+        "pre-rebase",
+        "post-rewrite",
+        "pre-push",
+        "applypatch-msg",
+        "pre-applypatch",
+        "post-applypatch",
+        "pre-auto-gc",
+        "post-checkout",
+        "post-merge"
+      ]
+    }
+  }
+}

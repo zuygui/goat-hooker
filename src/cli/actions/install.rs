@@ -5,7 +5,7 @@ use std::{
 
 use colored::Colorize;
 
-use crate::{config::Trigger, errors::GoatHookerError, git};
+use goat_hooker::{config::Trigger, errors::GoatHookerError, git};
 
 /// Marque les hooks installés par goat-hooker (pour ne pas écraser ceux de l'utilisateur)
 const HOOK_MARKER: &str = "# installed by goat-hooker";

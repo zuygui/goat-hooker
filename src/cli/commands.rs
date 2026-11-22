@@ -9,7 +9,7 @@ use clap::{
 };
 use clap_complete::Shell;
 
-use crate::config::Trigger;
+use goat_hooker::config::Trigger;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None, styles = styles())]
@@ -53,10 +53,34 @@ pub enum AppCommands {
         #[arg(short = 'c', value_parser, value_hint = clap::ValueHint::FilePath)]
         config_path: Option<PathBuf>,
 
+        /// Show the hooks that would run (and their files) without running them
+        #[arg(long)]
+        dry_run: bool,
+
         /// Arguments given by Git to the hook, available as `$1`, `$2`... in commands
         #[arg(last = true)]
         args: Vec<String>,
     },
+
+    /// List the configurations and their hooks
+    #[command()]
+    List {
+        /// Config file (default: `hooker.config.json` at the repository root)
+        #[arg(short = 'c', value_parser, value_hint = clap::ValueHint::FilePath)]
+        config_path: Option<PathBuf>,
+    },
+
+    /// Update the hooks loaded from git repositories (`from`)
+    #[command()]
+    Update {
+        /// Config file (default: `hooker.config.json` at the repository root)
+        #[arg(short = 'c', value_parser, value_hint = clap::ValueHint::FilePath)]
+        config_path: Option<PathBuf>,
+    },
+
+    /// Print the JSON schema of the configuration file
+    #[command()]
+    Schema,
 }
 
 fn styles() -> Styles {

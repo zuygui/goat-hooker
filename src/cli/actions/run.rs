@@ -1,70 +1,67 @@
 use std::{
-    io::{IsTerminal, Read, Write},
+    io::{IsTerminal, Read},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
 };
 
 use colored::Colorize;
 
-use crate::{
+use goat_hooker::{
     config::{ConfigLoader, HOOK_CONFIG_FILENAME, Trigger},
     errors::GoatHookerError,
-    git,
+    git::{self, UnstagedStash},
     matcher::{MatchedHook, Matcher},
+    runner::{self, HookInput},
 };
 
-/// Remplacé dans les commandes par les fichiers concernés (échappés pour le shell)
-const FILES_PLACEHOLDER: &str = "{files}";
+/// Config explicite, sinon celle à la racine du dépôt (`None` si elle n'existe pas)
+pub fn resolve_config(root: &Path, config_path: Option<PathBuf>) -> Option<PathBuf> {
+    match config_path {
+        Some(path) => Some(path),
+        None => Some(root.join(HOOK_CONFIG_FILENAME)).filter(|p| p.exists()),
+    }
+}
 
 pub fn run_hooks(
     trigger: Trigger,
     config_path: Option<PathBuf>,
     args: &[String],
+    dry_run: bool,
 ) -> Result<(), GoatHookerError> {
+    // `HOOKER_SKIP=1 git commit` pour passer les hooks
+    if std::env::var(git::SKIP_ENV).is_ok_and(|v| !v.is_empty() && v != "0") {
+        return Ok(());
+    }
+
     let cwd = std::env::current_dir()?;
     let root = git::repo_root(&cwd)?;
 
-    // Sans config explicite, on prend celle à la racine du dépôt.
-    // Si elle n'existe pas, on ne bloque pas Git.
-    let config_path = match config_path {
-        Some(path) => path,
-        None => {
-            let path = root.join(HOOK_CONFIG_FILENAME);
-            if !path.exists() {
-                eprintln!(
-                    "{}",
-                    format!(
-                        "⚠️ Warning: no {} found at {}, skipping {} hooks",
-                        HOOK_CONFIG_FILENAME,
-                        root.display(),
-                        trigger.as_str()
-                    )
-                    .yellow()
-                );
-                return Ok(());
-            }
-            path
-        }
+    // Si la config n'existe pas, on ne bloque pas Git
+    let Some(config_path) = resolve_config(&root, config_path) else {
+        eprintln!(
+            "{}",
+            format!(
+                "⚠️ Warning: no {} found at {}, skipping {} hooks",
+                HOOK_CONFIG_FILENAME,
+                root.display(),
+                trigger.as_str()
+            )
+            .yellow()
+        );
+        return Ok(());
     };
 
     let configs = ConfigLoader::new().load_recursive(&config_path)?;
+    let parallel = configs.first().and_then(|c| c.parallel).unwrap_or(false);
     let matcher = Matcher::new(&configs)?;
 
     // Git donne au pre-push les refs poussées sur stdin.
     // On le lit pour filtrer les hooks, puis on le redonne à chaque commande.
-    let stdin = read_stdin(trigger)?;
-
-    // Pre-commit : fichiers stagés / pre-push : fichiers des commits poussés.
-    // Les autres triggers lancent tous leurs hooks.
-    let files = match (trigger, stdin.as_deref()) {
-        (Trigger::PreCommit, _) => Some(git::staged_files(&root)?),
-        (Trigger::PrePush, Some(refs)) => {
-            let remote = args.first().map(String::as_str).unwrap_or_default();
-            Some(git::pushed_files(&root, remote, refs)?)
-        }
-        _ => None,
+    let input = HookInput {
+        args: args.to_vec(),
+        stdin: read_stdin(trigger)?,
     };
 
+    let files = runner::changed_files(trigger, &root, &input)?;
     let hooks = matcher.hooks_to_run(trigger, files.as_deref());
     if hooks.is_empty() {
         println!(
@@ -74,8 +71,39 @@ pub fn run_hooks(
         return Ok(());
     }
 
-    for matched in hooks {
-        run_hook(&matched, args, stdin.as_deref())?;
+    if dry_run {
+        print_dry_run(&hooks, &root);
+        return Ok(());
+    }
+
+    // Les hooks du pre-commit doivent voir exactement ce qui va être commité
+    let mut stash = if trigger == Trigger::PreCommit {
+        UnstagedStash::save(&root)?
+    } else {
+        None
+    };
+
+    let results = runner::run_all(&hooks, &input, parallel)?;
+
+    // Re-stage les fichiers corrigés (formateurs) avant de remettre les modifs non stagées
+    let files_to_stage: Vec<PathBuf> = results
+        .iter()
+        .filter(|r| r.success)
+        .flat_map(|r| r.files_to_stage.clone())
+        .collect();
+    git::add(&root, &files_to_stage)?;
+
+    if let Some(stash) = stash.as_mut() {
+        stash.restore()?;
+    }
+
+    let failed: Vec<&str> = results
+        .iter()
+        .filter(|r| !r.success)
+        .map(|r| r.name.as_str())
+        .collect();
+    if !failed.is_empty() {
+        return Err(GoatHookerError::HookFailed(failed.join("`, `")));
     }
 
     Ok(())
@@ -92,165 +120,28 @@ fn read_stdin(trigger: Trigger) -> Result<Option<String>, GoatHookerError> {
     Ok(Some(content))
 }
 
-fn run_hook(
-    matched: &MatchedHook,
-    args: &[String],
-    stdin: Option<&str>,
-) -> Result<(), GoatHookerError> {
-    let hook = matched.hook;
-    let commands = hook.commands();
-
-    if commands.is_empty() {
-        eprintln!(
-            "{}",
-            format!(
-                "⚠️ Warning: hook `{}` uses `from`/`path`, which isn't supported yet. Skipping.",
-                hook.name
-            )
-            .yellow()
-        );
-        return Ok(());
-    }
-
-    println!("{}", format!("🐐 Running hook `{}`", hook.name).bold());
-    for cmd in commands {
-        if !execute_command(cmd, &matched.base_dir, args, &matched.files, stdin)? {
-            return Err(GoatHookerError::HookFailed(hook.name.clone()));
-        }
-    }
-
-    Ok(())
-}
-
-/// Échappe un chemin pour le shell (`it's.rs` → `'it'\''s.rs'`)
-fn shell_quote(path: &Path) -> String {
-    format!("'{}'", path.to_string_lossy().replace('\'', r"'\''"))
-}
-
-/// Exécute une commande shell depuis `dir`.
-/// - les arguments de Git sont passés en paramètres positionnels (`$1`, `$2`...)
-/// - `{files}` est remplacé par les fichiers concernés, aussi dispo dans `$HOOKER_FILES` (un par ligne)
-/// - `stdin` est redonné à la commande (refs du pre-push)
-fn execute_command(
-    cmd: &str,
-    dir: &Path,
-    args: &[String],
-    files: &[PathBuf],
-    stdin: Option<&str>,
-) -> Result<bool, GoatHookerError> {
-    println!("🚧 Executing command: `{cmd}`");
-
-    let quoted_files: Vec<String> = files.iter().map(|f| shell_quote(f)).collect();
-    let cmd = cmd.replace(FILES_PLACEHOLDER, &quoted_files.join(" "));
-    let files_env: Vec<String> = files
-        .iter()
-        .map(|f| f.to_string_lossy().to_string())
-        .collect();
-
-    let mut child = Command::new("sh")
-        .arg("-c")
-        .arg(&cmd)
-        .arg("hooker") // $0
-        .args(args)
-        .current_dir(dir)
-        .env("HOOKER_FILES", files_env.join("\n"))
-        .stdin(if stdin.is_some() {
-            Stdio::piped()
+fn print_dry_run(hooks: &[MatchedHook], root: &Path) {
+    for matched in hooks {
+        let project = matched
+            .base_dir
+            .strip_prefix(root)
+            .unwrap_or(&matched.base_dir);
+        let project = if project.as_os_str().is_empty() {
+            ".".to_string()
         } else {
-            Stdio::inherit()
-        })
-        .stdout(Stdio::inherit()) // Rediriger la sortie standard vers le processus parent
-        .stderr(Stdio::inherit()) // Rediriger la sortie d'erreur vers le processus parent
-        .spawn()?;
+            project.display().to_string()
+        };
 
-    if let (Some(content), Some(mut child_stdin)) = (stdin, child.stdin.take()) {
-        // La commande peut ne pas lire stdin : on ignore un pipe fermé
-        let _ = child_stdin.write_all(content.as_bytes());
-    }
-
-    let status = child.wait()?;
-    if status.success() {
-        println!("{}", "✅ Command executed successfully".green());
-    } else {
-        eprintln!("{}", format!("❌ Command failed with {status}").red());
-    }
-
-    Ok(status.success())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    fn read(dir: &Path, file: &str) -> String {
-        std::fs::read_to_string(dir.join(file)).unwrap()
-    }
-
-    #[test]
-    fn command_status() {
-        let dir = tempdir().unwrap();
-        assert!(execute_command("true", dir.path(), &[], &[], None).unwrap());
-        assert!(!execute_command("exit 3", dir.path(), &[], &[], None).unwrap());
-    }
-
-    #[test]
-    fn command_gets_git_args_and_runs_in_base_dir() {
-        let dir = tempdir().unwrap();
-        let args = vec!["MSG_FILE".to_string()];
-
-        assert!(execute_command(r#"echo "$1" > out.txt"#, dir.path(), &args, &[], None).unwrap());
-        assert_eq!(read(dir.path(), "out.txt"), "MSG_FILE\n");
-    }
-
-    #[test]
-    fn command_gets_files() {
-        let dir = tempdir().unwrap();
-        let files = vec![PathBuf::from("src/a.rs"), PathBuf::from("it's a file.rs")];
-
-        // {files} est échappé : chaque fichier reste un seul argument
-        assert!(
-            execute_command(
-                r#"for f in {files}; do echo "$f"; done > out.txt"#,
-                dir.path(),
-                &[],
-                &files,
-                None
-            )
-            .unwrap()
+        println!(
+            "{} {}",
+            format!("🐐 {}", matched.hook.name).bold(),
+            format!("({project})").dimmed()
         );
-        assert_eq!(read(dir.path(), "out.txt"), "src/a.rs\nit's a file.rs\n");
-
-        assert!(
-            execute_command(
-                r#"echo "$HOOKER_FILES" > env.txt"#,
-                dir.path(),
-                &[],
-                &files,
-                None
-            )
-            .unwrap()
-        );
-        assert_eq!(read(dir.path(), "env.txt"), "src/a.rs\nit's a file.rs\n");
-    }
-
-    #[test]
-    fn command_gets_stdin() {
-        let dir = tempdir().unwrap();
-
-        assert!(
-            execute_command(
-                "cat > out.txt",
-                dir.path(),
-                &[],
-                &[],
-                Some("refs/heads/main abc\n")
-            )
-            .unwrap()
-        );
-        assert_eq!(read(dir.path(), "out.txt"), "refs/heads/main abc\n");
-
-        // une commande qui ne lit pas stdin ne doit pas planter
-        assert!(execute_command("true", dir.path(), &[], &[], Some(&"x".repeat(1 << 20))).unwrap());
+        for cmd in matched.hook.commands() {
+            println!("   🚧 {cmd}");
+        }
+        for file in &matched.files {
+            println!("   📄 {}", file.display());
+        }
     }
 }

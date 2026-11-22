@@ -4,7 +4,7 @@ mod commands;
 pub use commands::AppCli;
 use commands::AppCommands;
 
-use crate::errors::GoatHookerError;
+use goat_hooker::errors::GoatHookerError;
 
 pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
     match commands.cmd {
@@ -17,7 +17,14 @@ pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
         AppCommands::Run {
             hook_type,
             config_path,
+            dry_run,
             args,
-        } => actions::run::run_hooks(hook_type, config_path, &args),
+        } => actions::run::run_hooks(hook_type, config_path, &args, dry_run),
+        AppCommands::List { config_path } => actions::list::list_hooks(config_path),
+        AppCommands::Update { config_path } => actions::update::update_remotes(config_path),
+        AppCommands::Schema => {
+            print!("{}", goat_hooker::config::json_schema());
+            Ok(())
+        }
     }
 }

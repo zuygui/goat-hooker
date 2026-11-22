@@ -4,10 +4,6 @@ use clap::Parser;
 use colored::Colorize;
 
 mod cli;
-mod config;
-mod errors;
-mod git;
-mod matcher;
 
 fn main() {
     let opt = cli::AppCli::parse();
