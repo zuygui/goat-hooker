@@ -25,8 +25,11 @@ use goat_hooker::{
 
 use crate::{
     editor::{EditorEvent, HookEditor},
+    recents,
     repo::{PreviewItem, Project, Repo},
 };
+
+const REPOSITORY_URL: &str = "https://github.com/zuygui/goat-hooker";
 
 /// Ce qui est affiché dans la liste du milieu
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -67,6 +70,8 @@ pub struct HookerApp {
     results: HashMap<RunKey, HookResult>,
     running: HashSet<RunKey>,
     running_all: bool,
+    /// Dépôts ouverts récemment (page d'accueil)
+    recents: Vec<PathBuf>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -129,7 +134,8 @@ fn section(title: &'static str, cx: &App) -> Div {
 }
 
 impl HookerApp {
-    pub fn new(dir: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// Sans dossier, l'app s'ouvre sur la page d'accueil
+    pub fn new(dir: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search hooks"));
         let subscription = cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
@@ -150,10 +156,13 @@ impl HookerApp {
             results: HashMap::new(),
             running: HashSet::new(),
             running_all: false,
+            recents: recents::load(),
             _subscriptions: vec![subscription],
         };
-        app.open(dir);
-        app.select_first(cx);
+        if let Some(dir) = dir {
+            app.open(dir);
+            app.select_first(cx);
+        }
         app
     }
 
@@ -166,6 +175,7 @@ impl HookerApp {
         self.results.clear();
         match Repo::open(&dir) {
             Ok(repo) => {
+                self.recents = recents::add(repo.root.clone());
                 self.repo = Some(repo);
                 self.error = None;
             }
@@ -316,6 +326,23 @@ impl HookerApp {
             .ok();
         })
         .detach();
+    }
+
+    /// Retour à la page d'accueil
+    fn go_home(&mut self, cx: &mut Context<Self>) {
+        self.repo = None;
+        self.error = None;
+        self.notice = None;
+        self.editor = None;
+        self.selected = None;
+        self.recents = recents::load();
+        cx.notify();
+    }
+
+    fn open_recent(&mut self, dir: PathBuf, cx: &mut Context<Self>) {
+        self.open(dir);
+        self.select_first(cx);
+        cx.notify();
     }
 
     fn toggle_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -512,8 +539,7 @@ impl HookerApp {
             .repo
             .as_ref()
             .and_then(|r| r.root.file_name())
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "No repository".to_string());
+            .map(|n| n.to_string_lossy().to_string());
 
         TitleBar::new().child(
             h_flex()
@@ -526,17 +552,29 @@ impl HookerApp {
                         .gap_1p5()
                         .text_sm()
                         .child(div().font_weight(FontWeight::SEMIBOLD).child("Goat Hooker"))
-                        .child(div().text_color(theme.muted_foreground).child("—"))
-                        .child(
-                            lucide("folder-git-2")
-                                .small()
-                                .text_color(theme.muted_foreground),
-                        )
-                        .child(div().text_color(theme.muted_foreground).child(repo_name)),
+                        .when_some(repo_name, |this, repo_name| {
+                            this.child(div().text_color(theme.muted_foreground).child("—"))
+                                .child(
+                                    lucide("folder-git-2")
+                                        .small()
+                                        .text_color(theme.muted_foreground),
+                                )
+                                .child(div().text_color(theme.muted_foreground).child(repo_name))
+                        }),
                 )
                 .child(
                     h_flex()
                         .gap_1()
+                        .when(self.repo.is_some(), |this| {
+                            this.child(
+                                Button::new("home")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(lucide("house"))
+                                    .tooltip("Home")
+                                    .on_click(cx.listener(|this, _, _, cx| this.go_home(cx))),
+                            )
+                        })
                         .child(
                             Button::new("theme")
                                 .ghost()
@@ -1213,6 +1251,225 @@ impl HookerApp {
             .into_any_element()
     }
 
+    /// Page d'accueil : ouvrir un dépôt, dépôts récents, premiers pas
+    fn render_welcome(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+
+        let mut recent = v_flex().gap_0p5();
+        for (i, path) in self.recents.iter().enumerate() {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.display().to_string());
+            let configured = path
+                .join(goat_hooker::config::HOOK_CONFIG_FILENAME)
+                .exists();
+            let open_path = path.clone();
+            let remove_path = path.clone();
+
+            recent = recent.child(
+                h_flex()
+                    .id(("recent", i))
+                    .px_3()
+                    .py_2()
+                    .gap_3()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .hover(|this| this.bg(theme.accent))
+                    .child(
+                        lucide("folder-git-2")
+                            .small()
+                            .text_color(theme.muted_foreground),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .overflow_hidden()
+                            .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(name))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .truncate()
+                                    .child(path.display().to_string()),
+                            ),
+                    )
+                    .child(if configured {
+                        chip("configured", theme.success)
+                    } else {
+                        chip("not set up", theme.muted_foreground)
+                    })
+                    .child(
+                        Button::new(("remove-recent", i))
+                            .ghost()
+                            .xsmall()
+                            .icon(lucide("x"))
+                            .tooltip("Remove from the list")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.recents = recents::remove(&remove_path);
+                                cx.notify();
+                            })),
+                    )
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.open_recent(open_path.clone(), cx)),
+                    ),
+            );
+        }
+        if self.recents.is_empty() {
+            recent = recent.child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child("The repositories you open will appear here"),
+            );
+        }
+
+        let step = |n: &'static str, title: &'static str, text: &'static str| {
+            h_flex()
+                .gap_3()
+                .items_start()
+                .child(
+                    div()
+                        .size_6()
+                        .flex_shrink_0()
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .bg(theme.primary.opacity(0.1))
+                        .child(n),
+                )
+                .child(
+                    v_flex()
+                        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(title))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(text),
+                        ),
+                )
+        };
+
+        div()
+            .size_full()
+            .overflow_y_scrollbar()
+            .child(
+                v_flex().w_full().items_center().py_12().child(
+                    v_flex()
+                        .w(px(560.))
+                        .gap_8()
+                        // En-tête
+                        .child(
+                            h_flex()
+                                .gap_4()
+                                .child(img("images/goat.png").size(px(96.)))
+                                .child(
+                                    v_flex()
+                                        .gap_1()
+                                        .child(
+                                            div()
+                                                .text_3xl()
+                                                .font_weight(FontWeight::BOLD)
+                                                .child("Goat Hooker"),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_color(theme.muted_foreground)
+                                                .child("Git hooks for every project of your repository"),
+                                        ),
+                                ),
+                        )
+                        .when_some(self.error.clone(), |this, error| {
+                            this.child(
+                                h_flex()
+                                    .gap_2()
+                                    .p_3()
+                                    .rounded_md()
+                                    .text_sm()
+                                    .bg(theme.danger.opacity(0.1))
+                                    .text_color(theme.danger)
+                                    .child(Icon::new(IconName::CircleAlert).small())
+                                    .child(error),
+                            )
+                        })
+                        .child(
+                            Button::new("open-repository")
+                                .primary()
+                                .icon(IconName::FolderOpen)
+                                .label("Open a repository…")
+                                .on_click(cx.listener(|this, _, _, cx| this.pick_folder(cx))),
+                        )
+                        // Dépôts récents
+                        .child(
+                            v_flex()
+                                .gap_2()
+                                .child(section("RECENT", cx))
+                                .child(recent),
+                        )
+                        // Premiers pas
+                        .child(
+                            v_flex()
+                                .gap_3()
+                                .child(section("GET STARTED", cx))
+                                .child(step(
+                                    "1",
+                                    "Open a git repository",
+                                    "The folder of your project, or of your mono-repo",
+                                ))
+                                .child(step(
+                                    "2",
+                                    "Add hooks",
+                                    "Commands to run before a commit or a push: linters, formatters, tests…",
+                                ))
+                                .child(step(
+                                    "3",
+                                    "Install the Git hooks",
+                                    "From the status bar: from now on, Git runs them for you",
+                                )),
+                        )
+                        // Liens
+                        .child(
+                            h_flex()
+                                .gap_1()
+                                .pt_4()
+                                .border_t_1()
+                                .border_color(theme.border)
+                                .child(
+                                    Button::new("docs")
+                                        .ghost()
+                                        .small()
+                                        .icon(lucide("book-open"))
+                                        .label("Documentation")
+                                        .on_click(|_, _, cx| {
+                                            cx.open_url(&format!("{REPOSITORY_URL}#readme"))
+                                        }),
+                                )
+                                .child(
+                                    Button::new("github")
+                                        .ghost()
+                                        .small()
+                                        .icon(lucide("github"))
+                                        .label("GitHub")
+                                        .on_click(|_, _, cx| cx.open_url(REPOSITORY_URL)),
+                                )
+                                .child(div().flex_1())
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child(concat!("v", env!("CARGO_PKG_VERSION"))),
+                                ),
+                        ),
+                ),
+            )
+            .into_any_element()
+    }
+
     fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let Some(repo) = self.repo.as_ref() else {
@@ -1293,7 +1550,7 @@ impl Render for HookerApp {
         let theme = cx.theme().clone();
 
         let body = match self.repo.as_ref() {
-            None => self.render_placeholder("Open a git repository to manage its hooks", None, cx),
+            None => self.render_welcome(cx),
             Some(repo) if repo.projects.is_empty() => {
                 let action = Button::new("init")
                     .primary()
@@ -1374,6 +1631,8 @@ impl Render for HookerApp {
                 },
             )
             .child(div().flex_1().overflow_hidden().child(body))
-            .child(self.render_status_bar(cx))
+            .when(self.repo.is_some(), |this| {
+                this.child(self.render_status_bar(cx))
+            })
     }
 }
