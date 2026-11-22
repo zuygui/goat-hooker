@@ -43,7 +43,8 @@ fn install_hooks_in(hooks_dir: &Path, force: bool) -> Result<Vec<PathBuf>, GoatH
             }
         }
 
-        let script = format!("#!/bin/sh\n{HOOK_MARKER}\nexec hooker run {hook_name} -- \"$@\"\n");
+        let script =
+            format!("#!/bin/sh\n{HOOK_MARKER}\nexec hooker run {hook_name} --from-git -- \"$@\"\n");
         fs::write(&hook_path, script)?;
 
         // Rendre le fichier exécutable (chmod 755)

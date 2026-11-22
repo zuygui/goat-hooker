@@ -25,7 +25,22 @@ pub struct HookInput {
     pub args: Vec<String>,
     /// stdin (refs du pre-push)
     pub stdin: Option<String>,
+    /// Garde les couleurs des outils même quand leur sortie est capturée
+    pub force_color: bool,
 }
+
+/// Avancement d'un lancement (pour afficher des spinners)
+pub enum Progress<'a> {
+    /// Hooks qui vont tourner, dans l'ordre
+    Planned(&'a [MatchedHook<'a>]),
+    /// Le hook `index` démarre
+    Started(usize),
+    /// Le hook `index` est fini
+    Finished(usize, &'a HookResult),
+}
+
+/// Reçoit l'avancement (peut être appelé depuis plusieurs threads)
+pub type OnProgress<'a> = &'a (dyn Fn(Progress<'_>) + Sync);
 
 /// Où va la sortie des commandes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,11 +97,21 @@ pub fn run_all(
     input: &HookInput,
     parallel: bool,
     output: Output,
+    on_progress: Option<OnProgress>,
 ) -> Result<Vec<HookResult>, GoatHookerError> {
+    let notify = |progress: Progress| {
+        if let Some(on_progress) = on_progress {
+            on_progress(progress);
+        }
+    };
+    notify(Progress::Planned(hooks));
+
     if !parallel {
         let mut results = Vec::new();
-        for matched in hooks {
+        for (index, matched) in hooks.iter().enumerate() {
+            notify(Progress::Started(index));
             let result = run_hook(matched, input, output)?;
+            notify(Progress::Finished(index, &result));
             let failed = !result.success;
             results.push(result);
             if failed {
@@ -101,10 +126,14 @@ pub fn run_all(
     std::thread::scope(|scope| {
         let handles: Vec<_> = hooks
             .iter()
-            .map(|matched| {
+            .enumerate()
+            .map(|(index, matched)| {
                 let print_lock = &print_lock;
+                let notify = &notify;
                 scope.spawn(move || {
+                    notify(Progress::Started(index));
                     let result = run_hook(matched, input, Output::Capture)?;
+                    notify(Progress::Finished(index, &result));
                     if output == Output::Inherit {
                         let _guard = print_lock.lock().unwrap();
                         print_result(&result);
@@ -130,6 +159,7 @@ pub fn run_trigger(
     trigger: Trigger,
     input: &HookInput,
     output: Output,
+    on_progress: Option<OnProgress>,
 ) -> Result<Vec<HookResult>, GoatHookerError> {
     let parallel = configs.first().and_then(|c| c.parallel).unwrap_or(false);
     let matcher = Matcher::new(configs)?;
@@ -147,7 +177,7 @@ pub fn run_trigger(
         None
     };
 
-    let results = run_all(&hooks, input, parallel, output)?;
+    let results = run_all(&hooks, input, parallel, output, on_progress)?;
 
     // Re-stage les fichiers corrigés (formateurs) avant de remettre les modifs non stagées
     let files_to_stage: Vec<PathBuf> = results
@@ -262,6 +292,12 @@ fn execute_command(
         .args(&input.args)
         .current_dir(dir)
         .env("HOOKER_FILES", files_env.join("\n"))
+        .envs(
+            (input.force_color && output == Output::Capture)
+                .then_some([("FORCE_COLOR", "1"), ("CLICOLOR_FORCE", "1")])
+                .into_iter()
+                .flatten(),
+        )
         .stdin(if input.stdin.is_some() {
             Stdio::piped()
         } else if output == Output::Capture {
@@ -318,6 +354,7 @@ mod tests {
         HookInput {
             args: args.iter().map(|a| a.to_string()).collect(),
             stdin: stdin.map(String::from),
+            force_color: false,
         }
     }
 
@@ -443,7 +480,7 @@ mod tests {
             .collect();
 
         let start = std::time::Instant::now();
-        let results = run_all(&matched, &input(&[], None), true, Output::Capture).unwrap();
+        let results = run_all(&matched, &input(&[], None), true, Output::Capture, None).unwrap();
         assert!(
             start.elapsed().as_millis() < 550,
             "hooks didn't run in parallel"
@@ -468,7 +505,7 @@ mod tests {
             })
             .collect();
 
-        let results = run_all(&matched, &input(&[], None), false, Output::Capture).unwrap();
+        let results = run_all(&matched, &input(&[], None), false, Output::Capture, None).unwrap();
         assert_eq!(results.len(), 1);
     }
 
@@ -486,5 +523,67 @@ mod tests {
 
         let result = run_hook(&matched, &input(&[], None), Output::Capture).unwrap();
         assert_eq!(result.files_to_stage, vec![dir.path().join("a.rs")]);
+    }
+
+    #[test]
+    fn report_progress() {
+        let dir = tempdir().unwrap();
+        let hooks = [
+            hook("a", "true"),
+            hook("b", "exit 1"),
+            hook("never", "true"),
+        ];
+        let matched: Vec<MatchedHook> = hooks
+            .iter()
+            .map(|h| MatchedHook {
+                hook: h,
+                base_dir: dir.path().to_path_buf(),
+                files: vec![],
+            })
+            .collect();
+
+        let events = Mutex::new(Vec::new());
+        let on_progress = |progress: Progress| {
+            events.lock().unwrap().push(match progress {
+                Progress::Planned(hooks) => format!("planned {}", hooks.len()),
+                Progress::Started(i) => format!("started {i}"),
+                Progress::Finished(i, r) => format!("finished {i} {}", r.success),
+            });
+        };
+        run_all(
+            &matched,
+            &input(&[], None),
+            false,
+            Output::Capture,
+            Some(&on_progress),
+        )
+        .unwrap();
+
+        assert_eq!(
+            events.into_inner().unwrap(),
+            vec![
+                "planned 3",
+                "started 0",
+                "finished 0 true",
+                "started 1",
+                "finished 1 false"
+            ]
+        );
+    }
+
+    #[test]
+    fn force_color_env() {
+        let dir = tempdir().unwrap();
+        let mut colored = input(&[], None);
+        colored.force_color = true;
+        let res = execute_command(
+            r#"echo "$FORCE_COLOR""#,
+            dir.path(),
+            &colored,
+            &[],
+            Output::Capture,
+        )
+        .unwrap();
+        assert_eq!(res.output, "1\n");
     }
 }

@@ -160,6 +160,7 @@ impl Repo {
             trigger,
             &HookInput::default(),
             Output::Capture,
+            None,
         )
     }
 

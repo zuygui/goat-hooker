@@ -201,7 +201,7 @@ impl Hook {
         self.path.is_some()
     }
 
-    fn validate(&self) -> Result<(), GoatHookerError> {
+    pub fn validate(&self) -> Result<(), GoatHookerError> {
         let invalid = |reason: &str| GoatHookerError::InvalidHook {
             name: self.name.clone(),
             reason: reason.to_string(),
