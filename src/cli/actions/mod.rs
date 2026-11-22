@@ -1,4 +1,5 @@
 pub mod add;
+pub mod ci;
 pub mod generator;
 pub mod import;
 pub mod init;

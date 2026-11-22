@@ -166,6 +166,22 @@ pub enum AppCommands {
         reset: Option<String>,
     },
 
+    /// Run the hooks on the files changed by a pull request or a push (CI)
+    #[command()]
+    Ci {
+        /// Git hook whose hooks run
+        #[arg(short, long, value_enum, default_value = "pre-commit")]
+        trigger: Trigger,
+
+        /// Commit or branch to compare with (default: the base of the pull request, or origin/HEAD)
+        #[arg(long)]
+        base: Option<String>,
+
+        /// Show the output of every hook
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
     /// Forget the results of the hooks that passed (they all run again)
     #[command(name = "cache-clear")]
     CacheClear,

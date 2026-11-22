@@ -82,6 +82,8 @@ hooker run pre-commit --dry-run   # show the hooks that would run, and on which 
 hooker list        # list the configurations and their hooks
 hooker update      # update the hooks loaded from git repositories
 hooker search rust # find hooks shared on GitHub and add them
+hooker ci          # run the hooks on the files changed by a pull request (CI)
+hooker cache-clear # forget the results of the hooks that passed
 hooker trust       # review and trust the hooks loaded from other repositories
 hooker vars        # variables shared between hooks: value, writers, readers
 hooker import      # convert a husky / lint-staged, lefthook or pre-commit config
@@ -292,6 +294,30 @@ Add `share` to the root `hooker.config.json` of a repository: `hooker search` (a
 ```
 
 A hooks file can have a `description`. GitHub's code search needs a token: `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth login`. `HOOKER_HUB_REPOS=owner/name,owner/other@branch` adds repositories the search can't find (private ones, branches).
+
+## CI 🤖
+
+`hooker ci` runs the hooks of a trigger (`--trigger`, `pre-commit` by default) on the files changed since a base commit (`--base`, by default the base of the pull request or `origin/HEAD`). Nothing is staged: a formatter that changes a file fails, the file should have been fixed before the commit. Hooks of other repositories are trusted, since the CI runs the code of the repository anyway.
+
+On GitHub, use the action (it installs `hooker` from the releases and annotates the failed hooks):
+
+```yaml
+on: [pull_request, push]
+jobs:
+  hooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: zuygui/goat-hooker@main
+        with:
+          trigger: pre-commit # default
+```
+
+## Cache ⚡
+
+A hook that already passed with the same files (their content), commands, inputs and variables isn't run again: its output, outputs and variables are replayed. Hooks with `include` are cached by default, `"cache": true` / `false` chooses for a hook. Formatters are cached on the fixed files, so unformatted files always go through them. `hooker run --no-cache` runs everything, `hooker cache-clear` forgets the results.
 
 ## Variables 🔤
 

@@ -63,6 +63,11 @@ pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
         }
         AppCommands::Trust { all } => actions::trust::trust_hooks(all),
         AppCommands::Vars { reset } => actions::vars::variables(reset),
+        AppCommands::Ci {
+            trigger,
+            base,
+            verbose,
+        } => actions::ci::run_ci(trigger, base, verbose),
         AppCommands::CacheClear => {
             goat_hooker::cache::clear(&cli_root()?)?;
             println!("✔ Cache cleared");

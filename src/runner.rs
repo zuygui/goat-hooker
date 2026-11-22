@@ -119,6 +119,9 @@ pub struct HookInput {
     pub force_color: bool,
     /// Runs every hook, even the ones that passed with the same files
     pub no_cache: bool,
+    /// CI: the hooks run on these files (changed since the base), nothing is put aside or
+    /// staged, and a hook modifying files fails (they should have been fixed before the commit)
+    pub ci_files: Option<Vec<PathBuf>>,
 }
 
 /// Avancement d'un lancement (pour afficher des spinners)
@@ -468,14 +471,17 @@ pub fn run_trigger(
     let parallel = configs.first().and_then(|c| c.parallel).unwrap_or(false);
     let matcher = Matcher::new(configs)?;
 
-    let files = changed_files(trigger, root, input)?;
+    let files = match input.ci_files.as_ref() {
+        Some(files) => Some(files.clone()),
+        None => changed_files(trigger, root, input)?,
+    };
     let hooks = matcher.hooks_to_run(trigger, files.as_deref());
     if hooks.is_empty() {
         return Ok(vec![]);
     }
 
     // Les hooks du pre-commit doivent voir exactement ce qui va être commité
-    let mut stash = if trigger == Trigger::PreCommit {
+    let mut stash = if trigger == Trigger::PreCommit && input.ci_files.is_none() {
         UnstagedStash::save(root)?
     } else {
         None
@@ -501,7 +507,9 @@ pub fn run_trigger(
         .filter(|r| r.success)
         .flat_map(|r| r.files_to_stage.clone())
         .collect();
-    git::add(root, &files_to_stage)?;
+    if input.ci_files.is_none() {
+        git::add(root, &files_to_stage)?;
+    }
 
     if let Some(stash) = stash.as_mut() {
         stash.restore()?;
@@ -616,8 +624,10 @@ fn run_node(
         });
     }
 
-    // Read-only files: kept to check (and revert) them after the hook
-    let protected: Vec<(PathBuf, Vec<u8>)> = if granted.files == FileAccess::Read {
+    // Read-only files: kept to check (and revert) them after the hook. In CI, every hook:
+    // a formatter changing files means they weren't fixed before the commit
+    let ci = input.ci_files.is_some();
+    let protected: Vec<(PathBuf, Vec<u8>)> = if granted.files == FileAccess::Read || ci {
         node.files
             .iter()
             .map(|f| node.base_dir.join(f))
@@ -679,10 +689,20 @@ fn run_node(
     for (file, content) in &protected {
         if std::fs::read(file).ok().as_ref() != Some(content) {
             let _ = std::fs::write(file, content);
-            denied.push(format!(
-                "modified {} without the permission to modify files, the change was reverted",
-                file.strip_prefix(&node.base_dir).unwrap_or(file).display()
-            ));
+            let relative = file.strip_prefix(&node.base_dir).unwrap_or(file).display();
+            if ci && granted.files == FileAccess::Write {
+                // Not a permission issue: the committed file isn't fixed
+                result.success = false;
+                result.commands.push(CommandResult {
+                    cmd: "ci".to_string(),
+                    success: false,
+                    output: format!("{relative} isn't fixed: run the hooks before committing\n"),
+                });
+            } else {
+                denied.push(format!(
+                    "modified {relative} without the permission to modify files, the change was reverted"
+                ));
+            }
         }
     }
     // Its variables are kept only if it passed and did nothing it may not do
@@ -952,6 +972,7 @@ mod tests {
             stdin: stdin.map(String::from),
             force_color: false,
             no_cache: false,
+            ci_files: None,
         }
     }
 

@@ -1,0 +1,65 @@
+name: goat-hooker
+description: Run the goat-hooker hooks on the files changed by a pull request or a push
+author: Zuygui
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  version:
+    description: Version of goat-hooker (`latest` or `0.3.0`)
+    default: latest
+  trigger:
+    description: Git hook whose hooks run
+    default: pre-commit
+  base:
+    description: Commit or branch to compare with (default: the base of the pull request, or the commit before the push)
+    default: ''
+  verbose:
+    description: Show the output of every hook
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Install goat-hooker
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        case "${RUNNER_OS}-${RUNNER_ARCH}" in
+          Linux-X64) target=x86_64-unknown-linux-gnu; ext=tar.gz ;;
+          macOS-ARM64) target=aarch64-apple-darwin; ext=tar.gz ;;
+          macOS-X64) target=x86_64-apple-darwin; ext=tar.gz ;;
+          Windows-X64) target=x86_64-pc-windows-msvc; ext=zip ;;
+          *) echo "::error::goat-hooker has no build for ${RUNNER_OS} ${RUNNER_ARCH}"; exit 1 ;;
+        esac
+        if [ "$VERSION" = latest ]; then
+          tag=$(gh release view --repo zuygui/goat-hooker --json tagName --jq .tagName)
+        else
+          tag="v${VERSION#v}"
+        fi
+        dir="$RUNNER_TEMP/goat-hooker"
+        mkdir -p "$dir"
+        gh release download "$tag" --repo zuygui/goat-hooker \
+          --pattern "hooker-$tag-$target.$ext" --dir "$dir" --clobber
+        if [ "$ext" = zip ]; then
+          (cd "$dir" && 7z x -y "hooker-$tag-$target.zip" > /dev/null)
+        else
+          tar -xzf "$dir/hooker-$tag-$target.tar.gz" -C "$dir"
+        fi
+        echo "$dir/hooker-$tag-$target" >> "$GITHUB_PATH"
+
+    - name: Run the hooks
+      shell: bash
+      env:
+        TRIGGER: ${{ inputs.trigger }}
+        BASE: ${{ inputs.base || github.event.pull_request.base.sha || github.event.before }}
+        VERBOSE: ${{ inputs.verbose }}
+      run: |
+        args=(ci --trigger "$TRIGGER")
+        if [ -n "$BASE" ]; then args+=(--base "$BASE"); fi
+        if [ "$VERBOSE" = true ]; then args+=(--verbose); fi
+        hooker "${args[@]}"

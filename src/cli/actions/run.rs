@@ -78,6 +78,7 @@ pub fn run_hooks(
         stdin: read_stdin(trigger)?,
         force_color: std::io::stderr().is_terminal(),
         no_cache,
+        ci_files: None,
     };
 
     if dry_run {
@@ -149,7 +150,7 @@ fn hook_line(glyph: &str, name: &str, width: usize, project: &str, extra: &str) 
 }
 
 /// Affiche l'avancement : un spinner par hook dans un terminal, une ligne par hook sinon
-struct Reporter {
+pub(crate) struct Reporter {
     trigger: Trigger,
     root: PathBuf,
     multi: MultiProgress,
@@ -158,7 +159,7 @@ struct Reporter {
 }
 
 #[derive(Default)]
-struct ReporterState {
+pub(crate) struct ReporterState {
     bars: Vec<ProgressBar>,
     labels: Vec<(String, String)>,
     /// Nœuds attendus par chaque nœud (`← codegen`)
@@ -168,7 +169,7 @@ struct ReporterState {
 }
 
 impl Reporter {
-    fn new(trigger: Trigger, root: &Path) -> Self {
+    pub(crate) fn new(trigger: Trigger, root: &Path) -> Self {
         let interactive = std::io::stderr().is_terminal();
         let multi = MultiProgress::with_draw_target(if interactive {
             ProgressDrawTarget::stderr()
@@ -184,7 +185,7 @@ impl Reporter {
         }
     }
 
-    fn on_progress(&self, progress: Progress) {
+    pub(crate) fn on_progress(&self, progress: Progress) {
         let mut state = self.state.lock().unwrap();
         match progress {
             Progress::Planned(graph) => self.plan(&mut state, graph),
@@ -294,7 +295,7 @@ impl Reporter {
     }
 
     /// Consomme le reporter : les spinners ne doivent plus redessiner par-dessus la suite.
-    fn finish(self) {
+    pub(crate) fn finish(self) {
         let state = self.state.into_inner().unwrap();
         let had_bars = !state.bars.is_empty();
         drop(state.bars);
@@ -307,7 +308,7 @@ impl Reporter {
 }
 
 /// Sortie des hooks en échec (de tous avec `--verbose`)
-fn print_outputs(results: &[HookResult], root: &Path, verbose: bool) {
+pub(crate) fn print_outputs(results: &[HookResult], root: &Path, verbose: bool) {
     for result in results
         .iter()
         .filter(|r| !r.skipped && (verbose || !r.success))
@@ -329,7 +330,7 @@ fn print_outputs(results: &[HookResult], root: &Path, verbose: bool) {
     }
 }
 
-fn print_summary(results: &[HookResult], elapsed: Duration) {
+pub(crate) fn print_summary(results: &[HookResult], elapsed: Duration) {
     let denied = results.iter().filter(|r| r.denied).count();
     let failed = results.iter().filter(|r| r.failed()).count() - denied;
     let skipped = results.iter().filter(|r| r.skipped).count();
