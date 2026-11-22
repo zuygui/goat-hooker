@@ -43,6 +43,9 @@ binaries = [{ path = "goat-hooker-gui", main = true }, { path = "hooker" }]
 
 [package.metadata.packager.macos]
 minimum-system-version = "11.0"
+# Signature ad hoc : sans compte Apple Developer, macOS propose « Ouvrir quand même »
+# au lieu de dire que l'app est endommagée
+signing-identity = "-"
 
 [package.metadata.packager.nsis]
 installer-icon = "packaging/icon.ico"
