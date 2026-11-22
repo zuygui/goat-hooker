@@ -3,6 +3,7 @@
 pub mod config;
 pub mod errors;
 pub mod git;
+pub mod install;
 pub mod matcher;
 pub mod remote;
 pub mod runner;

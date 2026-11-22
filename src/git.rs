@@ -243,6 +243,12 @@ pub fn repo_root(dir: &Path) -> Result<PathBuf, GoatHookerError> {
     Ok(PathBuf::from(root.trim()))
 }
 
+/// Branche courante (`None` en HEAD détaché)
+pub fn current_branch(dir: &Path) -> Option<String> {
+    let branch = git(dir, &["symbolic-ref", "--quiet", "--short", "HEAD"]).ok()?;
+    Some(branch.trim().to_string()).filter(|b| !b.is_empty())
+}
+
 /// Dossier des hooks (gère `core.hooksPath` et les worktrees)
 pub fn hooks_dir(dir: &Path) -> Result<PathBuf, GoatHookerError> {
     let hooks = git(dir, &["rev-parse", "--git-path", "hooks"])?;

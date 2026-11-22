@@ -8,9 +8,9 @@ use colored::Colorize;
 use goat_hooker::{
     config::{ConfigLoader, HOOK_CONFIG_FILENAME, Trigger},
     errors::GoatHookerError,
-    git::{self, UnstagedStash},
+    git,
     matcher::{MatchedHook, Matcher},
-    runner::{self, HookInput},
+    runner::{self, HookInput, Output},
 };
 
 /// Config explicite, sinon celle à la racine du dépôt (`None` si elle n'existe pas)
@@ -51,8 +51,6 @@ pub fn run_hooks(
     };
 
     let configs = ConfigLoader::new().load_recursive(&config_path)?;
-    let parallel = configs.first().and_then(|c| c.parallel).unwrap_or(false);
-    let matcher = Matcher::new(&configs)?;
 
     // Git donne au pre-push les refs poussées sur stdin.
     // On le lit pour filtrer les hooks, puis on le redonne à chaque commande.
@@ -61,40 +59,27 @@ pub fn run_hooks(
         stdin: read_stdin(trigger)?,
     };
 
-    let files = runner::changed_files(trigger, &root, &input)?;
-    let hooks = matcher.hooks_to_run(trigger, files.as_deref());
-    if hooks.is_empty() {
+    if dry_run {
+        let matcher = Matcher::new(&configs)?;
+        let files = runner::changed_files(trigger, &root, &input)?;
+        let hooks = matcher.hooks_to_run(trigger, files.as_deref());
+        if hooks.is_empty() {
+            println!(
+                "{}",
+                format!("🐐 No {} hooks to run", trigger.as_str()).dimmed()
+            );
+        }
+        print_dry_run(&hooks, &root);
+        return Ok(());
+    }
+
+    let results = runner::run_trigger(&root, &configs, trigger, &input, Output::Inherit)?;
+    if results.is_empty() {
         println!(
             "{}",
             format!("🐐 No {} hooks to run", trigger.as_str()).dimmed()
         );
         return Ok(());
-    }
-
-    if dry_run {
-        print_dry_run(&hooks, &root);
-        return Ok(());
-    }
-
-    // Les hooks du pre-commit doivent voir exactement ce qui va être commité
-    let mut stash = if trigger == Trigger::PreCommit {
-        UnstagedStash::save(&root)?
-    } else {
-        None
-    };
-
-    let results = runner::run_all(&hooks, &input, parallel)?;
-
-    // Re-stage les fichiers corrigés (formateurs) avant de remettre les modifs non stagées
-    let files_to_stage: Vec<PathBuf> = results
-        .iter()
-        .filter(|r| r.success)
-        .flat_map(|r| r.files_to_stage.clone())
-        .collect();
-    git::add(&root, &files_to_stage)?;
-
-    if let Some(stash) = stash.as_mut() {
-        stash.restore()?;
     }
 
     let failed: Vec<&str> = results

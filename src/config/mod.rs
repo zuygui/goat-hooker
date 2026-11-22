@@ -774,8 +774,10 @@ mod tests {
 
     #[test]
     fn schema_file_is_up_to_date() {
-        let expected = json_schema();
-        let current = include_str!("../../schema.json");
+        // Comparé comme JSON : l'ordre des clés dépend des features de schemars
+        let expected: serde_json::Value = serde_json::from_str(&json_schema()).unwrap();
+        let current: serde_json::Value =
+            serde_json::from_str(include_str!("../../schema.json")).unwrap();
         assert_eq!(
             current, expected,
             "schema.json is outdated, run `cargo run -- schema > schema.json`"

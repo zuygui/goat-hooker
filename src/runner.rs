@@ -3,11 +3,17 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Mutex,
+    time::{Duration, Instant},
 };
 
 use colored::Colorize;
 
-use crate::{config::Trigger, errors::GoatHookerError, git, matcher::MatchedHook};
+use crate::{
+    config::{Config, Trigger},
+    errors::GoatHookerError,
+    git::{self, UnstagedStash},
+    matcher::{MatchedHook, Matcher},
+};
 
 /// Remplacé dans les commandes par les fichiers concernés (échappés pour le shell)
 pub const FILES_PLACEHOLDER: &str = "{files}";
@@ -41,7 +47,10 @@ pub struct CommandResult {
 #[derive(Debug, Clone)]
 pub struct HookResult {
     pub name: String,
+    /// Dossier du projet du hook
+    pub base_dir: PathBuf,
     pub success: bool,
+    pub duration: Duration,
     pub commands: Vec<CommandResult>,
     /// Fichiers à re-stager (`stage_fixed`), en chemins absolus
     pub files_to_stage: Vec<PathBuf>,
@@ -67,15 +76,17 @@ pub fn changed_files(
 
 /// Lance les hooks, en parallèle ou les uns après les autres.
 /// En séquentiel, on s'arrête au premier hook qui échoue.
+/// En parallèle avec `Output::Inherit`, chaque hook est affiché quand il a fini.
 pub fn run_all(
     hooks: &[MatchedHook],
     input: &HookInput,
     parallel: bool,
+    output: Output,
 ) -> Result<Vec<HookResult>, GoatHookerError> {
     if !parallel {
         let mut results = Vec::new();
         for matched in hooks {
-            let result = run_hook(matched, input, Output::Inherit)?;
+            let result = run_hook(matched, input, output)?;
             let failed = !result.success;
             results.push(result);
             if failed {
@@ -94,8 +105,10 @@ pub fn run_all(
                 let print_lock = &print_lock;
                 scope.spawn(move || {
                     let result = run_hook(matched, input, Output::Capture)?;
-                    let _guard = print_lock.lock().unwrap();
-                    print_result(&result);
+                    if output == Output::Inherit {
+                        let _guard = print_lock.lock().unwrap();
+                        print_result(&result);
+                    }
                     Ok(result)
                 })
             })
@@ -106,6 +119,49 @@ pub fn run_all(
             .map(|handle| handle.join().expect("hook thread panicked"))
             .collect()
     })
+}
+
+/// Lance tous les hooks d'un trigger, comme le ferait Git :
+/// filtre sur les fichiers, met de côté les modifs non stagées (pre-commit),
+/// re-stage les fichiers corrigés (`stage_fixed`).
+pub fn run_trigger(
+    root: &Path,
+    configs: &[Config],
+    trigger: Trigger,
+    input: &HookInput,
+    output: Output,
+) -> Result<Vec<HookResult>, GoatHookerError> {
+    let parallel = configs.first().and_then(|c| c.parallel).unwrap_or(false);
+    let matcher = Matcher::new(configs)?;
+
+    let files = changed_files(trigger, root, input)?;
+    let hooks = matcher.hooks_to_run(trigger, files.as_deref());
+    if hooks.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Les hooks du pre-commit doivent voir exactement ce qui va être commité
+    let mut stash = if trigger == Trigger::PreCommit {
+        UnstagedStash::save(root)?
+    } else {
+        None
+    };
+
+    let results = run_all(&hooks, input, parallel, output)?;
+
+    // Re-stage les fichiers corrigés (formateurs) avant de remettre les modifs non stagées
+    let files_to_stage: Vec<PathBuf> = results
+        .iter()
+        .filter(|r| r.success)
+        .flat_map(|r| r.files_to_stage.clone())
+        .collect();
+    git::add(root, &files_to_stage)?;
+
+    if let Some(stash) = stash.as_mut() {
+        stash.restore()?;
+    }
+
+    Ok(results)
 }
 
 /// Affiche le résultat d'un hook lancé en mode `Capture`
@@ -133,9 +189,12 @@ pub fn run_hook(
         println!("{}", format!("🐐 Running hook `{}`", hook.name).bold());
     }
 
+    let start = Instant::now();
     let mut result = HookResult {
         name: hook.name.clone(),
+        base_dir: matched.base_dir.clone(),
         success: true,
+        duration: Duration::ZERO,
         commands: vec![],
         files_to_stage: vec![],
     };
@@ -146,9 +205,11 @@ pub fn run_hook(
         result.commands.push(cmd_result);
         if failed {
             result.success = false;
+            result.duration = start.elapsed();
             return Ok(result);
         }
     }
+    result.duration = start.elapsed();
 
     if hook.stage_fixed.unwrap_or(false) {
         result.files_to_stage = matched
@@ -382,7 +443,7 @@ mod tests {
             .collect();
 
         let start = std::time::Instant::now();
-        let results = run_all(&matched, &input(&[], None), true).unwrap();
+        let results = run_all(&matched, &input(&[], None), true, Output::Capture).unwrap();
         assert!(
             start.elapsed().as_millis() < 550,
             "hooks didn't run in parallel"
@@ -407,7 +468,7 @@ mod tests {
             })
             .collect();
 
-        let results = run_all(&matched, &input(&[], None), false).unwrap();
+        let results = run_all(&matched, &input(&[], None), false, Output::Capture).unwrap();
         assert_eq!(results.len(), 1);
     }
 
