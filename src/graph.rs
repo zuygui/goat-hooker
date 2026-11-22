@@ -378,16 +378,16 @@ impl Resolver<'_, '_> {
         };
 
         // Depuis une étape, `types` désigne d'abord une étape sœur
-        if step.is_some() && !reference.contains([':', '/']) {
-            if let Some(position) = entry
+        if step.is_some()
+            && !reference.contains([':', '/'])
+            && let Some(position) = entry
                 .hook
                 .steps
                 .iter()
                 .flatten()
                 .position(|s| s.id == hook_name)
-            {
-                return Ok(Target::Step(index, position));
-            }
+        {
+            return Ok(Target::Step(index, position));
         }
 
         let Some(target) = self

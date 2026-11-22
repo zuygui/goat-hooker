@@ -124,8 +124,9 @@ pub struct Hook {
     pub steps: Option<Vec<Step>>,
 }
 
-/// Une étape d'un hook (un nœud dans le graphe)
+// Une étape d'un hook (un nœud dans le graphe)
 #[derive(Debug, Default, Serialize, Deserialize, Clone, JsonSchema)]
+#[schemars(description = "A step of a hook: a node of the graph")]
 pub struct Step {
     #[schemars(description = "Step id, unique in the hook")]
     pub id: String,

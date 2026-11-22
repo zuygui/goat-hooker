@@ -93,9 +93,39 @@
             "type": "string"
           }
         },
+        "inputs": {
+          "description": "Values from other hooks, available as `{name}` and `$name` in commands: `{ \"name\": \"hook.output\" }` (outputs: files, stdout, status or a declared output)",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "name": {
           "description": "Hook name",
           "type": "string"
+        },
+        "needs": {
+          "description": "Hooks this one waits for: `name`, `name/step` or `project:name` (same trigger)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "outputs": {
+          "description": "Outputs this hook writes with `echo \"name=value\" >> $HOOKER_OUTPUT`",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
         },
         "path": {
           "description": "Hooks file to load, relative to the config folder (or to the root of `from`)",
@@ -118,6 +148,16 @@
             "null"
           ]
         },
+        "steps": {
+          "description": "Steps of this hook, each one can wait for the others",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Step"
+          }
+        },
         "trigger": {
           "description": "Git hook that runs this hook (not used with `path`)",
           "anyOf": [
@@ -132,6 +172,54 @@
       },
       "required": [
         "name"
+      ]
+    },
+    "Step": {
+      "description": "A step of a hook: a node of the graph",
+      "type": "object",
+      "properties": {
+        "cmd": {
+          "description": "Shell command of the step",
+          "type": "string"
+        },
+        "id": {
+          "description": "Step id, unique in the hook",
+          "type": "string"
+        },
+        "inputs": {
+          "description": "Values from other steps or hooks: `{ \"name\": \"step.output\" }`",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "needs": {
+          "description": "Steps (or hooks) this one waits for",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "outputs": {
+          "description": "Outputs this step writes to $HOOKER_OUTPUT",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "cmd"
       ]
     },
     "Trigger": {

@@ -1,8 +1,9 @@
 use std::{
+    collections::{BTreeMap, VecDeque},
     io::Write,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::{Command, Stdio},
-    sync::Mutex,
+    sync::{Mutex, mpsc},
     time::{Duration, Instant},
 };
 
@@ -12,6 +13,7 @@ use crate::{
     config::{Config, Trigger},
     errors::GoatHookerError,
     git::{self, UnstagedStash},
+    graph::{self, Graph, Node},
     matcher::{MatchedHook, Matcher},
 };
 
@@ -31,12 +33,20 @@ pub struct HookInput {
 
 /// Avancement d'un lancement (pour afficher des spinners)
 pub enum Progress<'a> {
-    /// Hooks qui vont tourner, dans l'ordre
-    Planned(&'a [MatchedHook<'a>]),
-    /// Le hook `index` démarre
+    /// Nœuds qui vont tourner, dans l'ordre du graphe
+    Planned(&'a Graph<'a>),
+    /// Le nœud `index` démarre
     Started(usize),
-    /// Le hook `index` est fini
+    /// Le nœud `index` est fini (ou passé, si une dépendance a échoué)
     Finished(usize, &'a HookResult),
+}
+
+/// Valeur reçue d'un autre nœud
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Value {
+    Text(String),
+    /// Une liste de fichiers (sortie `files`)
+    List(Vec<String>),
 }
 
 /// Reçoit l'avancement (peut être appelé depuis plusieurs threads)
@@ -59,16 +69,39 @@ pub struct CommandResult {
     pub output: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct HookResult {
+    /// Nom du hook (`hook › étape` pour une étape)
     pub name: String,
     /// Dossier du projet du hook
     pub base_dir: PathBuf,
     pub success: bool,
+    /// Pas lancé : un nœud attendu a échoué
+    pub skipped: bool,
     pub duration: Duration,
     pub commands: Vec<CommandResult>,
+    /// Fichiers ciblés, relatifs à `base_dir` (sortie `files`)
+    pub files: Vec<PathBuf>,
+    /// Sorties écrites dans `$HOOKER_OUTPUT`
+    pub outputs: BTreeMap<String, String>,
     /// Fichiers à re-stager (`stage_fixed`), en chemins absolus
     pub files_to_stage: Vec<PathBuf>,
+}
+
+impl HookResult {
+    pub fn failed(&self) -> bool {
+        !self.success && !self.skipped
+    }
+
+    /// Sortie `stdout` : la sortie de toutes les commandes
+    pub fn stdout(&self) -> String {
+        self.commands
+            .iter()
+            .map(|c| c.output.as_str())
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
 }
 
 /// Fichiers sur lesquels filtrer les hooks :
@@ -89,11 +122,40 @@ pub fn changed_files(
     }
 }
 
-/// Lance les hooks, en parallèle ou les uns après les autres.
-/// En séquentiel, on s'arrête au premier hook qui échoue.
-/// En parallèle avec `Output::Inherit`, chaque hook est affiché quand il a fini.
+/// Lance des hooks sans liens entre eux (voir `run_graph`)
 pub fn run_all(
     hooks: &[MatchedHook],
+    input: &HookInput,
+    parallel: bool,
+    output: Output,
+    on_progress: Option<OnProgress>,
+) -> Result<Vec<HookResult>, GoatHookerError> {
+    let graph = Graph {
+        nodes: hooks.iter().map(standalone_node).collect(),
+    };
+    run_graph(&graph, input, parallel, output, on_progress)
+}
+
+/// Nœud sans liens pour un hook seul
+fn standalone_node<'a>(matched: &MatchedHook<'a>) -> Node<'a> {
+    Node {
+        hook: matched.hook,
+        step: None,
+        project: String::new(),
+        base_dir: matched.base_dir.clone(),
+        files: matched.files.clone(),
+        needs: vec![],
+        inputs: vec![],
+        outputs: vec![],
+    }
+}
+
+/// Lance un graphe : chaque nœud démarre quand ceux qu'il attend ont réussi,
+/// avec leurs sorties en entrée. Si un nœud attendu échoue, le nœud est passé (`skipped`).
+/// En parallèle, tous les nœuds prêts tournent en même temps ; sinon un par un.
+/// En parallèle avec `Output::Inherit`, chaque nœud est affiché quand il a fini.
+pub fn run_graph(
+    graph: &Graph,
     input: &HookInput,
     parallel: bool,
     output: Output,
@@ -104,50 +166,156 @@ pub fn run_all(
             on_progress(progress);
         }
     };
-    notify(Progress::Planned(hooks));
+    notify(Progress::Planned(graph));
 
-    if !parallel {
-        let mut results = Vec::new();
-        for (index, matched) in hooks.iter().enumerate() {
-            notify(Progress::Started(index));
-            let result = run_hook(matched, input, output)?;
-            notify(Progress::Finished(index, &result));
-            let failed = !result.success;
-            results.push(result);
-            if failed {
-                break;
+    let count = graph.nodes.len();
+    let mut results: Vec<Option<HookResult>> = (0..count).map(|_| None).collect();
+    let mut remaining: Vec<usize> = graph.nodes.iter().map(|n| n.needs.len()).collect();
+    let mut dependents = vec![Vec::new(); count];
+    for (index, node) in graph.nodes.iter().enumerate() {
+        for &need in &node.needs {
+            dependents[need].push(index);
+        }
+    }
+    let mut ready: VecDeque<usize> = (0..count).filter(|&i| remaining[i] == 0).collect();
+
+    // Les nœuds qui attendaient `index` sont peut-être prêts
+    let release = |index: usize, remaining: &mut Vec<usize>, ready: &mut VecDeque<usize>| {
+        for &dependent in &dependents[index] {
+            remaining[dependent] -= 1;
+            if remaining[dependent] == 0 {
+                ready.push_back(dependent);
             }
         }
-        return Ok(results);
-    }
+    };
 
-    // Les sorties sont capturées puis affichées hook par hook, pour ne pas les mélanger
+    // En parallèle, les sorties sont capturées puis affichées nœud par nœud
+    let node_output = if parallel { Output::Capture } else { output };
     let print_lock = Mutex::new(());
-    std::thread::scope(|scope| {
-        let handles: Vec<_> = hooks
-            .iter()
-            .enumerate()
-            .map(|(index, matched)| {
-                let print_lock = &print_lock;
-                let notify = &notify;
-                scope.spawn(move || {
-                    notify(Progress::Started(index));
-                    let result = run_hook(matched, input, Output::Capture)?;
-                    notify(Progress::Finished(index, &result));
-                    if output == Output::Inherit {
-                        let _guard = print_lock.lock().unwrap();
-                        print_result(&result);
-                    }
-                    Ok(result)
-                })
-            })
-            .collect();
 
-        handles
-            .into_iter()
-            .map(|handle| handle.join().expect("hook thread panicked"))
-            .collect()
-    })
+    std::thread::scope(|scope| -> Result<(), GoatHookerError> {
+        let (sender, receiver) = mpsc::channel();
+        let mut running = 0;
+
+        loop {
+            while running == 0 || parallel {
+                let Some(index) = ready.pop_front() else {
+                    break;
+                };
+                let node = &graph.nodes[index];
+
+                if node
+                    .needs
+                    .iter()
+                    .any(|&need| results[need].as_ref().is_some_and(|r| !r.success))
+                {
+                    let result = HookResult {
+                        name: node.label(),
+                        base_dir: node.base_dir.clone(),
+                        skipped: true,
+                        files: node.files.clone(),
+                        ..Default::default()
+                    };
+                    notify(Progress::Finished(index, &result));
+                    results[index] = Some(result);
+                    release(index, &mut remaining, &mut ready);
+                    continue;
+                }
+
+                let values = input_values(node, &results, graph);
+                notify(Progress::Started(index));
+                running += 1;
+                let sender = sender.clone();
+                scope.spawn(move || {
+                    let result = run_node(node, input, &values, node_output);
+                    let _ = sender.send((index, result));
+                });
+            }
+
+            if running == 0 {
+                break;
+            }
+            let (index, result) = receiver.recv().expect("hook thread stopped");
+            running -= 1;
+            let result = result?;
+
+            if parallel && output == Output::Inherit {
+                let _guard = print_lock.lock().unwrap();
+                print_result(&result);
+            }
+            notify(Progress::Finished(index, &result));
+            results[index] = Some(result);
+            release(index, &mut remaining, &mut ready);
+        }
+        Ok(())
+    })?;
+
+    Ok(results.into_iter().flatten().collect())
+}
+
+/// Valeurs des entrées d'un nœud, d'après les résultats des nœuds qu'il attend
+fn input_values(
+    node: &Node,
+    results: &[Option<HookResult>],
+    graph: &Graph,
+) -> Vec<(String, Value)> {
+    node.inputs
+        .iter()
+        .map(|input| {
+            let source = results[input.node].as_ref();
+            let value = match input.output.as_str() {
+                "files" => {
+                    let from = &graph.nodes[input.node];
+                    Value::List(
+                        from.files
+                            .iter()
+                            .map(|f| {
+                                relative_to(&node.base_dir, &from.base_dir.join(f))
+                                    .to_string_lossy()
+                                    .to_string()
+                            })
+                            .collect(),
+                    )
+                }
+                "stdout" => Value::Text(source.map(|r| r.stdout()).unwrap_or_default()),
+                "status" => Value::Text(
+                    match source {
+                        Some(r) if r.success => "success",
+                        _ => "failure",
+                    }
+                    .to_string(),
+                ),
+                output => Value::Text(
+                    source
+                        .and_then(|r| r.outputs.get(output).cloned())
+                        .unwrap_or_default(),
+                ),
+            };
+            (input.name.clone(), value)
+        })
+        .collect()
+}
+
+/// Chemin de `path` vu depuis `dir` (`../api/src/lib.rs`)
+fn relative_to(dir: &Path, path: &Path) -> PathBuf {
+    let dir: Vec<Component> = dir.components().collect();
+    let path_components: Vec<Component> = path.components().collect();
+    let common = dir
+        .iter()
+        .zip(&path_components)
+        .take_while(|(a, b)| a == b)
+        .count();
+    if common == 0 {
+        return path.to_path_buf();
+    }
+    let mut relative = PathBuf::new();
+    for _ in common..dir.len() {
+        relative.push("..");
+    }
+    for component in &path_components[common..] {
+        relative.push(component);
+    }
+    relative
 }
 
 /// Lance tous les hooks d'un trigger, comme le ferait Git :
@@ -177,7 +345,8 @@ pub fn run_trigger(
         None
     };
 
-    let results = run_all(&hooks, input, parallel, output, on_progress)?;
+    let graph = graph::build(configs, trigger, &hooks)?;
+    let results = run_graph(&graph, input, parallel, output, on_progress)?;
 
     // Re-stage les fichiers corrigés (formateurs) avant de remettre les modifs non stagées
     let files_to_stage: Vec<PathBuf> = results
@@ -208,49 +377,94 @@ pub fn print_result(result: &HookResult) {
     }
 }
 
-/// Lance les commandes d'un hook depuis le dossier de son projet
+/// Lance les commandes d'un hook seul (sans ses dépendances) depuis le dossier de son projet
 pub fn run_hook(
     matched: &MatchedHook,
     input: &HookInput,
     output: Output,
 ) -> Result<HookResult, GoatHookerError> {
-    let hook = matched.hook;
+    run_node(&standalone_node(matched), input, &[], output)
+}
+
+/// Lance les commandes d'un nœud, avec les valeurs de ses entrées
+fn run_node(
+    node: &Node,
+    input: &HookInput,
+    values: &[(String, Value)],
+    output: Output,
+) -> Result<HookResult, GoatHookerError> {
     if output == Output::Inherit {
-        println!("{}", format!("🐐 Running hook `{}`", hook.name).bold());
+        println!("{}", format!("🐐 Running hook `{}`", node.label()).bold());
     }
+
+    // Les sorties du nœud sont écrites dans ce fichier (`echo "name=value" >> $HOOKER_OUTPUT`)
+    let output_file = std::env::temp_dir().join(format!(
+        "goat-hooker-{}-{}.out",
+        std::process::id(),
+        OUTPUT_FILES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::write(&output_file, "")?;
 
     let start = Instant::now();
     let mut result = HookResult {
-        name: hook.name.clone(),
-        base_dir: matched.base_dir.clone(),
+        name: node.label(),
+        base_dir: node.base_dir.clone(),
         success: true,
-        duration: Duration::ZERO,
-        commands: vec![],
-        files_to_stage: vec![],
+        files: node.files.clone(),
+        ..Default::default()
     };
 
-    for cmd in hook.commands() {
-        let cmd_result = execute_command(cmd, &matched.base_dir, input, &matched.files, output)?;
+    for cmd in node.commands() {
+        let cmd_result = execute_command(
+            cmd,
+            &node.base_dir,
+            input,
+            &node.files,
+            values,
+            Some(&output_file),
+            output,
+        );
+        let cmd_result = match cmd_result {
+            Ok(r) => r,
+            Err(err) => {
+                let _ = std::fs::remove_file(&output_file);
+                return Err(err);
+            }
+        };
         let failed = !cmd_result.success;
         result.commands.push(cmd_result);
         if failed {
             result.success = false;
-            result.duration = start.elapsed();
-            return Ok(result);
+            break;
         }
     }
     result.duration = start.elapsed();
+    result.outputs = parse_outputs(&std::fs::read_to_string(&output_file).unwrap_or_default());
+    let _ = std::fs::remove_file(&output_file);
 
-    if hook.stage_fixed.unwrap_or(false) {
-        result.files_to_stage = matched
+    if result.success && node.hook.stage_fixed.unwrap_or(false) {
+        result.files_to_stage = node
             .files
             .iter()
-            .map(|f| matched.base_dir.join(f))
+            .map(|f| node.base_dir.join(f))
             .filter(|f| f.exists())
             .collect();
     }
 
     Ok(result)
+}
+
+/// Numéro des fichiers de sortie (un par nœud lancé)
+static OUTPUT_FILES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Lit les lignes `name=value` de `$HOOKER_OUTPUT` (la dernière valeur gagne)
+fn parse_outputs(content: &str) -> BTreeMap<String, String> {
+    content
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(name, value)| (name.trim().to_string(), value.to_string()))
+        .filter(|(name, _)| !name.is_empty())
+        .collect()
 }
 
 /// Échappe un chemin pour le shell (`it's.rs` → `'it'\''s.rs'`)
@@ -262,11 +476,14 @@ fn shell_quote(path: &Path) -> String {
 /// - les arguments de Git sont passés en paramètres positionnels (`$1`, `$2`...)
 /// - `{files}` est remplacé par les fichiers concernés, aussi dispo dans `$HOOKER_FILES` (un par ligne)
 /// - stdin est redonné à la commande (refs du pre-push)
+#[allow(clippy::too_many_arguments)]
 fn execute_command(
     cmd: &str,
     dir: &Path,
     input: &HookInput,
     files: &[PathBuf],
+    values: &[(String, Value)],
+    output_file: Option<&Path>,
     output: Output,
 ) -> Result<CommandResult, GoatHookerError> {
     if output == Output::Inherit {
@@ -274,7 +491,30 @@ fn execute_command(
     }
 
     let quoted_files: Vec<String> = files.iter().map(|f| shell_quote(f)).collect();
-    let shell_cmd = cmd.replace(FILES_PLACEHOLDER, &quoted_files.join(" "));
+    let mut shell_cmd = cmd.replace(FILES_PLACEHOLDER, &quoted_files.join(" "));
+    // `{name}` : valeur d'une entrée, échappée pour le shell
+    for (name, value) in values {
+        let quoted = match value {
+            Value::Text(text) => shell_quote(Path::new(text)),
+            Value::List(items) => items
+                .iter()
+                .map(|i| shell_quote(Path::new(i)))
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
+        shell_cmd = shell_cmd.replace(&format!("{{{name}}}"), &quoted);
+    }
+    // `$name` : même valeur en variable d'environnement (une ligne par fichier)
+    let env_values: Vec<(String, String)> = values
+        .iter()
+        .map(|(name, value)| {
+            let value = match value {
+                Value::Text(text) => text.clone(),
+                Value::List(items) => items.join("\n"),
+            };
+            (name.clone(), value)
+        })
+        .collect();
     let files_env: Vec<String> = files
         .iter()
         .map(|f| f.to_string_lossy().to_string())
@@ -292,6 +532,8 @@ fn execute_command(
         .args(&input.args)
         .current_dir(dir)
         .env("HOOKER_FILES", files_env.join("\n"))
+        .envs(env_values)
+        .envs(output_file.map(|f| ("HOOKER_OUTPUT", f.as_os_str().to_owned())))
         .envs(
             (input.force_color && output == Output::Capture)
                 .then_some([("FORCE_COLOR", "1"), ("CLICOLOR_FORCE", "1")])
@@ -370,13 +612,23 @@ mod tests {
     #[test]
     fn command_status() {
         let dir = tempdir().unwrap();
-        let ok = execute_command("true", dir.path(), &input(&[], None), &[], Output::Inherit);
+        let ok = execute_command(
+            "true",
+            dir.path(),
+            &input(&[], None),
+            &[],
+            &[],
+            None,
+            Output::Inherit,
+        );
         assert!(ok.unwrap().success);
         let ko = execute_command(
             "exit 3",
             dir.path(),
             &input(&[], None),
             &[],
+            &[],
+            None,
             Output::Inherit,
         );
         assert!(!ko.unwrap().success);
@@ -390,6 +642,8 @@ mod tests {
             dir.path(),
             &input(&["MSG_FILE"], None),
             &[],
+            &[],
+            None,
             Output::Inherit,
         );
         assert!(res.unwrap().success);
@@ -407,6 +661,8 @@ mod tests {
             dir.path(),
             &input(&[], None),
             &files,
+            &[],
+            None,
             Output::Capture,
         )
         .unwrap();
@@ -417,6 +673,8 @@ mod tests {
             dir.path(),
             &input(&[], None),
             &files,
+            &[],
+            None,
             Output::Capture,
         )
         .unwrap();
@@ -431,6 +689,8 @@ mod tests {
             dir.path(),
             &input(&[], Some("refs/heads/main abc\n")),
             &[],
+            &[],
+            None,
             Output::Capture,
         )
         .unwrap();
@@ -443,6 +703,8 @@ mod tests {
             dir.path(),
             &input(&[], Some(&big)),
             &[],
+            &[],
+            None,
             Output::Capture,
         );
         assert!(res.unwrap().success);
@@ -456,6 +718,8 @@ mod tests {
             dir.path(),
             &input(&[], None),
             &[],
+            &[],
+            None,
             Output::Capture,
         )
         .unwrap();
@@ -493,9 +757,9 @@ mod tests {
     }
 
     #[test]
-    fn stop_at_first_failure_in_sequence() {
+    fn independent_hooks_still_run_after_a_failure() {
         let dir = tempdir().unwrap();
-        let hooks = [hook("fail", "exit 1"), hook("never", "true")];
+        let hooks = [hook("fail", "exit 1"), hook("other", "true")];
         let matched: Vec<MatchedHook> = hooks
             .iter()
             .map(|h| MatchedHook {
@@ -506,7 +770,9 @@ mod tests {
             .collect();
 
         let results = run_all(&matched, &input(&[], None), false, Output::Capture, None).unwrap();
-        assert_eq!(results.len(), 1);
+        assert_eq!(results.len(), 2);
+        assert!(results[0].failed());
+        assert!(results[1].success);
     }
 
     #[test]
@@ -545,7 +811,7 @@ mod tests {
         let events = Mutex::new(Vec::new());
         let on_progress = |progress: Progress| {
             events.lock().unwrap().push(match progress {
-                Progress::Planned(hooks) => format!("planned {}", hooks.len()),
+                Progress::Planned(graph) => format!("planned {}", graph.nodes.len()),
                 Progress::Started(i) => format!("started {i}"),
                 Progress::Finished(i, r) => format!("finished {i} {}", r.success),
             });
@@ -566,7 +832,9 @@ mod tests {
                 "started 0",
                 "finished 0 true",
                 "started 1",
-                "finished 1 false"
+                "finished 1 false",
+                "started 2",
+                "finished 2 true"
             ]
         );
     }
@@ -581,9 +849,129 @@ mod tests {
             dir.path(),
             &colored,
             &[],
+            &[],
+            None,
             Output::Capture,
         )
         .unwrap();
         assert_eq!(res.output, "1\n");
+    }
+
+    /// Graphe d'un monorepo de test, lancé sur tous les hooks pre-commit
+    fn run_configs(files: &[(&str, &str)], parallel: bool) -> (tempfile::TempDir, Vec<HookResult>) {
+        let dir = tempdir().unwrap();
+        for (folder, json) in files {
+            let path = dir.path().join(folder);
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(path.join("hooker.config.json"), json).unwrap();
+        }
+        let configs = crate::config::ConfigLoader::new()
+            .load_recursive(&dir.path().join("hooker.config.json"))
+            .unwrap();
+        let matcher = Matcher::new(&configs).unwrap();
+        let hooks = matcher.hooks_to_run(Trigger::PreCommit, None);
+        let graph = graph::build(&configs, Trigger::PreCommit, &hooks).unwrap();
+        let results =
+            run_graph(&graph, &input(&[], None), parallel, Output::Capture, None).unwrap();
+        (dir, results)
+    }
+
+    fn by_name<'r>(results: &'r [HookResult], name: &str) -> &'r HookResult {
+        results.iter().find(|r| r.name == name).unwrap()
+    }
+
+    #[test]
+    fn outputs_flow_to_inputs() {
+        for parallel in [false, true] {
+            let (_dir, results) = run_configs(
+                &[(
+                    ".",
+                    r#"{ "hooks": [
+                        { "name": "codegen", "trigger": "pre-commit", "outputs": ["schema"],
+                          "cmd": "echo generating; echo schema=gen/schema.ts >> $HOOKER_OUTPUT" },
+                        { "name": "lint", "trigger": "pre-commit", "steps": [
+                            { "id": "types", "inputs": { "schema": "codegen.schema", "log": "codegen.stdout", "ok": "codegen.status" },
+                              "cmd": "echo tsc {schema} \"$schema\" \"[$log]\" \"$ok\"" }
+                        ] }
+                    ] }"#,
+                )],
+                parallel,
+            );
+            let types = by_name(&results, "lint › types");
+            assert_eq!(
+                types.stdout(),
+                "tsc gen/schema.ts gen/schema.ts [generating] success"
+            );
+        }
+    }
+
+    #[test]
+    fn files_are_relative_to_the_consumer() {
+        let (dir, results) = run_configs(
+            &[
+                (".", r#"{ "imports": ["api", "web"], "hooks": [] }"#),
+                (
+                    "api",
+                    r#"{ "hooks": [ { "name": "codegen", "trigger": "pre-commit", "cmd": "true" } ] }"#,
+                ),
+                (
+                    "web",
+                    r#"{ "hooks": [ { "name": "lint", "trigger": "pre-commit",
+                        "inputs": { "generated": "api:codegen.files" }, "cmd": "for f in {generated}; do echo \"$f\"; done" } ] }"#,
+                ),
+            ],
+            false,
+        );
+        let _ = dir;
+        // sans fichiers stagés (`None`), `codegen` n'a pas de fichiers : la liste est vide
+        assert_eq!(by_name(&results, "lint").stdout(), "");
+        assert_eq!(
+            relative_to(Path::new("/repo/web"), Path::new("/repo/api/src/lib.rs")),
+            PathBuf::from("../api/src/lib.rs")
+        );
+    }
+
+    #[test]
+    fn failure_skips_the_dependents_only() {
+        let (_dir, results) = run_configs(
+            &[(
+                ".",
+                r#"{ "hooks": [
+                    { "name": "build", "trigger": "pre-commit", "cmd": "exit 1" },
+                    { "name": "test", "trigger": "pre-commit", "needs": ["build"], "cmd": "true" },
+                    { "name": "deploy", "trigger": "pre-commit", "needs": ["test"], "cmd": "true" },
+                    { "name": "lint", "trigger": "pre-commit", "cmd": "true" }
+                ] }"#,
+            )],
+            true,
+        );
+        assert!(by_name(&results, "build").failed());
+        assert!(by_name(&results, "test").skipped);
+        assert!(by_name(&results, "deploy").skipped);
+        assert!(by_name(&results, "lint").success);
+        assert_eq!(results.len(), 4);
+    }
+
+    #[test]
+    fn steps_wait_for_each_other() {
+        let (_dir, results) = run_configs(
+            &[(
+                ".",
+                r#"{ "hooks": [ { "name": "ci", "trigger": "pre-commit", "steps": [
+                    { "id": "second", "needs": ["first"], "cmd": "cat order.txt; echo second >> order.txt" },
+                    { "id": "first", "cmd": "sleep 0.2; echo first > order.txt" }
+                ] } ] }"#,
+            )],
+            true,
+        );
+        assert_eq!(by_name(&results, "ci › second").stdout(), "first");
+    }
+
+    #[test]
+    fn parse_output_file() {
+        let outputs = parse_outputs("a=1\nb=x=y\n\nnot an output\na=2\n");
+        assert_eq!(outputs.get("a").unwrap(), "2");
+        assert_eq!(outputs.get("b").unwrap(), "x=y");
+        assert_eq!(outputs.len(), 2);
     }
 }
