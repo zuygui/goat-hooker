@@ -101,6 +101,20 @@ Hooks show a spinner while running, then a summary. Only the output of the faile
 - run a hook, or the whole pre-commit, and read its output
 - add, edit and delete hooks without touching the JSON
 - install the Git hooks
+- **Graph** view: the hooks of a trigger as connected nodes, like in Blender
+  - nodes are laid out from the config (no positions to save): each node sits right of what it waits for
+  - drag from an output to a node to pass it as an input (`inputs`), or to its *waits for* row to add an order dependency (`needs`)
+  - `×` on a link removes it; cycles are refused
+  - run the trigger and see each node's result and duration
+  - edits are written to the `hooker.config.json` files, so the JSON stays the source of truth
+
+## Contributing 🤝
+
+goat-hooker runs its own hooks (see [`hooker.config.json`](hooker.config.json)): `rustfmt` and `clippy` on commit, the JSON schema regenerated when the config changes, a conventional commit message (release-plz builds the changelog from it) and the tests before a push.
+
+```sh
+cargo install --path . && hooker install
+```
 
 ## Configuration ⚙️
 
@@ -222,6 +236,28 @@ Hooks can be shared between projects in a hooks file (`{ "hooks": [...] }`), loa
 ```
 
 Loaded hooks run from the project that loads them. Repositories are cloned once, run `hooker update` to fetch their new version.
+
+A hooks file can declare `params`, used as `{{name}}` in its hooks, and set with `with` by the hook loading it. This makes reusable nodes:
+
+```json
+// eslint.json, in the repository acme/hooks
+{
+  "params": {
+    "files": { "description": "Files to lint" },
+    "config": { "default": ".eslintrc.json" }
+  },
+  "hooks": [
+    { "name": "eslint", "trigger": "pre-commit", "include": ["{{files}}"], "cmd": "eslint -c {{config}} {files}" }
+  ]
+}
+```
+
+```json
+{ "name": "lint", "from": "https://github.com/acme/hooks", "rev": "v1", "path": "eslint.json",
+  "with": { "files": ["src/**/*.ts", "src/**/*.tsx"] } }
+```
+
+`{{name}}` (two braces) is replaced when the config is loaded; `{files}` and the inputs (one brace) when the hook runs. A string that is exactly `{{name}}` takes the value as is, so a list fills an array.
 
 ## Thanks to all contributors 🧡
 <p align="center">

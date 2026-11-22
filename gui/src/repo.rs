@@ -128,7 +128,7 @@ impl Repo {
         Ok(skipped)
     }
 
-    fn load_configs(&self) -> Result<Vec<Config>, GoatHookerError> {
+    pub(crate) fn load_configs(&self) -> Result<Vec<Config>, GoatHookerError> {
         if !self.config_file().exists() {
             return Ok(vec![]);
         }

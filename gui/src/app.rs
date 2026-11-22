@@ -24,8 +24,10 @@ use goat_hooker::{
 };
 
 use crate::{
+    canvas::{CanvasEvent, GraphCanvas, NodeStatus},
     discover::{self, FoundRepo},
     editor::{EditorEvent, HookEditor},
+    graph_view::ViewNode,
     recents,
     repo::{PreviewItem, Project, Repo},
 };
@@ -50,6 +52,13 @@ struct HookRef {
 
 /// Clé d'un résultat : dossier du projet + nom du hook
 type RunKey = (PathBuf, String);
+
+/// Résultat du dernier lancement, dans la liste
+enum RunStatus {
+    Passed,
+    Failed,
+    Skipped,
+}
 
 /// Formulaire ouvert dans le panneau de détail
 struct OpenEditor {
@@ -76,6 +85,11 @@ pub struct HookerApp {
     /// Dépôts trouvés sur l'ordinateur (`None` pendant la recherche)
     found: Option<Vec<FoundRepo>>,
     show_all_found: bool,
+    /// Éditeur de nœuds à la place de la liste
+    graph_mode: bool,
+    graph: Entity<GraphCanvas>,
+    /// Le graphe doit être recalculé (config ou résultats changés)
+    graph_dirty: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -153,6 +167,12 @@ impl HookerApp {
             }
         });
 
+        let graph = cx.new(|_| GraphCanvas::new());
+        let graph_subscription = cx.subscribe(&graph, |this, _, event: &CanvasEvent, cx| {
+            this.on_canvas_event(event, cx);
+            cx.notify();
+        });
+
         let mut app = Self {
             repo: None,
             error: None,
@@ -168,7 +188,10 @@ impl HookerApp {
             recents: recents::load(),
             found: None,
             show_all_found: false,
-            _subscriptions: vec![subscription],
+            graph_mode: false,
+            graph,
+            graph_dirty: true,
+            _subscriptions: vec![subscription, graph_subscription],
         };
         if let Some(dir) = dir {
             app.open(dir);
@@ -197,6 +220,7 @@ impl HookerApp {
             }
         }
         self.refresh_preview();
+        self.graph_dirty = true;
     }
 
     fn reload(&mut self) {
@@ -205,6 +229,7 @@ impl HookerApp {
         };
         self.error = repo.reload().err().map(|e| e.to_string());
         self.refresh_preview();
+        self.graph_dirty = true;
     }
 
     fn refresh_preview(&mut self) {
@@ -221,6 +246,30 @@ impl HookerApp {
     fn run_key(&self, project: &Project, hook: &Hook) -> RunKey {
         let dir = project.dir();
         (dir.canonicalize().unwrap_or(dir), hook.name.clone())
+    }
+
+    /// Résultat d'un hook, ou de ses étapes réunies (`lint › eslint`, `lint › types`...)
+    fn last_status(&self, key: &RunKey) -> Option<RunStatus> {
+        let results: Vec<&HookResult> = match self.results.get(key) {
+            Some(result) => vec![result],
+            None => {
+                let prefix = format!("{} › ", key.1);
+                self.results
+                    .iter()
+                    .filter(|((dir, name), _)| *dir == key.0 && name.starts_with(&prefix))
+                    .map(|(_, result)| result)
+                    .collect()
+            }
+        };
+        if results.is_empty() {
+            None
+        } else if results.iter().any(|r| r.failed()) {
+            Some(RunStatus::Failed)
+        } else if results.iter().all(|r| r.skipped) {
+            Some(RunStatus::Skipped)
+        } else {
+            Some(RunStatus::Passed)
+        }
     }
 
     fn preview_for(&self, project: &Project, hook: &Hook) -> Option<&PreviewItem> {
@@ -536,6 +585,7 @@ impl HookerApp {
                 match result {
                     Ok(result) => {
                         this.results.insert(key, result);
+                        this.graph_dirty = true;
                     }
                     Err(err) => this.notice = Some((err.to_string(), false)),
                 }
@@ -548,32 +598,45 @@ impl HookerApp {
 
     /// Lance tout le pre-commit, comme `git commit`
     fn run_pre_commit(&mut self, cx: &mut Context<Self>) {
+        self.run_trigger(Trigger::PreCommit, cx);
+    }
+
+    /// Lance tous les hooks d'un trigger, dans l'ordre du graphe
+    fn run_trigger(&mut self, trigger: Trigger, cx: &mut Context<Self>) {
         let Some(repo) = self.repo.clone() else {
             return;
         };
         self.running_all = true;
+        self.graph_dirty = true;
         cx.notify();
 
         cx.spawn(async move |this, cx| {
             let results = cx
-                .background_spawn(async move { repo.run_trigger(Trigger::PreCommit) })
+                .background_spawn(async move { repo.run_trigger(trigger) })
                 .await;
             this.update(cx, |this, cx| {
                 this.running_all = false;
+                this.graph_dirty = true;
                 match results {
                     Ok(results) => {
-                        let failed = results.iter().filter(|r| !r.success).count();
+                        let failed = results.iter().filter(|r| r.failed()).count();
+                        let skipped = results.iter().filter(|r| r.skipped).count();
+                        let name = trigger.as_str();
                         this.notice = Some(if failed == 0 {
-                            (format!("pre-commit passed ({} hooks)", results.len()), true)
+                            (format!("{name} passed ({} hooks)", results.len()), true)
                         } else {
-                            (
-                                format!("pre-commit failed ({failed} of {} hooks)", results.len()),
-                                false,
-                            )
+                            let mut message = format!("{name} failed: {failed} failed");
+                            if skipped > 0 {
+                                message.push_str(&format!(", {skipped} skipped"));
+                            }
+                            (message, false)
                         });
                         for result in results {
-                            this.results
-                                .insert((result.base_dir.clone(), result.name.clone()), result);
+                            let dir = result
+                                .base_dir
+                                .canonicalize()
+                                .unwrap_or(result.base_dir.clone());
+                            this.results.insert((dir, result.name.clone()), result);
                         }
                     }
                     Err(err) => this.notice = Some((err.to_string(), false)),
@@ -584,6 +647,141 @@ impl HookerApp {
             .ok();
         })
         .detach();
+    }
+
+    // MARK: graphe
+
+    /// Triggers qui ont au moins un hook (dans l'ordre de `Trigger::ALL`)
+    fn graph_triggers(&self) -> Vec<Trigger> {
+        let Some(repo) = self.repo.as_ref() else {
+            return vec![];
+        };
+        let configs = repo.load_configs().unwrap_or_default();
+        Trigger::ALL
+            .iter()
+            .copied()
+            .filter(|trigger| {
+                configs
+                    .iter()
+                    .flat_map(|c| c.hooks.iter().flatten())
+                    .any(|h| h.trigger == Some(*trigger))
+            })
+            .collect()
+    }
+
+    fn refresh_graph(&mut self, cx: &mut Context<Self>) {
+        self.graph_dirty = false;
+        let Some(repo) = self.repo.as_ref() else {
+            return;
+        };
+        let triggers = self.graph_triggers();
+        let mut trigger = self.graph.read(cx).trigger;
+        if !triggers.contains(&trigger)
+            && let Some(first) = triggers.first()
+        {
+            trigger = *first;
+        }
+        let nodes = repo.graph_view(trigger).map_err(|e| e.to_string());
+        let statuses = self
+            .results
+            .iter()
+            .map(|(key, result)| {
+                (
+                    key.clone(),
+                    NodeStatus {
+                        success: result.success,
+                        skipped: result.skipped,
+                        duration: result.duration,
+                    },
+                )
+            })
+            .collect();
+        let running = self.running_all;
+        self.graph.update(cx, |graph, cx| {
+            graph.trigger = trigger;
+            graph.set_data(triggers, nodes, statuses, running, cx);
+        });
+    }
+
+    fn on_canvas_event(&mut self, event: &CanvasEvent, cx: &mut Context<Self>) {
+        let nodes: Vec<ViewNode> = self.graph.read(cx).nodes().to_vec();
+        let trigger = self.graph.read(cx).trigger;
+        let result = match event {
+            CanvasEvent::SetTrigger(trigger) => {
+                let trigger = *trigger;
+                self.graph.update(cx, |graph, _| graph.trigger = trigger);
+                Ok(())
+            }
+            CanvasEvent::Run(trigger) => {
+                self.run_trigger(*trigger, cx);
+                Ok(())
+            }
+            CanvasEvent::Select(index) => {
+                self.select_node(&nodes[*index], cx);
+                Ok(())
+            }
+            CanvasEvent::Link {
+                target,
+                source,
+                link,
+            } => self.repo.as_mut().map_or(Ok(()), |repo| {
+                repo.add_link(trigger, &nodes[*target], &nodes[*source], link.clone())
+            }),
+            CanvasEvent::RemoveNeed { target, source } => {
+                self.repo.as_mut().map_or(Ok(()), |repo| {
+                    repo.remove_need(trigger, &nodes[*target], &nodes[*source])
+                })
+            }
+            CanvasEvent::RemoveInput { target, name } => {
+                self.repo.as_mut().map_or(Ok(()), |repo| {
+                    repo.remove_input(trigger, &nodes[*target], name)
+                })
+            }
+        };
+        if let Err(err) = result {
+            self.notice = Some((err.to_string(), false));
+        } else if matches!(
+            event,
+            CanvasEvent::Link { .. }
+                | CanvasEvent::RemoveNeed { .. }
+                | CanvasEvent::RemoveInput { .. }
+        ) {
+            self.notice = None;
+        }
+        self.reload();
+    }
+
+    /// Ouvre le hook d'un nœud dans la vue liste
+    fn select_node(&mut self, node: &ViewNode, cx: &mut Context<Self>) {
+        let Some(repo) = self.repo.as_ref() else {
+            return;
+        };
+        let dir = node
+            .project_dir
+            .canonicalize()
+            .unwrap_or(node.project_dir.clone());
+        let found = repo.projects.iter().enumerate().find_map(|(p, project)| {
+            let project_dir = project.dir();
+            if project_dir.canonicalize().unwrap_or(project_dir) != dir {
+                return None;
+            }
+            let hooks = project.hooks();
+            hooks
+                .iter()
+                .position(|h| h.name == node.hook)
+                .or_else(|| hooks.iter().position(|h| h.is_import()))
+                .map(|h| HookRef {
+                    project: p,
+                    hook: h,
+                })
+        });
+        if let Some(hook_ref) = found {
+            self.graph_mode = false;
+            self.filter = Filter::All;
+            self.editor = None;
+            self.selected = Some(hook_ref);
+            cx.notify();
+        }
     }
 
     // MARK: rendu
@@ -620,6 +818,34 @@ impl HookerApp {
                 .child(
                     h_flex()
                         .gap_1()
+                        .when(
+                            self.repo.as_ref().is_some_and(|r| !r.projects.is_empty()),
+                            |this| {
+                                let list = Button::new("mode-list")
+                                    .xsmall()
+                                    .icon(lucide("list"))
+                                    .label("List")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.graph_mode = false;
+                                        cx.notify();
+                                    }));
+                                let graph = Button::new("mode-graph")
+                                    .xsmall()
+                                    .icon(lucide("workflow"))
+                                    .label("Graph")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.graph_mode = true;
+                                        this.graph_dirty = true;
+                                        cx.notify();
+                                    }));
+                                let (list, graph) = if self.graph_mode {
+                                    (list.ghost(), graph.primary())
+                                } else {
+                                    (list.primary(), graph.ghost())
+                                };
+                                this.child(list).child(graph).child(div().w_2())
+                            },
+                        )
                         .when(self.repo.is_some(), |this| {
                             this.child(
                                 Button::new("home")
@@ -838,16 +1064,16 @@ impl HookerApp {
                         .text_color(theme.muted_foreground),
                 )
             } else {
-                self.results.get(&key).map(|r| {
-                    if r.success {
-                        Icon::new(IconName::CircleCheck)
-                            .xsmall()
-                            .text_color(theme.success)
-                    } else {
-                        Icon::new(IconName::CircleX)
-                            .xsmall()
-                            .text_color(theme.danger)
-                    }
+                self.last_status(&key).map(|status| match status {
+                    RunStatus::Passed => Icon::new(IconName::CircleCheck)
+                        .xsmall()
+                        .text_color(theme.success),
+                    RunStatus::Failed => Icon::new(IconName::CircleX)
+                        .xsmall()
+                        .text_color(theme.danger),
+                    RunStatus::Skipped => Icon::new(IconName::Minus)
+                        .xsmall()
+                        .text_color(theme.muted_foreground),
                 })
             };
             let staged = if hook.is_import() {
@@ -1243,7 +1469,11 @@ impl HookerApp {
                         h_flex()
                             .gap_1p5()
                             .text_sm()
-                            .child(if result.success {
+                            .child(if result.skipped {
+                                Icon::new(IconName::Minus)
+                                    .small()
+                                    .text_color(theme.muted_foreground)
+                            } else if result.success {
                                 Icon::new(IconName::CircleCheck)
                                     .small()
                                     .text_color(theme.success)
@@ -1252,7 +1482,13 @@ impl HookerApp {
                                     .small()
                                     .text_color(theme.danger)
                             })
-                            .child(if result.success { "Passed" } else { "Failed" })
+                            .child(if result.skipped {
+                                "Skipped (a hook it needs failed)"
+                            } else if result.success {
+                                "Passed"
+                            } else {
+                                "Failed"
+                            })
                             .child(
                                 div()
                                     .text_color(theme.muted_foreground)
@@ -1707,6 +1943,9 @@ impl HookerApp {
 impl Render for HookerApp {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
+        if self.graph_mode && self.graph_dirty {
+            self.refresh_graph(cx);
+        }
 
         let body = match self.repo.as_ref() {
             None => self.render_welcome(cx),
@@ -1722,6 +1961,10 @@ impl Render for HookerApp {
                     cx,
                 )
             }
+            Some(_) if self.graph_mode => div()
+                .size_full()
+                .child(self.graph.clone())
+                .into_any_element(),
             Some(_) => h_flex()
                 .size_full()
                 .child(self.render_sidebar(cx))

@@ -22,6 +22,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "github",
     "house",
     "layers",
+    "list",
     "list-checks",
     "message-square",
     "moon",
@@ -32,6 +33,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "terminal",
     "trash",
     "upload",
+    "workflow",
     "x",
     "zap",
 ];

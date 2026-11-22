@@ -43,6 +43,16 @@
         "boolean",
         "null"
       ]
+    },
+    "params": {
+      "description": "Parameters of a reusable hooks file, used as `{{name}}` in its hooks and set with `with` by the hook loading it",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Param"
+      }
     }
   },
   "$defs": {
@@ -168,11 +178,35 @@
               "type": "null"
             }
           ]
+        },
+        "with": {
+          "description": "Values of the `params` of the hooks file loaded with `path`",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
         }
       },
       "required": [
         "name"
       ]
+    },
+    "Param": {
+      "description": "A parameter of a reusable hooks file",
+      "type": "object",
+      "properties": {
+        "default": {
+          "description": "Value used when `with` doesn't set it (required without it)"
+        },
+        "description": {
+          "description": "What the parameter is for",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     },
     "Step": {
       "description": "A step of a hook: a node of the graph",
