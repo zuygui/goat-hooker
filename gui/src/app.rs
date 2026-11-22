@@ -717,7 +717,9 @@ impl HookerApp {
             })
             .collect();
         let running = self.running_all;
+        let projects: Vec<String> = repo.projects.iter().map(|p| p.name.clone()).collect();
         self.graph.update(cx, |graph, cx| {
+            graph.set_projects(projects);
             graph.trigger = trigger;
             graph.set_data(triggers, nodes, statuses, running, cx);
         });
@@ -752,6 +754,16 @@ impl HookerApp {
                     repo.remove_need(trigger, &nodes[*target], &nodes[*source])
                 })
             }
+            CanvasEvent::Create {
+                project,
+                name,
+                cmd,
+                link,
+            } => self.create_from_canvas(trigger, *project, name, cmd, link.clone(), cx),
+            CanvasEvent::Delete(index) => self
+                .repo
+                .as_mut()
+                .map_or(Ok(()), |repo| repo.delete_node(trigger, &nodes[*index])),
             CanvasEvent::RemoveInput { target, name } => {
                 self.repo.as_mut().map_or(Ok(()), |repo| {
                     repo.remove_input(trigger, &nodes[*target], name)
@@ -769,6 +781,40 @@ impl HookerApp {
             self.notice = None;
         }
         self.reload();
+    }
+
+    /// Hook created on the canvas, linked to the node its wire comes from
+    fn create_from_canvas(
+        &mut self,
+        trigger: Trigger,
+        project: usize,
+        name: &str,
+        cmd: &str,
+        link: Option<(usize, crate::graph_view::Link)>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), goat_hooker::errors::GoatHookerError> {
+        let source = link
+            .as_ref()
+            .map(|(node, _)| self.graph.read(cx).nodes()[*node].clone());
+        let Some(repo) = self.repo.as_mut() else {
+            return Ok(());
+        };
+        repo.create_hook(trigger, project, name, cmd)?;
+        if let (Some(source), Some((_, link))) = (source, link) {
+            let project_dir = repo.projects[project].dir();
+            let project_dir = project_dir.canonicalize().unwrap_or(project_dir);
+            let created = repo.graph_view(trigger)?.into_iter().find(|n| {
+                n.hook == name.trim()
+                    && n.project_dir
+                        .canonicalize()
+                        .unwrap_or(n.project_dir.clone())
+                        == project_dir
+            });
+            if let Some(created) = created {
+                repo.add_link(trigger, &created, &source, link)?;
+            }
+        }
+        Ok(())
     }
 
     /// Ouvre le hook d'un nœud dans la vue liste
