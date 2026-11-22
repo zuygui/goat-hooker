@@ -108,6 +108,14 @@ Hooks show a spinner while running, then a summary. Only the output of the faile
   - run the trigger and see each node's result and duration
   - edits are written to the `hooker.config.json` files, so the JSON stays the source of truth
 
+## Contributing 🤝
+
+goat-hooker runs its own hooks (see [`hooker.config.json`](hooker.config.json)): `rustfmt` and `clippy` on commit, the JSON schema regenerated when the config changes, a conventional commit message (release-plz builds the changelog from it) and the tests before a push.
+
+```sh
+cargo install --path . && hooker install
+```
+
 ## Configuration ⚙️
 
 `hooker.config.json` at the root of the repository:

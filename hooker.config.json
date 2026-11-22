@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json",
+  "hooks": [
+    {
+      "name": "fmt",
+      "trigger": "pre-commit",
+      "include": ["**/*.rs"],
+      "cmd": "rustfmt --edition 2024 {files}",
+      "stage_fixed": true
+    },
+    {
+      "name": "schema",
+      "trigger": "pre-commit",
+      "include": ["src/config/**/*.rs"],
+      "cmds": [
+        "cargo run -q --bin hooker -- schema > schema.json",
+        "git add schema.json"
+      ]
+    },
+    {
+      "name": "clippy",
+      "trigger": "pre-commit",
+      "needs": ["fmt"],
+      "include": ["**/*.rs", "**/Cargo.toml"],
+      "cmd": "cargo clippy --workspace --all-targets -q -- -D warnings"
+    },
+    {
+      "name": "conventional commit",
+      "trigger": "commit-msg",
+      "cmd": "head -n1 \"$1\" | grep -qE '^((feat|fix|chore|docs|refactor|perf|test|ci|build|style|revert)(\\(.+\\))?!?: .+|Merge .+)' || { echo 'Use a conventional commit message, e.g. \"feat(gui): node graph\" (release-plz builds the changelog from it)'; exit 1; }"
+    },
+    {
+      "name": "test",
+      "trigger": "pre-push",
+      "cmd": "cargo test --workspace -q"
+    }
+  ]
+}
