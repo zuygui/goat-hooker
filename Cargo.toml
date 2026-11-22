@@ -1,10 +1,32 @@
 [workspace]
 members = ["gui"]
 
-[package]
-name = "goat-hooker"
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+authors = ["Zuygui <maxime@halbitte.fr>"]
+license = "MIT"
+repository = "https://github.com/zuygui/goat-hooker"
+homepage = "https://github.com/zuygui/goat-hooker"
+
+# Binaires plus légers pour les releases
+[profile.release]
+strip = true
+lto = "thin"
+
+[package]
+name = "goat-hooker"
+description = "An open-source Git hooks manager, with mono-repos support"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["git", "hooks", "pre-commit", "monorepo", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+include = ["src/**", "schema.json", "README.md", "LICENSE"]
 
 [lib]
 name = "goat_hooker"
