@@ -26,6 +26,12 @@ pub enum GoatHookerError {
         source: glob::PatternError,
     },
 
+    #[error("Invalid import `{import}`: {source}")]
+    InvalidImport {
+        import: String,
+        source: glob::PatternError,
+    },
+
     #[error("Git error: {0}")]
     GitError(String),
 

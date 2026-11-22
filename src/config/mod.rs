@@ -7,14 +7,18 @@ use std::{
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
-use crate::errors::GoatHookerError;
+use crate::{errors::GoatHookerError, git};
 
 pub const HOOK_CONFIG_FILENAME: &str = "hooker.config.json";
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
+    /// Dossiers des sous-projets (globs acceptés, ex: `packages/*`)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub imports: Option<Vec<String>>,
+    /// Charge automatiquement tous les `hooker.config.json` du dépôt
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discover: Option<bool>,
     pub hooks: Option<Vec<Hook>>,
     #[serde(skip)]
     pub base_dir: Option<PathBuf>,
@@ -117,11 +121,6 @@ impl Trigger {
             Trigger::PostMerge => "post-merge",
         }
     }
-
-    /// Seul le pre-commit filtre les hooks sur les fichiers stagés
-    pub fn uses_staged_files(&self) -> bool {
-        matches!(self, Trigger::PreCommit)
-    }
 }
 
 impl Hook {
@@ -214,29 +213,67 @@ impl ConfigLoader {
         let root = Config::load_from_file(&abs_path)?;
         let mut all_cfg = vec![root.clone()];
 
-        if let Some(includes) = root.imports.clone() {
-            for inc in includes {
-                let sub_path = root
-                    .base_dir
-                    .as_ref()
-                    .unwrap()
-                    .join(&inc)
-                    .join(HOOK_CONFIG_FILENAME);
+        let base_dir = root.base_dir.clone().unwrap();
 
-                if sub_path.exists() {
-                    let sub_cfgs = self.load_recursive(&sub_path)?;
-                    all_cfg.extend(sub_cfgs);
-                } else {
-                    eprintln!(
-                        "⚠️ Warning: included path {:?} does not contain {}",
-                        sub_path, HOOK_CONFIG_FILENAME
-                    );
-                }
+        for inc in root.imports.iter().flatten() {
+            for sub_path in resolve_import(&base_dir, inc)? {
+                let sub_cfgs = self.load_recursive(&sub_path)?;
+                all_cfg.extend(sub_cfgs);
+            }
+        }
+
+        // Les configs déjà chargées (dont celle-ci) sont ignorées grâce à `visited`
+        if root.discover.unwrap_or(false) {
+            for sub_path in git::find_files(&base_dir, HOOK_CONFIG_FILENAME)? {
+                let sub_cfgs = self.load_recursive(&sub_path)?;
+                all_cfg.extend(sub_cfgs);
             }
         }
 
         Ok(all_cfg)
     }
+}
+
+/// Résout un import en chemins de configs.
+/// Un import peut être un dossier (`api`) ou un glob (`packages/*`).
+fn resolve_import(base_dir: &Path, inc: &str) -> Result<Vec<PathBuf>, GoatHookerError> {
+    let is_glob = inc.contains(['*', '?', '[']);
+
+    if !is_glob {
+        let sub_path = base_dir.join(inc).join(HOOK_CONFIG_FILENAME);
+        if !sub_path.exists() {
+            eprintln!(
+                "⚠️ Warning: included path {:?} does not contain {}",
+                sub_path, HOOK_CONFIG_FILENAME
+            );
+            return Ok(vec![]);
+        }
+        return Ok(vec![sub_path]);
+    }
+
+    // Le dossier de base est échappé pour qu'un `[` dans son chemin ne casse pas le glob
+    let pattern = format!(
+        "{}/{}/{}",
+        glob::Pattern::escape(&base_dir.to_string_lossy()),
+        inc.trim_start_matches("./").trim_end_matches('/'),
+        HOOK_CONFIG_FILENAME
+    );
+    let paths = glob::glob(&pattern).map_err(|source| GoatHookerError::InvalidImport {
+        import: inc.to_string(),
+        source,
+    })?;
+
+    // Les dossiers sans config sont ignorés silencieusement (ex: `packages/*` avec un dossier vide)
+    let mut sub_paths: Vec<PathBuf> = paths.filter_map(Result::ok).collect();
+    sub_paths.sort();
+
+    if sub_paths.is_empty() {
+        eprintln!(
+            "⚠️ Warning: no {} found for import `{}`",
+            HOOK_CONFIG_FILENAME, inc
+        );
+    }
+    Ok(sub_paths)
 }
 
 #[cfg(test)]
@@ -380,5 +417,68 @@ mod tests {
             let parsed: Trigger = serde_json::from_str(&json).unwrap();
             assert_eq!(parsed, trigger);
         }
+    }
+
+    fn hook_names(cfgs: &[Config]) -> Vec<String> {
+        let mut names: Vec<String> = cfgs
+            .iter()
+            .flat_map(|c| c.hooks.clone().unwrap_or_default())
+            .map(|h| h.name)
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn write_sub_config(dir: &Path, hook_name: &str) {
+        fs::create_dir_all(dir).unwrap();
+        write_json(
+            &dir.join(HOOK_CONFIG_FILENAME),
+            &format!(
+                r#"{{ "hooks": [ {{ "name": "{hook_name}", "trigger": "pre-commit", "cmd": "true" }} ] }}"#
+            ),
+        );
+    }
+
+    #[test]
+    fn load_glob_imports() {
+        let dir = tempdir().unwrap();
+        let root_path = dir.path().join(HOOK_CONFIG_FILENAME);
+        write_json(&root_path, r#"{ "imports": ["packages/*"], "hooks": [] }"#);
+
+        write_sub_config(&dir.path().join("packages/a"), "a");
+        write_sub_config(&dir.path().join("packages/b"), "b");
+        // dossier sans config → ignoré
+        fs::create_dir_all(dir.path().join("packages/empty")).unwrap();
+
+        let cfgs = ConfigLoader::new().load_recursive(&root_path).unwrap();
+        assert_eq!(hook_names(&cfgs), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn discover_configs() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .status()
+            .unwrap();
+        fs::write(root.join(".gitignore"), "ignored/\n").unwrap();
+
+        write_json(
+            &root.join(HOOK_CONFIG_FILENAME),
+            r#"{ "discover": true, "imports": ["api"], "hooks": [ { "name": "root", "trigger": "pre-commit", "cmd": "true" } ] }"#,
+        );
+        write_sub_config(&root.join("api"), "api");
+        write_sub_config(&root.join("apps/web"), "web");
+        write_sub_config(&root.join("apps/web/nested"), "nested");
+        write_sub_config(&root.join("ignored/lib"), "ignored");
+
+        let cfgs = ConfigLoader::new()
+            .load_recursive(&root.join(HOOK_CONFIG_FILENAME))
+            .unwrap();
+
+        // `api` importé ET découvert → chargé une seule fois ; `ignored/` est ignoré par git
+        assert_eq!(hook_names(&cfgs), vec!["api", "nested", "root", "web"]);
     }
 }
