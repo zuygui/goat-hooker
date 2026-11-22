@@ -35,15 +35,26 @@ On Linux, the desktop app needs `libxkbcommon`, `wayland`, `vulkan`, `fontconfig
 ## Usage 🐐
 
 ```sh
+hooker             # status: Git hooks, projects, hooks of the next commit
 hooker init        # create hooker.config.json
+hooker add         # add a hook (an assistant asks what's missing)
 hooker install     # install the Git hooks in .git/hooks (or core.hooksPath)
 hooker run pre-commit   # run manually the hooks of a trigger
+hooker run pre-commit -v   # also show the output of the hooks that passed
 hooker run pre-commit --dry-run   # show the hooks that would run, and on which files
 hooker list        # list the configurations and their hooks
 hooker update      # update the hooks loaded from git repositories
 hooker schema      # print the JSON schema of the configuration
 hooker completion zsh > ~/.zfunc/_hooker   # shell completion
 ```
+
+`hooker add` also works without a terminal:
+
+```sh
+hooker add -n "ESLint" -t pre-commit -i "src/**/*.ts" -c "eslint {files}" -p packages/web
+```
+
+Hooks show a spinner while running, then a summary. Only the output of the failed hooks is shown (all of them with `-v`).
 
 `hooker install` doesn't overwrite hooks it didn't install, use `--force` for that.
 
