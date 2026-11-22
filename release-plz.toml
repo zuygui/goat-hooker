@@ -9,6 +9,8 @@ git_tag_name = "v{{ version }}"
 git_release_name = "Goat Hooker v{{ version }}"
 changelog_path = "./CHANGELOG.md"
 pr_labels = ["release"]
+# En 0.x, une nouvelle fonctionnalité (feat) passe à la version mineure (0.1 → 0.2)
+features_always_increment_minor = true
 
 [[package]]
 name = "goat-hooker-gui"
@@ -16,3 +18,4 @@ name = "goat-hooker-gui"
 publish = false
 release = false
 changelog_update = false
+
