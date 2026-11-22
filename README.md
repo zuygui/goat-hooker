@@ -11,10 +11,11 @@
 ## Features 🚀
 
 - [x] Easy to write/read configuration files
-- [x] Mono-repos support
+- [x] Mono-repos support: each sub-project owns its config, with glob imports (`packages/*`) or automatic discovery
 - [x] Shell commands support
 - [x] All types of Git Hooks supported
-- [x] Run `pre-commit` hooks only on the staged files they target
+- [x] Run `pre-commit` hooks only on the staged files they target, `pre-push` hooks only on the pushed files they target
+- [x] Pass the targeted files to commands (`{files}` / `$HOOKER_FILES`)
 - [ ] Remote hooks (`from`) and hooks files (`path`)
 
 ## Installation 📦
@@ -49,7 +50,7 @@ hooker completion zsh > ~/.zfunc/_hooker   # shell completion
       "trigger": "pre-commit",
       "include": ["src/**/*.rs"],
       "exclude": ["src/generated/*.rs"],
-      "cmd": "cargo fmt --check"
+      "cmd": "rustfmt --check {files}"
     },
     {
       "name": "commit message",
@@ -62,14 +63,42 @@ hooker completion zsh > ~/.zfunc/_hooker   # shell completion
 
 | Field     | Description |
 |-----------|-------------|
-| `imports` | Sub-projects folders, each one with its own `hooker.config.json` |
+| `imports` | Sub-projects folders, each one with its own `hooker.config.json`. Globs are supported (`packages/*`) |
+| `discover` | `true` to load every `hooker.config.json` of the repository (files ignored by git are skipped) |
 | `name`    | Hook name |
 | `trigger` | Git hook: `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit`, `pre-rebase`, `post-rewrite`, `pre-push`, `applypatch-msg`, `pre-applypatch`, `post-applypatch`, `pre-auto-gc`, `post-checkout`, `post-merge` |
 | `include` | Glob patterns, relative to the config folder. Without it, the hook targets all files |
 | `exclude` | Glob patterns of files to ignore |
 | `cmd` / `cmds` | Shell command(s) to run, from the config folder. Git arguments are available as `$1`, `$2`... |
 
-For `pre-commit`, a hook only runs if at least one staged file matches it. `*` doesn't cross folders, use `**` for that.
+`*` doesn't cross folders, use `**` for that.
+
+## Mono-repos 🗂️
+
+Each sub-project keeps its own `hooker.config.json` next to its code:
+
+```
+my-repo/
+├── hooker.config.json          { "imports": ["packages/*"] }
+└── packages/
+    ├── api/hooker.config.json
+    └── front/hooker.config.json
+```
+
+Or let goat-hooker find them all with `{ "discover": true }`.
+
+For each sub-project:
+
+- `include` / `exclude` patterns are relative to its folder
+- commands run from its folder
+- `pre-commit` hooks only run if a staged file belongs to it, `pre-push` hooks only if a pushed commit changed one of its files
+- `{files}` in a command is replaced by the targeted files (relative to its folder, shell-escaped), also available in `$HOOKER_FILES` (one per line)
+
+```json
+{ "name": "lint", "trigger": "pre-commit", "include": ["src/**/*.ts"], "cmd": "eslint {files}" }
+```
+
+Other triggers (`commit-msg`, `post-merge`...) run all their hooks.
 
 ## Thanks to all contributors 🧡
 <p align="center">
