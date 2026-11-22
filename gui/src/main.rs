@@ -10,6 +10,7 @@ mod json_complete;
 mod json_editor;
 mod recents;
 mod repo;
+mod update;
 
 use std::path::PathBuf;
 

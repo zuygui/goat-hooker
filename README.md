@@ -34,10 +34,15 @@
 **CLI** (`hooker`):
 
 ```sh
-cargo install goat-hooker
+brew install zuygui/tap/goat-hooker        # macOS, Linux
+curl -fsSL https://raw.githubusercontent.com/zuygui/goat-hooker/main/install.sh | sh
+cargo binstall goat-hooker                  # prebuilt, with cargo-binstall
+cargo install goat-hooker                   # from the sources
 ```
 
 or download the archive of your platform from the [latest release](https://github.com/zuygui/goat-hooker/releases/latest).
+
+**Desktop app** with Homebrew: `brew install --cask zuygui/tap/goat-hooker`. The app tells when a new version is out.
 
 **Desktop app**: download the installer of your platform from the [latest release](https://github.com/zuygui/goat-hooker/releases/latest):
 
@@ -68,6 +73,8 @@ Releases are automatic, from the [conventional commits](https://www.conventional
 3. the CLI archives and the app installers are built for every platform and added to the release
 
 The repository needs a `CARGO_REGISTRY_TOKEN` secret (crates.io token with the `publish-new` and `publish-update` scopes), and GitHub Actions allowed to create pull requests (Settings → Actions → General).
+
+The Homebrew tap (`zuygui/homebrew-tap`, with `Formula/` and `Casks/`) is updated by the release workflow when the `HOMEBREW_TAP_TOKEN` secret holds a token allowed to push to it.
 
 ## Usage 🐐
 

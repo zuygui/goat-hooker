@@ -111,6 +111,8 @@ pub struct HookerApp {
     pages: pages::PagesState,
     /// Config files before the last changes, and the undone ones
     undo_stack: Vec<Vec<(PathBuf, Option<String>)>>,
+    /// A newer version was released
+    update: Option<String>,
     redo_stack: Vec<Vec<(PathBuf, Option<String>)>>,
     /// JSON editor of a config, in place of the detail
     json_editor: Option<Entity<crate::json_editor::JsonEditor>>,
@@ -221,6 +223,7 @@ impl HookerApp {
             graph_dirty: true,
             pages: pages::PagesState::new(window, cx),
             undo_stack: vec![],
+            update: None,
             redo_stack: vec![],
             json_editor: None,
             _subscriptions: vec![subscription, graph_subscription],
@@ -230,6 +233,17 @@ impl HookerApp {
             app.select_first(cx);
         }
         app.scan_repositories(cx);
+        cx.spawn(async move |this, cx| {
+            let update = cx
+                .background_spawn(async move { crate::update::newer_version() })
+                .await;
+            this.update(cx, |this, cx| {
+                this.update = update;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
         app
     }
 
@@ -1088,6 +1102,16 @@ impl HookerApp {
                         .gap_1p5()
                         .text_sm()
                         .child(div().font_weight(FontWeight::SEMIBOLD).child("Goat Hooker"))
+                        .when_some(self.update.clone(), |this, version| {
+                            this.child(
+                                Button::new("update-available")
+                                    .xsmall()
+                                    .primary()
+                                    .label(format!("v{version} available"))
+                                    .tooltip("Open the release to download it")
+                                    .on_click(|_, _, cx| cx.open_url(crate::update::RELEASES)),
+                            )
+                        })
                         .when_some(repo_name, |this, repo_name| {
                             this.child(div().text_color(theme.muted_foreground).child("—"))
                                 .child(

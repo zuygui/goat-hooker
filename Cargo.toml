@@ -28,6 +28,15 @@ keywords = ["git", "hooks", "pre-commit", "monorepo", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 include = ["src/**", "schema.json", "README.md", "LICENSE"]
 
+# `cargo binstall goat-hooker`: the CLI built by the release
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/hooker-v{ version }-{ target }{ archive-suffix }"
+bin-dir = "hooker-v{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 [lib]
 name = "goat_hooker"
 path = "src/lib.rs"
