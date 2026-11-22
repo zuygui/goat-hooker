@@ -12,7 +12,8 @@ use goat_hooker::{
     config::{ConfigLoader, HOOK_CONFIG_FILENAME, Trigger},
     errors::GoatHookerError,
     git,
-    matcher::{MatchedHook, Matcher},
+    graph::{self, Graph},
+    matcher::Matcher,
     runner::{self, HookInput, HookResult, Output, Progress},
 };
 
@@ -80,7 +81,8 @@ pub fn run_hooks(
         let matcher = Matcher::new(&configs)?;
         let files = runner::changed_files(trigger, &root, &input)?;
         let hooks = matcher.hooks_to_run(trigger, files.as_deref());
-        print_dry_run(trigger, &hooks, &root);
+        let graph = graph::build(&configs, trigger, &hooks)?;
+        print_dry_run(trigger, &graph, &root);
         return Ok(());
     }
 
@@ -97,7 +99,7 @@ pub fn run_hooks(
             Some(&on_progress),
         )?
     };
-    reporter.finish(results.len());
+    reporter.finish();
 
     if results.is_empty() {
         if !from_git {
@@ -114,7 +116,7 @@ pub fn run_hooks(
 
     let failed: Vec<&str> = results
         .iter()
-        .filter(|r| !r.success)
+        .filter(|r| r.failed())
         .map(|r| r.name.as_str())
         .collect();
     if !failed.is_empty() {
@@ -156,6 +158,8 @@ struct Reporter {
 struct ReporterState {
     bars: Vec<ProgressBar>,
     labels: Vec<(String, String)>,
+    /// Nœuds attendus par chaque nœud (`← codegen`)
+    needs: Vec<String>,
     width: usize,
     project_width: usize,
 }
@@ -180,7 +184,7 @@ impl Reporter {
     fn on_progress(&self, progress: Progress) {
         let mut state = self.state.lock().unwrap();
         match progress {
-            Progress::Planned(hooks) => self.plan(&mut state, hooks),
+            Progress::Planned(graph) => self.plan(&mut state, graph),
             Progress::Started(index) => {
                 if let Some(bar) = state.bars.get(index) {
                     bar.set_style(
@@ -193,17 +197,23 @@ impl Reporter {
             }
             Progress::Finished(index, result) => {
                 let (name, project) = state.labels[index].clone();
-                let glyph = if result.success {
-                    OK.green().to_string()
+                let (glyph, extra) = if result.skipped {
+                    ("–".dimmed().to_string(), "skipped".to_string())
+                } else if result.success {
+                    (OK.green().to_string(), ui::duration(result.duration))
                 } else {
-                    KO.red().to_string()
+                    (KO.red().to_string(), ui::duration(result.duration))
+                };
+                let extra = match state.needs[index].as_str() {
+                    "" => extra,
+                    needs => format!("{extra:<8} ← {needs}"),
                 };
                 let line = hook_line(
                     &glyph,
                     &name,
                     state.width,
                     &format!("{project:<w$}", w = state.project_width),
-                    &ui::duration(result.duration),
+                    &extra,
                 );
                 match state.bars.get(index) {
                     Some(bar) if self.interactive => {
@@ -216,23 +226,31 @@ impl Reporter {
         }
     }
 
-    fn plan(&self, state: &mut ReporterState, hooks: &[MatchedHook]) {
-        if hooks.is_empty() {
+    fn plan(&self, state: &mut ReporterState, graph: &Graph) {
+        if graph.nodes.is_empty() {
             return;
         }
         eprintln!(
             "{} {}",
             format!("🐐 {}", self.trigger.as_str()).bold(),
-            format!("· {}", ui::plural(hooks.len(), "hook")).dimmed()
+            format!("· {}", ui::plural(graph.nodes.len(), "hook")).dimmed()
         );
 
-        state.labels = hooks
+        state.labels = graph
+            .nodes
             .iter()
-            .map(|m| {
-                (
-                    m.hook.name.clone(),
-                    ui::project_label(&self.root, &m.base_dir),
-                )
+            .map(|n| (n.label(), ui::project_label(&self.root, &n.base_dir)))
+            .collect();
+        state.needs = graph
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, n)| {
+                n.needs
+                    .iter()
+                    .map(|&need| label_from(graph, index, need))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             })
             .collect();
         state.width = state
@@ -265,26 +283,9 @@ impl Reporter {
         }
     }
 
-    /// Les hooks qui n'ont pas tourné (séquentiel arrêté par un échec).
     /// Consomme le reporter : les spinners ne doivent plus redessiner par-dessus la suite.
-    fn finish(self, ran: usize) {
+    fn finish(self) {
         let state = self.state.into_inner().unwrap();
-        for (index, (name, project)) in state.labels.iter().enumerate().skip(ran) {
-            let line = hook_line(
-                &"–".dimmed().to_string(),
-                name,
-                state.width,
-                &format!("{project:<w$}", w = state.project_width),
-                "skipped",
-            );
-            match state.bars.get(index) {
-                Some(bar) => {
-                    bar.set_style(ProgressStyle::with_template("{msg}").unwrap());
-                    bar.finish_with_message(line);
-                }
-                None => eprintln!("{line}"),
-            }
-        }
         let had_bars = !state.bars.is_empty();
         drop(state.bars);
         drop(self.multi);
@@ -297,7 +298,10 @@ impl Reporter {
 
 /// Sortie des hooks en échec (de tous avec `--verbose`)
 fn print_outputs(results: &[HookResult], root: &Path, verbose: bool) {
-    for result in results.iter().filter(|r| verbose || !r.success) {
+    for result in results
+        .iter()
+        .filter(|r| !r.skipped && (verbose || !r.success))
+    {
         let glyph = if result.success { OK.green() } else { KO.red() };
         eprintln!();
         eprintln!(
@@ -316,8 +320,9 @@ fn print_outputs(results: &[HookResult], root: &Path, verbose: bool) {
 }
 
 fn print_summary(results: &[HookResult], elapsed: Duration) {
-    let failed = results.iter().filter(|r| !r.success).count();
-    let passed = results.len() - failed;
+    let failed = results.iter().filter(|r| r.failed()).count();
+    let skipped = results.iter().filter(|r| r.skipped).count();
+    let passed = results.len() - failed - skipped;
     let time = format!("in {}", ui::duration(elapsed)).dimmed();
 
     eprintln!();
@@ -331,9 +336,14 @@ fn print_summary(results: &[HookResult], elapsed: Duration) {
         );
     } else {
         eprintln!(
-            "{} {}{} {time}",
+            "{} {}{}{} {time}",
             KO.red(),
             format!("{failed} failed").red().bold(),
+            if skipped > 0 {
+                format!(", {skipped} skipped")
+            } else {
+                String::new()
+            },
             if passed > 0 {
                 format!(", {passed} passed")
             } else {
@@ -348,8 +358,18 @@ fn print_summary(results: &[HookResult], elapsed: Duration) {
     }
 }
 
-fn print_dry_run(trigger: Trigger, hooks: &[MatchedHook], root: &Path) {
-    if hooks.is_empty() {
+/// Nom d'un nœud vu depuis un autre : avec son projet s'il est ailleurs (`api:codegen`)
+fn label_from(graph: &Graph, from: usize, node: usize) -> String {
+    let target = &graph.nodes[node];
+    if target.project == graph.nodes[from].project {
+        target.label()
+    } else {
+        format!("{}:{}", target.project, target.label())
+    }
+}
+
+fn print_dry_run(trigger: Trigger, graph: &Graph, root: &Path) {
+    if graph.nodes.is_empty() {
         eprintln!(
             "{}",
             format!("🐐 No {} hooks to run", trigger.as_str()).dimmed()
@@ -359,20 +379,42 @@ fn print_dry_run(trigger: Trigger, hooks: &[MatchedHook], root: &Path) {
     eprintln!(
         "{} {}",
         format!("🐐 {}", trigger.as_str()).bold(),
-        format!("· {} would run", ui::plural(hooks.len(), "hook")).dimmed()
+        format!(
+            "· {} would run, in this order",
+            ui::plural(graph.nodes.len(), "hook")
+        )
+        .dimmed()
     );
-    for matched in hooks {
+    for (index, node) in graph.nodes.iter().enumerate() {
         eprintln!();
         eprintln!(
             "{} {} {}",
             PENDING.dimmed(),
-            matched.hook.name.bold(),
-            format!("· {}", ui::project_label(root, &matched.base_dir)).dimmed()
+            node.label().bold(),
+            format!("· {}", ui::project_label(root, &node.base_dir)).dimmed()
         );
-        for cmd in matched.hook.commands() {
+        let needs: Vec<String> = node
+            .needs
+            .iter()
+            .filter(|need| !node.inputs.iter().any(|i| i.node == **need))
+            .map(|&need| label_from(graph, index, need))
+            .collect();
+        if !needs.is_empty() {
+            eprintln!("  {} waits for {}", "←".dimmed(), needs.join(", "));
+        }
+        for input in &node.inputs {
+            eprintln!(
+                "  {} {} = {}.{}",
+                "←".dimmed(),
+                format!("{{{}}}", input.name).cyan(),
+                label_from(graph, index, input.node),
+                input.output
+            );
+        }
+        for cmd in node.commands() {
             eprintln!("  {} {cmd}", "$".dimmed());
         }
-        for file in &matched.files {
+        for file in &node.files {
             eprintln!("  {} {}", "📄".dimmed(), file.display());
         }
     }
