@@ -36,8 +36,41 @@ pub fn list_hooks(config_path: Option<PathBuf>) -> Result<(), GoatHookerError> {
             if let Some(exclude) = hook.exclude.as_ref() {
                 println!("      exclude: {}", exclude.join(", ").dimmed());
             }
-            for cmd in hook.commands() {
-                println!("      🚧 {cmd}");
+            if let Some(needs) = hook.needs.as_ref() {
+                println!("      needs: {}", needs.join(", ").dimmed());
+            }
+            for (name, source) in hook.inputs.iter().flatten() {
+                println!(
+                    "      input {}: {}",
+                    format!("{{{name}}}").cyan(),
+                    source.dimmed()
+                );
+            }
+            if let Some(outputs) = hook.outputs.as_ref() {
+                println!("      outputs: {}", outputs.join(", ").dimmed());
+            }
+            match hook.steps.as_ref() {
+                Some(steps) => {
+                    for step in steps {
+                        println!("      › {}", step.id.bold());
+                        if let Some(needs) = step.needs.as_ref() {
+                            println!("          needs: {}", needs.join(", ").dimmed());
+                        }
+                        for (name, source) in step.inputs.iter().flatten() {
+                            println!(
+                                "          input {}: {}",
+                                format!("{{{name}}}").cyan(),
+                                source.dimmed()
+                            );
+                        }
+                        println!("          🚧 {}", step.cmd);
+                    }
+                }
+                None => {
+                    for cmd in hook.commands() {
+                        println!("      🚧 {cmd}");
+                    }
+                }
             }
         }
     }

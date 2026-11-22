@@ -20,6 +20,7 @@
 - [x] Re-stage files fixed by formatters (`stage_fixed`)
 - [x] Run hooks in parallel
 - [x] Shared hooks files, local or from a git repository (`path` / `from`)
+- [x] Hooks graph: hooks and steps that wait for each other and pass values to each other
 - [x] JSON schema for autocompletion in editors
 - [x] A desktop app for those who prefer not to use the CLI
 
@@ -168,6 +169,44 @@ For each sub-project:
 ```
 
 Other triggers (`commit-msg`, `post-merge`...) run all their hooks.
+
+## Hooks graph 🕸️
+
+Hooks can wait for each other, and pass values to each other, like nodes connected by wires:
+
+```json
+{
+  "hooks": [
+    {
+      "name": "codegen",
+      "trigger": "pre-commit",
+      "outputs": ["schema"],
+      "cmd": "npm run codegen && echo \"schema=gen/schema.ts\" >> $HOOKER_OUTPUT"
+    },
+    {
+      "name": "lint",
+      "trigger": "pre-commit",
+      "steps": [
+        { "id": "eslint", "cmd": "eslint {files}" },
+        { "id": "types", "needs": ["eslint"], "inputs": { "schema": "codegen.schema" }, "cmd": "tsc --noEmit {schema}" }
+      ]
+    },
+    { "name": "e2e", "trigger": "pre-commit", "needs": ["lint", "packages/api:build"], "cmd": "npm run e2e" }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `needs` | Hooks to wait for: `hook`, `hook/step`, or `project:hook` for a hook of another project of the mono-repo (`root:hook` for the root). Same trigger only |
+| `steps` | Steps of a hook (`id`, `cmd`, and their own `needs` / `inputs` / `outputs`). A step can wait for the other steps of its hook by their `id` |
+| `outputs` | Values a hook writes with `echo "name=value" >> $HOOKER_OUTPUT` |
+| `inputs` | Values from other hooks: `{ "name": "hook.output" }`, available as `{name}` (shell-escaped) and `$name` in the commands. Every hook also has the `files`, `stdout` and `status` outputs |
+
+- every hook starts as soon as the hooks it waits for have passed (in parallel with `"parallel": true`)
+- when a hook fails, the hooks waiting for it are skipped
+- a hook a matching hook waits for runs too, even if none of the staged files match it
+- `hooker run pre-commit --dry-run` shows the graph: order, dependencies, inputs and files
 
 ## Shared hooks 📦
 

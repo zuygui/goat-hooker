@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -100,6 +100,63 @@ pub struct Hook {
         description = "Hooks file to load, relative to the config folder (or to the root of `from`)"
     )]
     pub path: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Hooks this one waits for: `name`, `name/step` or `project:name` (same trigger)"
+    )]
+    pub needs: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Values from other hooks, available as `{name}` and `$name` in commands: `{ \"name\": \"hook.output\" }` (outputs: files, stdout, status or a declared output)"
+    )]
+    pub inputs: Option<BTreeMap<String, String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Outputs this hook writes with `echo \"name=value\" >> $HOOKER_OUTPUT`"
+    )]
+    pub outputs: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Steps of this hook, each one can wait for the others")]
+    pub steps: Option<Vec<Step>>,
+}
+
+// Une étape d'un hook (un nœud dans le graphe)
+#[derive(Debug, Default, Serialize, Deserialize, Clone, JsonSchema)]
+#[schemars(description = "A step of a hook: a node of the graph")]
+pub struct Step {
+    #[schemars(description = "Step id, unique in the hook")]
+    pub id: String,
+
+    #[schemars(description = "Shell command of the step")]
+    pub cmd: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Steps (or hooks) this one waits for")]
+    pub needs: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Values from other steps or hooks: `{ \"name\": \"step.output\" }`")]
+    pub inputs: Option<BTreeMap<String, String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Outputs this step writes to $HOOKER_OUTPUT")]
+    pub outputs: Option<Vec<String>>,
+}
+
+/// Sorties de chaque nœud, sans avoir à les déclarer
+pub const BUILTIN_OUTPUTS: [&str; 3] = ["files", "stdout", "status"];
+
+/// Nom utilisable comme variable shell (`$name`)
+fn is_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 // Hooks Git côté client (le nom = le nom du fichier dans `.git/hooks`)
@@ -188,12 +245,47 @@ impl Trigger {
 
 impl Hook {
     /// Commandes à exécuter, dans l'ordre
+    /// (les étapes, dans l'ordre du fichier, pour un hook avec `steps`)
     pub fn commands(&self) -> Vec<&str> {
-        match (self.cmd.as_ref(), self.cmds.as_ref()) {
-            (Some(cmd), _) => vec![cmd.as_str()],
-            (None, Some(cmds)) => cmds.iter().map(String::as_str).collect(),
-            (None, None) => vec![],
+        match (self.cmd.as_ref(), self.cmds.as_ref(), self.steps.as_ref()) {
+            (Some(cmd), _, _) => vec![cmd.as_str()],
+            (None, Some(cmds), _) => cmds.iter().map(String::as_str).collect(),
+            (None, None, Some(steps)) => steps.iter().map(|s| s.cmd.as_str()).collect(),
+            (None, None, None) => vec![],
         }
+    }
+
+    /// Validation des champs du graphe (`needs`, `inputs`, `outputs`)
+    fn validate_links(
+        name: &str,
+        inputs: Option<&BTreeMap<String, String>>,
+        outputs: Option<&Vec<String>>,
+    ) -> Result<(), String> {
+        for (input, source) in inputs.into_iter().flatten() {
+            if !is_identifier(input) {
+                return Err(format!(
+                    "input `{input}` of `{name}` must be a valid variable name (letters, digits, _)"
+                ));
+            }
+            if !source.contains('.') {
+                return Err(format!(
+                    "input `{input}` of `{name}` must look like `hook.output` (got `{source}`)"
+                ));
+            }
+        }
+        for output in outputs.into_iter().flatten() {
+            if !is_identifier(output) {
+                return Err(format!(
+                    "output `{output}` of `{name}` must be a valid variable name"
+                ));
+            }
+            if BUILTIN_OUTPUTS.contains(&output.as_str()) {
+                return Err(format!(
+                    "output `{output}` of `{name}` is built in, no need to declare it"
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Hook qui charge les hooks d'un fichier (`path`, éventuellement depuis `from`)
@@ -223,6 +315,33 @@ impl Hook {
         if self.trigger.is_none() {
             return Err(invalid("`trigger` is required"));
         }
+        Self::validate_links(&self.name, self.inputs.as_ref(), self.outputs.as_ref())
+            .map_err(|reason| invalid(&reason))?;
+
+        if let Some(steps) = self.steps.as_ref() {
+            if self.cmd.is_some() || self.cmds.is_some() {
+                return Err(invalid("`steps` can't be used with `cmd` or `cmds`"));
+            }
+            if steps.is_empty() {
+                return Err(invalid("`steps` is empty"));
+            }
+            let mut ids = HashSet::new();
+            for step in steps {
+                if step.id.is_empty() || step.id.contains(['/', '.', ':']) {
+                    return Err(invalid(&format!(
+                        "step id `{}` can't be empty or contain `/`, `.` or `:`",
+                        step.id
+                    )));
+                }
+                if !ids.insert(step.id.as_str()) {
+                    return Err(invalid(&format!("two steps are named `{}`", step.id)));
+                }
+                Self::validate_links(&step.id, step.inputs.as_ref(), step.outputs.as_ref())
+                    .map_err(|reason| invalid(&reason))?;
+            }
+            return Ok(());
+        }
+
         if self.cmd.is_some() && self.cmds.is_some() {
             return Err(invalid("`cmd` and `cmds` can't be used together"));
         }
@@ -230,7 +349,9 @@ impl Hook {
             return Err(invalid("`cmds` is empty"));
         }
         if self.cmd.is_none() && self.cmds.is_none() {
-            return Err(invalid("one of `cmd`, `cmds` or `path` is required"));
+            return Err(invalid(
+                "one of `cmd`, `cmds`, `steps` or `path` is required",
+            ));
         }
         Ok(())
     }
