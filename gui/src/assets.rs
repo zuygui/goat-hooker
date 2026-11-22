@@ -1,4 +1,5 @@
 //! Icônes Lucide en plus de celles de gpui-kit (licence dans `assets/LICENSE-LUCIDE`)
+//! et images de l'app
 
 use std::borrow::Cow;
 
@@ -13,10 +14,13 @@ macro_rules! icons {
 const ICONS: &[(&str, &[u8])] = icons![
     "circle-dot",
     "clock",
+    "book-open",
     "folder-git-2",
     "git-branch",
     "git-commit-horizontal",
     "git-merge",
+    "github",
+    "house",
     "layers",
     "list-checks",
     "message-square",
@@ -28,15 +32,21 @@ const ICONS: &[(&str, &[u8])] = icons![
     "terminal",
     "trash",
     "upload",
+    "x",
     "zap",
 ];
+
+const IMAGES: &[(&str, &[u8])] = &[(
+    "images/goat.png",
+    include_bytes!("../assets/images/goat.png"),
+)];
 
 /// Nos icônes, puis celles de gpui-kit
 pub struct Assets;
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        if let Some((_, bytes)) = ICONS.iter().find(|(p, _)| *p == path) {
+        if let Some((_, bytes)) = ICONS.iter().chain(IMAGES).find(|(p, _)| *p == path) {
             return Ok(Some(Cow::Borrowed(bytes)));
         }
         gpui_kit::assets::Assets.load(path)
@@ -47,6 +57,7 @@ impl AssetSource for Assets {
         list.extend(
             ICONS
                 .iter()
+                .chain(IMAGES)
                 .filter(|(p, _)| p.starts_with(path))
                 .map(|(p, _)| SharedString::from(*p)),
         );
