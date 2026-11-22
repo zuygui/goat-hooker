@@ -13,5 +13,6 @@ pr_labels = ["release"]
 [[package]]
 name = "goat-hooker-gui"
 # Pas sur crates.io : l'app est livrée avec les installeurs de la release
+publish = false
 release = false
 changelog_update = false
