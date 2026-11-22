@@ -45,11 +45,15 @@ enum Filter {
     Variables,
     Browse,
     Review,
+    History,
 }
 
 impl Filter {
     fn is_page(self) -> bool {
-        matches!(self, Filter::Variables | Filter::Browse | Filter::Review)
+        matches!(
+            self,
+            Filter::Variables | Filter::Browse | Filter::Review | Filter::History
+        )
     }
 }
 
@@ -354,7 +358,7 @@ impl HookerApp {
                     Filter::Project(i) => i == p,
                     Filter::Trigger(trigger) => hook.trigger == Some(trigger),
                     Filter::NextCommit => self.runs_next_commit(project, hook),
-                    Filter::Variables | Filter::Browse | Filter::Review => false,
+                    Filter::Variables | Filter::Browse | Filter::Review | Filter::History => false,
                 };
                 let matches_search = query.is_empty()
                     || hook.name.to_lowercase().contains(&query)
@@ -1324,6 +1328,7 @@ impl HookerApp {
             Filter::Variables => "Variables".to_string(),
             Filter::Browse => "Browse hooks".to_string(),
             Filter::Review => "Review".to_string(),
+            Filter::History => "History".to_string(),
             Filter::Project(i) => self
                 .repo
                 .as_ref()

@@ -84,6 +84,7 @@ hooker update      # update the hooks loaded from git repositories
 hooker search rust # find hooks shared on GitHub and add them
 hooker ci          # run the hooks on the files changed by a pull request (CI)
 hooker cache-clear # forget the results of the hooks that passed
+hooker history     # last runs and slowest hooks
 hooker trust       # review and trust the hooks loaded from other repositories
 hooker outdated    # hooks of other repositories with a newer version
 hooker pin         # pin them to the commit in use
@@ -122,6 +123,9 @@ Hooks show a spinner while running, then a summary. Only the output of the faile
   - edits are written to the `hooker.config.json` files, so the JSON stays the source of truth
   - double-click the background (or drop a wire on it) to create a hook, hover a node to delete it
   - variables are drawn from the hooks writing them to the hooks reading them
+- **History**: the last runs and the slowest hooks
+- the **Source** of a hook: its JSON in the config file, the scripts it runs, the hooks file it loads; **Edit the JSON** opens an editor with colors and autocompletion (keys, triggers, hooks, variables, outputs) that checks the file while you type
+- the graph edits a node in a panel next to it, and its changes can be undone (⌘/Ctrl+Z)
 - **Variables**: value, writers and readers of each variable
 - **Browse hooks**: search the hooks shared on GitHub, set their parameters and add them
 - **To review**: the commands and permissions of the hooks of other repositories, to trust them

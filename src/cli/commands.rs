@@ -193,6 +193,14 @@ pub enum AppCommands {
         verbose: bool,
     },
 
+    /// Show the last runs of the hooks and the slowest hooks
+    #[command()]
+    History {
+        /// Number of runs
+        #[arg(short = 'n', long, default_value_t = 20)]
+        limit: usize,
+    },
+
     /// Forget the results of the hooks that passed (they all run again)
     #[command(name = "cache-clear")]
     CacheClear,

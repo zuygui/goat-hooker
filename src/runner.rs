@@ -488,6 +488,7 @@ pub fn run_trigger(
     };
 
     let graph = graph::build(configs, trigger, &hooks)?;
+    let start = Instant::now();
     let mut shared = Shared::load(root, configs)?;
     if !input.no_cache {
         shared.cache = Some(crate::cache::Cache::load(root)?);
@@ -495,6 +496,10 @@ pub fn run_trigger(
     let results = run_graph(&graph, input, parallel, output, on_progress, &shared)?;
     if let Some(cache) = shared.cache.as_ref() {
         cache.save()?;
+    }
+    if input.ci_files.is_none() {
+        // The history is a bonus: it never stops a commit
+        let _ = crate::history::record(root, trigger, &results, start.elapsed());
     }
     // The values are kept only if the run passed (the commit or push happens)
     if results.iter().all(|r| r.success) {

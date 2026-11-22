@@ -408,6 +408,11 @@ impl Trigger {
     ];
 
     /// Nom du hook côté Git
+    /// `pre-commit` → `Trigger::PreCommit`
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|t| t.as_str() == name)
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Trigger::PreCommit => "pre-commit",
