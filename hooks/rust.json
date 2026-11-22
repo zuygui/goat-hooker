@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json",
+  "description": "Rust: rustfmt and clippy on commit, tests before a push",
+  "params": {
+    "edition": { "description": "Rust edition used by rustfmt", "default": "2024" },
+    "clippy_args": { "description": "Arguments of cargo clippy", "default": "--workspace --all-targets" },
+    "test_args": { "description": "Arguments of cargo test", "default": "--workspace" }
+  },
+  "hooks": [
+    {
+      "name": "rustfmt",
+      "trigger": "pre-commit",
+      "include": ["**/*.rs"],
+      "cmd": "rustfmt --edition {{edition}} {files}",
+      "stage_fixed": true
+    },
+    {
+      "name": "clippy",
+      "trigger": "pre-commit",
+      "needs": ["rustfmt"],
+      "include": ["**/*.rs", "**/Cargo.toml"],
+      "cmd": "cargo clippy {{clippy_args}} -q -- -D warnings"
+    },
+    {
+      "name": "cargo test",
+      "trigger": "pre-push",
+      "include": ["**/*.rs", "**/Cargo.toml"],
+      "cmd": "cargo test {{test_args}} -q"
+    }
+  ]
+}

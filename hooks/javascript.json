@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json",
+  "description": "JavaScript / TypeScript: Prettier then ESLint on the staged files",
+  "params": {
+    "runner": { "description": "Command running the local binaries (npx, pnpm exec, yarn, bunx)", "default": "npx" },
+    "eslint_args": { "description": "Arguments of ESLint", "default": "--fix" }
+  },
+  "hooks": [
+    {
+      "name": "prettier",
+      "trigger": "pre-commit",
+      "include": ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs", "**/*.json", "**/*.css", "**/*.md"],
+      "exclude": ["**/node_modules/**"],
+      "cmd": "{{runner}} prettier --write --ignore-unknown {files}",
+      "stage_fixed": true
+    },
+    {
+      "name": "eslint",
+      "trigger": "pre-commit",
+      "needs": ["prettier"],
+      "include": ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs"],
+      "exclude": ["**/node_modules/**"],
+      "cmd": "{{runner}} eslint {{eslint_args}} {files}",
+      "stage_fixed": true
+    }
+  ]
+}

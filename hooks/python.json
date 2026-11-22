@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json",
+  "description": "Python: Ruff formatter and linter on the staged files",
+  "params": {
+    "ruff": { "description": "Command running Ruff (ruff, uv run ruff, uvx ruff)", "default": "ruff" }
+  },
+  "hooks": [
+    {
+      "name": "ruff format",
+      "trigger": "pre-commit",
+      "include": ["**/*.py", "**/*.pyi"],
+      "cmd": "{{ruff}} format {files}",
+      "stage_fixed": true
+    },
+    {
+      "name": "ruff check",
+      "trigger": "pre-commit",
+      "needs": ["ruff format"],
+      "include": ["**/*.py", "**/*.pyi"],
+      "cmd": "{{ruff}} check --fix {files}",
+      "stage_fixed": true
+    }
+  ]
+}

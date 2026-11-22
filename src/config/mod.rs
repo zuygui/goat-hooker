@@ -25,6 +25,18 @@ pub struct Config {
     #[schemars(description = "JSON schema of the file")]
     pub schema: Option<String>,
 
+    /// What a reusable hooks file does (shown by `hooker search`)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "What this hooks file does, shown when searching hooks")]
+    pub description: Option<String>,
+
+    /// Root config only: this repository shares hooks files, found by `hooker search`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Share hooks files of this repository: `hooker search` finds the root configs with this field on GitHub (root config only)"
+    )]
+    pub share: Option<Share>,
+
     /// Paramètres d'un fichier de hooks réutilisable (utilisés en `{{nom}}`)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -135,6 +147,24 @@ pub struct Hook {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Steps of this hook, each one can wait for the others")]
     pub steps: Option<Vec<Step>>,
+}
+
+/// Hooks files shared by a repository
+#[derive(Debug, Default, Serialize, Deserialize, Clone, JsonSchema)]
+#[schemars(description = "Hooks files shared by this repository")]
+pub struct Share {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "What these hooks are for")]
+    pub description: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Keywords to find them (rust, lint, commits...)")]
+    pub tags: Option<Vec<String>>,
+
+    #[schemars(
+        description = "Shared hooks files, relative to the repository root. Globs are supported (hooks/*.json)"
+    )]
+    pub hooks: Vec<String>,
 }
 
 // Paramètre d'un fichier de hooks réutilisable

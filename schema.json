@@ -10,6 +10,13 @@
         "null"
       ]
     },
+    "description": {
+      "description": "What this hooks file does, shown when searching hooks",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "discover": {
       "description": "Load every hooker.config.json of the repository (files ignored by git are skipped)",
       "type": [
@@ -53,6 +60,17 @@
       "additionalProperties": {
         "$ref": "#/$defs/Param"
       }
+    },
+    "share": {
+      "description": "Share hooks files of this repository: `hooker search` finds the root configs with this field on GitHub (root config only)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Share"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "$defs": {
@@ -207,6 +225,39 @@
           ]
         }
       }
+    },
+    "Share": {
+      "description": "Hooks files shared by this repository",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "What these hooks are for",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hooks": {
+          "description": "Shared hooks files, relative to the repository root. Globs are supported (hooks/*.json)",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "description": "Keywords to find them (rust, lint, commits...)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "hooks"
+      ]
     },
     "Step": {
       "description": "A step of a hook: a node of the graph",
