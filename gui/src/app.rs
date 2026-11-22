@@ -108,6 +108,11 @@ fn project_label(project: &Project) -> String {
     }
 }
 
+/// `1 project`, `2 projects`
+fn plural(n: usize, word: &str) -> String {
+    format!("{n} {word}{}", if n > 1 { "s" } else { "" })
+}
+
 /// Petite étiquette colorée
 fn chip(text: impl Into<SharedString>, color: Hsla) -> Div {
     div()
@@ -1275,11 +1280,11 @@ impl HookerApp {
                         .child("parallel"),
                 )
             })
-            .right(
-                div()
-                    .text_color(theme.muted_foreground)
-                    .child(format!("{} projects · {hooks} hooks", repo.projects.len())),
-            )
+            .right(div().text_color(theme.muted_foreground).child(format!(
+                "{} · {}",
+                plural(repo.projects.len(), "project"),
+                plural(hooks, "hook")
+            )))
             .right(
                 div()
                     .text_color(theme.muted_foreground)
