@@ -35,7 +35,7 @@ icons = [
     "packaging/32x32.png",
     "packaging/128x128.png",
     "packaging/128x128@2x.png",
-    "packaging/icon.png",
+    "packaging/icon@2x.png",
     "packaging/icon.ico",
 ]
 # L'app, et la CLI `hooker` à côté
