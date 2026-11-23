@@ -8,46 +8,46 @@
 <text x="40" y="124" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#F4F2F2" text-anchor="start" >One hook that does nothing</text>
 <text x="296" y="124" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#A9A4A4" text-anchor="start" >the cost of the tool itself</text>
 <text x="40" y="153" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#F3678B" text-anchor="start" >Goat Hooker</text>
-<rect x="210" y="138" width="38.7" height="20" rx="6" fill="#F3678B" fill-opacity="1"/>
-<text x="258.7341772151899" y="153" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#F4F2F2" text-anchor="start" >30 ms</text>
+<rect x="210" y="138" width="41.6" height="20" rx="6" fill="#F3678B" fill-opacity="1"/>
+<text x="261.63265306122446" y="153" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#F4F2F2" text-anchor="start" >36 ms</text>
 <text x="40" y="183" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >lefthook</text>
-<rect x="210" y="168" width="36.2" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
-<text x="256.1518987341772" y="183" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >28 ms</text>
+<rect x="210" y="168" width="38.2" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
+<text x="258.1632653061224" y="183" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >33 ms</text>
 <text x="40" y="213" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >pre-commit</text>
-<rect x="210" y="198" width="188.5" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
-<text x="408.50632911392404" y="213" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >146 ms</text>
+<rect x="210" y="198" width="209.3" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
+<text x="429.3197278911565" y="213" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >181 ms</text>
 <text x="40" y="243" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >husky + lint-staged</text>
 <rect x="210" y="228" width="510.0" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
-<text x="730.0" y="243" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >395 ms</text>
+<text x="730.0" y="243" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >441 ms</text>
 <text x="40" y="294" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#F4F2F2" text-anchor="start" >Five hooks of 200 ms</text>
 <text x="242" y="294" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#A9A4A4" text-anchor="start" >how the hooks are scheduled</text>
 <text x="40" y="323" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#F3678B" text-anchor="start" >Goat Hooker</text>
-<rect x="210" y="308" width="103.5" height="20" rx="6" fill="#F3678B" fill-opacity="1"/>
-<text x="323.47826086956525" y="323" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#F4F2F2" text-anchor="start" >238 ms</text>
+<rect x="210" y="308" width="103.2" height="20" rx="6" fill="#F3678B" fill-opacity="1"/>
+<text x="323.18407960199005" y="323" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#F4F2F2" text-anchor="start" >244 ms</text>
 <text x="40" y="353" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >lefthook</text>
-<rect x="210" y="338" width="104.8" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
-<text x="324.7826086956522" y="353" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >241 ms</text>
+<rect x="210" y="338" width="104.5" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
+<text x="324.452736318408" y="353" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >247 ms</text>
 <text x="40" y="383" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >pre-commit</text>
 <rect x="210" y="368" width="510.0" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
-<text x="730.0" y="383" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >1173 ms</text>
+<text x="730.0" y="383" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >1206 ms</text>
 <text x="40" y="413" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >husky + lint-staged</text>
-<rect x="210" y="398" width="235.2" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
-<text x="455.2173913043478" y="413" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >541 ms</text>
+<rect x="210" y="398" width="273.2" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
+<text x="493.18407960199005" y="413" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >646 ms</text>
 <text x="40" y="464" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#F4F2F2" text-anchor="start" >The same commit again</text>
 <text x="251" y="464" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#A9A4A4" text-anchor="start" >after a failed commit message, same staged files</text>
 <text x="40" y="493" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#F3678B" text-anchor="start" >Goat Hooker</text>
-<rect x="210" y="478" width="10.4" height="20" rx="6" fill="#F3678B" fill-opacity="1"/>
-<text x="230.40816326530611" y="493" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#F4F2F2" text-anchor="start" >24 ms</text>
+<rect x="210" y="478" width="10.1" height="20" rx="6" fill="#F3678B" fill-opacity="1"/>
+<text x="230.1492537313433" y="493" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#F4F2F2" text-anchor="start" >24 ms</text>
 <text x="40" y="523" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >lefthook</text>
-<rect x="210" y="508" width="101.0" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
-<text x="321.0459183673469" y="523" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >233 ms</text>
+<rect x="210" y="508" width="104.9" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
+<text x="324.8756218905473" y="523" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >248 ms</text>
 <text x="40" y="553" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >pre-commit</text>
 <rect x="210" y="538" width="510.0" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
-<text x="730.0" y="553" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >1176 ms</text>
+<text x="730.0" y="553" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >1206 ms</text>
 <text x="40" y="583" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >husky + lint-staged</text>
-<rect x="210" y="568" width="245.9" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
-<text x="465.8928571428571" y="583" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >567 ms</text>
-<text x="40" y="624" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#A9A4A4" text-anchor="start" >Goat Hooker 0.2.0, lefthook 2.2.2, pre-commit 4.7.0, husky 9.1.7 + lint-staged 17.6.2, git version 2.43.0, 2-core Linux VM</text>
+<rect x="210" y="568" width="269.0" height="20" rx="6" fill="#65DDDB" fill-opacity="0.75"/>
+<text x="488.95522388059703" y="583" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#F4F2F2" text-anchor="start" >636 ms</text>
+<text x="40" y="624" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#A9A4A4" text-anchor="start" >Goat Hooker 0.4.0, lefthook 2.2.2, pre-commit 4.7.0, husky 9.1.7 + lint-staged 17.6.2, git version 2.43.0, 2-core Linux VM</text>
 <text x="40" y="642" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#A9A4A4" text-anchor="start" >Reproduce with python3 benchmarks/run.py</text>
 </g>
 </svg>
