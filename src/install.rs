@@ -5,16 +5,16 @@ use std::{
 
 use crate::{config::Trigger, errors::GoatHookerError, git};
 
-/// Marque les hooks installés par goat-hooker (pour ne pas écraser ceux de l'utilisateur)
+/// Marks the hooks installed by goat-hooker (not to overwrite the ones of the user)
 pub const HOOK_MARKER: &str = "# installed by goat-hooker";
 
-/// Installe les hooks du dépôt.
-/// Retourne les hooks écrits à la main qui ont été gardés (sauf avec `force`).
+/// Installs the hooks of the repository.
+/// Returns the hand-written hooks that were kept (unless `force`).
 pub fn install_hooks(root: &Path, force: bool) -> Result<Vec<PathBuf>, GoatHookerError> {
     install_hooks_in(&git::hooks_dir(root)?, force)
 }
 
-/// Tous les hooks sont installés par goat-hooker
+/// All the hooks are installed by goat-hooker
 pub fn is_installed(root: &Path) -> bool {
     let Ok(hooks_dir) = git::hooks_dir(root) else {
         return false;
@@ -26,7 +26,7 @@ pub fn is_installed(root: &Path) -> bool {
 }
 
 fn install_hooks_in(hooks_dir: &Path, force: bool) -> Result<Vec<PathBuf>, GoatHookerError> {
-    // Crée le répertoire des hooks si nécessaire
+    // Creates the hooks folder if needed
     create_dir_all(hooks_dir)?;
     let mut skipped = Vec::new();
 
@@ -34,7 +34,7 @@ fn install_hooks_in(hooks_dir: &Path, force: bool) -> Result<Vec<PathBuf>, GoatH
         let hook_name = trigger.as_str();
         let hook_path = hooks_dir.join(hook_name);
 
-        // Ne pas écraser un hook écrit à la main
+        // Don't overwrite a hand-written hook
         if hook_path.exists() && !force {
             let content = fs::read_to_string(&hook_path).unwrap_or_default();
             if !content.contains(HOOK_MARKER) {
@@ -48,7 +48,7 @@ fn install_hooks_in(hooks_dir: &Path, force: bool) -> Result<Vec<PathBuf>, GoatH
         );
         fs::write(&hook_path, script)?;
 
-        // Rendre le fichier exécutable (chmod 755)
+        // Make the file executable (chmod 755)
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

@@ -6,8 +6,8 @@ use std::{
 
 use crate::errors::GoatHookerError;
 
-/// Dossier de cache des repos `from`
-/// (`$HOOKER_CACHE_DIR`, sinon `$XDG_CACHE_HOME/goat-hooker`, sinon `~/.cache/goat-hooker`)
+/// Cache folder of the `from` repositories
+/// (`$HOOKER_CACHE_DIR`, else `$XDG_CACHE_HOME/goat-hooker`, else `~/.cache/goat-hooker`)
 pub fn cache_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("HOOKER_CACHE_DIR") {
         return PathBuf::from(dir);
@@ -21,7 +21,7 @@ pub fn cache_dir() -> PathBuf {
     PathBuf::from(home).join(".cache").join("goat-hooker")
 }
 
-/// Dossier du repo en cache pour une URL + rev
+/// Folder of the repository in cache for a URL + rev
 pub fn repo_dir(url: &str, rev: Option<&str>) -> PathBuf {
     let key = format!("{url}#{}", rev.unwrap_or_default());
     cache_dir()
@@ -29,8 +29,8 @@ pub fn repo_dir(url: &str, rev: Option<&str>) -> PathBuf {
         .join(format!("{:016x}", fnv1a(&key)))
 }
 
-/// Retourne le repo en cache, en le clonant s'il n'y est pas encore.
-/// Pas de réseau si le repo est déjà là : `hooker update` le met à jour.
+/// Returns the repository in cache, cloning it if it isn't there yet.
+/// No network if the repository is already there: `hooker update` updates it.
 pub fn fetch(url: &str, rev: Option<&str>) -> Result<PathBuf, GoatHookerError> {
     let dir = repo_dir(url, rev);
     if dir.join(".git").exists() {
@@ -40,7 +40,7 @@ pub fn fetch(url: &str, rev: Option<&str>) -> Result<PathBuf, GoatHookerError> {
     let parent = dir.parent().unwrap();
     fs::create_dir_all(parent)?;
 
-    // Clone dans un dossier temporaire puis renomme : pas de repo à moitié cloné en cache
+    // Cloned in a temporary folder then renamed: no half-cloned repository in cache
     let tmp = parent.join(format!(
         "{}.tmp-{}",
         dir.file_name().unwrap().to_string_lossy(),
@@ -75,13 +75,13 @@ pub fn fetch(url: &str, rev: Option<&str>) -> Result<PathBuf, GoatHookerError> {
     }
 
     if fs::rename(&tmp, &dir).is_err() {
-        // un autre process l'a cloné en même temps
+        // another process cloned it at the same time
         let _ = fs::remove_dir_all(&tmp);
     }
     Ok(dir)
 }
 
-/// Met à jour un repo en cache sur la dernière version de `rev`
+/// Updates a repository in cache to the last version of `rev`
 pub fn update(repo: &Path, rev: Option<&str>) -> Result<(), GoatHookerError> {
     let target = rev.unwrap_or("HEAD");
     git(
@@ -136,7 +136,7 @@ fn git(dir: &Path, args: &[&str]) -> Result<(), GoatHookerError> {
     let output = Command::new("git")
         .args(args)
         .current_dir(dir)
-        // pas de prompt de mot de passe dans un hook
+        // no password prompt in a hook
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .map_err(|e| GoatHookerError::GitError(format!("failed to run git: {e}")))?;
@@ -149,7 +149,7 @@ fn git(dir: &Path, args: &[&str]) -> Result<(), GoatHookerError> {
     Ok(())
 }
 
-/// Hash stable entre les versions de Rust (contrairement à `DefaultHasher`)
+/// Hash stable between the versions of Rust (unlike `DefaultHasher`)
 fn fnv1a(s: &str) -> u64 {
     s.bytes().fold(0xcbf29ce484222325, |hash, byte| {
         (hash ^ byte as u64).wrapping_mul(0x100000001b3)

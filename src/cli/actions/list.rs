@@ -6,7 +6,7 @@ use goat_hooker::{config::ConfigLoader, errors::GoatHookerError, git};
 
 use super::run::resolve_config;
 
-/// Affiche chaque config et ses hooks
+/// Shows each config and its hooks
 pub fn list_hooks(config_path: Option<PathBuf>) -> Result<(), GoatHookerError> {
     let cwd = std::env::current_dir()?;
     let root = git::repo_root(&cwd)?;

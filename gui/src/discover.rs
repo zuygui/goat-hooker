@@ -1,4 +1,4 @@
-//! Recherche des dépôts git sur l'ordinateur (page d'accueil)
+//! Search of the git repositories of the computer (welcome page)
 
 use std::{
     fs,
@@ -8,13 +8,13 @@ use std::{
 
 use goat_hooker::config::HOOK_CONFIG_FILENAME;
 
-/// Profondeur max sous un dossier scanné (`~/dev/org/repo` = 3)
+/// Max depth under a scanned folder (`~/dev/org/repo` = 3)
 const MAX_DEPTH: usize = 4;
-/// Nombre max de dossiers visités par scan (évite de parcourir tout le disque)
+/// Max number of folders visited by a scan (avoids walking the whole disk)
 const MAX_VISITED: usize = 40_000;
 
-/// Dossiers jamais parcourus : dépendances, builds, et dossiers protégés de macOS
-/// (y accéder afficherait une demande d'autorisation au lancement)
+/// Folders never walked: dependencies, builds, and protected folders of macOS
+/// (reading them would show an authorization prompt at launch)
 const SKIPPED: &[&str] = &[
     "node_modules",
     "target",
@@ -37,13 +37,13 @@ const SKIPPED: &[&str] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundRepo {
     pub path: PathBuf,
-    /// A déjà un `hooker.config.json`
+    /// Already has a `hooker.config.json`
     pub configured: bool,
-    /// Dernière activité git (pour trier)
+    /// Last git activity (to sort)
     pub modified: SystemTime,
 }
 
-/// Dossiers scannés par défaut : le dossier personnel
+/// Folders scanned by default: the home folder
 pub fn default_roots() -> Vec<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -52,8 +52,8 @@ pub fn default_roots() -> Vec<PathBuf> {
         .collect()
 }
 
-/// Cherche les dépôts git sous `roots`.
-/// Un dossier choisi par l'utilisateur est parcouru même s'il est dans `SKIPPED`.
+/// Searches the git repositories under `roots`.
+/// A folder picked by the user is walked even if it is in `SKIPPED`.
 pub fn find_repositories(roots: &[PathBuf]) -> Vec<FoundRepo> {
     let mut found = Vec::new();
     let mut visited = 0;
@@ -76,7 +76,7 @@ fn scan(dir: &Path, depth: usize, found: &mut Vec<FoundRepo>, visited: &mut usiz
     }
     *visited += 1;
 
-    // Un dépôt : on le garde, sans descendre dedans (sous-modules, monorepo)
+    // A repository: kept, without going into it (submodules, monorepo)
     let git = dir.join(".git");
     if git.exists() {
         let modified = ["index", "HEAD"]
@@ -133,10 +133,10 @@ mod tests {
         let home = home.path();
         init(&home.join("dev/org/api"));
         init(&home.join("dev/side-project"));
-        init(&home.join("dev/side-project/sub")); // dans un dépôt : ignoré
-        init(&home.join("dev/node_modules/pkg")); // dépendances : ignoré
-        init(&home.join("Documents/thesis")); // protégé sur macOS : ignoré
-        init(&home.join(".cache/repo")); // caché : ignoré
+        init(&home.join("dev/side-project/sub")); // in a repository: ignored
+        init(&home.join("dev/node_modules/pkg")); // dependencies: ignored
+        init(&home.join("Documents/thesis")); // protected on macOS: ignored
+        init(&home.join(".cache/repo")); // hidden: ignored
         init(&home.join("a/b/c/d/e/too-deep"));
         fs::write(home.join("dev/side-project/hooker.config.json"), "{}").unwrap();
 
@@ -148,7 +148,7 @@ mod tests {
         );
         assert!(found[0].configured);
 
-        // un dossier choisi est parcouru même s'il est protégé
+        // a picked folder is walked even if it is protected
         let found = find_repositories(&[home.join("Documents")]);
         assert_eq!(found[0].path, home.join("Documents/thesis"));
     }

@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 use crate::config::{Config, Hook, Trigger};
 use crate::errors::GoatHookerError;
 
-/// `*` ne doit pas traverser les dossiers (`src/*.rs` ne matche pas `src/a/b.rs`)
+/// `*` must not cross folders (`src/*.rs` doesn't match `src/a/b.rs`)
 const MATCH_OPTIONS: MatchOptions = MatchOptions {
     case_sensitive: true,
     require_literal_separator: true,
     require_literal_leading_dot: false,
 };
 
-/// Un hook avec ses patterns déjà compilés
+/// A hook with its patterns already compiled
 struct CompiledHook<'a> {
     hook: &'a Hook,
     base_dir: PathBuf,
@@ -20,12 +20,12 @@ struct CompiledHook<'a> {
     exclude: Vec<Pattern>,
 }
 
-/// Un hook qui doit être exécuté, avec le dossier depuis lequel le lancer
+/// A hook to run, with the folder to run it from
 #[derive(Debug)]
 pub struct MatchedHook<'a> {
     pub hook: &'a Hook,
     pub base_dir: PathBuf,
-    /// Fichiers concernés, relatifs à `base_dir` (vide si le trigger n'a pas de fichiers)
+    /// Targeted files, relative to `base_dir` (empty when the trigger has no files)
     pub files: Vec<PathBuf>,
 }
 
@@ -56,10 +56,10 @@ impl<'a> Matcher<'a> {
         Ok(Self { hooks })
     }
 
-    /// Retourne tous les hooks qui matchent le fichier donné
+    /// Returns all the hooks matching the given file
     #[cfg(test)]
     pub fn match_hooks(&self, file_path: &Path) -> Vec<&'a Hook> {
-        // Chemin absolu et normalisé du fichier
+        // Absolute and normalized path of the file
         let file_path_abs = normalize_path(file_path);
 
         self.hooks
@@ -69,8 +69,8 @@ impl<'a> Matcher<'a> {
             .collect()
     }
 
-    /// Retourne les hooks du trigger à exécuter.
-    /// Si `files` est fourni, seuls les hooks qui matchent au moins un fichier sont gardés.
+    /// Returns the hooks of the trigger to run.
+    /// When `files` is given, only the hooks matching at least one file are kept.
     pub fn hooks_to_run(
         &self,
         trigger: Trigger,
@@ -108,7 +108,7 @@ impl<'a> Matcher<'a> {
 }
 
 impl CompiledHook<'_> {
-    /// Chemin relatif au projet si le fichier matche le hook
+    /// Path relative to the project if the file matches the hook
     fn matched_path(&self, file_path_abs: &Path) -> Option<PathBuf> {
         let relative = file_path_abs.strip_prefix(&self.base_dir).ok()?;
         self.matches_relative(relative)
@@ -121,7 +121,7 @@ impl CompiledHook<'_> {
     }
 
     fn matches_relative(&self, relative: &Path) -> bool {
-        // Vérifie si exclu avant même d’inclure
+        // Checks the exclusions before the inclusions
         if self
             .exclude
             .iter()
@@ -130,7 +130,7 @@ impl CompiledHook<'_> {
             return false;
         }
 
-        // Si pas d'include → hook sur tous les fichiers
+        // Without include → hook on every file
         if self.include.is_empty() {
             return true;
         }
@@ -141,7 +141,7 @@ impl CompiledHook<'_> {
     }
 }
 
-/// Compile les patterns glob d'un hook (relatifs au dossier du projet)
+/// Compiles the glob patterns of a hook (relative to the folder of the project)
 fn compile_patterns(
     hook: &Hook,
     patterns: Option<&Vec<String>>,
@@ -161,7 +161,7 @@ fn compile_patterns(
         .collect()
 }
 
-/// Normalise un chemin (canonicalize si possible, sinon absolutize, sinon inchangé)
+/// Normalizes a path (canonicalize if possible, else absolutize, else unchanged)
 fn normalize_path(path: &Path) -> PathBuf {
     path.canonicalize()
         .or_else(|_| std::env::current_dir().map(|cwd| cwd.join(path)))
@@ -201,17 +201,17 @@ mod tests {
         let configs = [config];
         let matcher = Matcher::new(&configs).unwrap();
 
-        // src/config/mod.rs doit matcher seulement hook2 (hook1 est exclu)
+        // src/config/mod.rs must match only hook2 (hook1 excludes it)
         let matched_hooks = matcher.match_hooks(Path::new("src/config/mod.rs"));
         assert_eq!(matched_hooks.len(), 1);
         assert_eq!(matched_hooks[0].name, "Only config rs");
 
-        // src/main.rs doit matcher seulement hook1
+        // src/main.rs must match only hook1
         let matched_hooks = matcher.match_hooks(Path::new("src/main.rs"));
         assert_eq!(matched_hooks.len(), 1);
         assert_eq!(matched_hooks[0].name, "Rust files");
 
-        // fichier inconnu → aucun hook
+        // unknown file → no hook
         let matched_hooks = matcher.match_hooks(Path::new("src/unknown.txt"));
         assert_eq!(matched_hooks.len(), 0);
     }
@@ -248,11 +248,11 @@ mod tests {
 
         assert_eq!(matcher.match_hooks(&sub.join("src/lib.rs")).len(), 1);
 
-        // les fichiers passés au hook sont relatifs au sous-projet
+        // the files given to the hook are relative to the sub-project
         let files = [sub.join("src/lib.rs"), dir.path().join("lib.rs")];
         let hooks = matcher.hooks_to_run(Trigger::PreCommit, Some(&files));
         assert_eq!(hooks[0].files, vec![PathBuf::from("src/lib.rs")]);
-        // fichier hors du sous-projet → ignoré
+        // file outside the sub-project → ignored
         assert_eq!(matcher.match_hooks(&dir.path().join("lib.rs")).len(), 0);
     }
 
@@ -284,7 +284,7 @@ mod tests {
                 .is_empty()
         );
 
-        // pas de fichiers → tous les hooks du trigger
+        // no files → all the hooks of the trigger
         let hooks = matcher.hooks_to_run(Trigger::PrePush, None);
         assert_eq!(hooks.len(), 1);
         assert_eq!(hooks[0].hook.name, "Push");

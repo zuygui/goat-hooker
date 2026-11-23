@@ -11,7 +11,7 @@ use goat_hooker::{
 
 use crate::cli::ui::{self, PENDING};
 
-/// `hooker` / `hooker status` : état du dépôt en un coup d'œil
+/// `hooker` / `hooker status`: state of the repository at a glance
 pub fn show_status() -> Result<(), GoatHookerError> {
     let root = ui::current_repo()?;
     let repo_name = root

@@ -25,7 +25,7 @@ pub enum EditorEvent {
 }
 
 pub struct HookEditor {
-    /// Hook modifié (`None` = nouveau hook)
+    /// Edited hook (`None` = new hook)
     pub index: Option<usize>,
     name: Entity<InputState>,
     include: Entity<InputState>,
@@ -142,7 +142,7 @@ impl HookEditor {
         }
     }
 
-    /// Construit le hook à partir du formulaire
+    /// Builds the hook from the form
     fn build_hook(&self, cx: &App) -> Result<Hook, String> {
         let name = self.name.read(cx).value().trim().to_string();
         if name.is_empty() {

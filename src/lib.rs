@@ -1,4 +1,4 @@
-//! Goat Hooker : gestionnaire de hooks Git (utilisé par la CLI `hooker` et l'app graphique)
+//! Goat Hooker: Git hooks manager (used by the `hooker` CLI and the desktop app)
 
 pub mod cache;
 pub mod config;

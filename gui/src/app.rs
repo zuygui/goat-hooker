@@ -1,5 +1,5 @@
-//! Fenêtre principale, en trois panneaux :
-//! filtres (sidebar) → liste des hooks → détail du hook sélectionné, avec une barre d'état en bas.
+//! Main window, in three panes:
+//! filters (sidebar) → list of the hooks → detail of the selected hook, with a status bar at the bottom.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -34,7 +34,7 @@ use crate::{
 
 const REPOSITORY_URL: &str = "https://github.com/zuygui/goat-hooker";
 
-/// Ce qui est affiché dans la liste du milieu
+/// What the middle list shows
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Filter {
     All,
@@ -60,17 +60,17 @@ impl Filter {
 mod pages;
 mod source;
 
-/// Un hook dans un projet
+/// A hook in a project
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct HookRef {
     project: usize,
     hook: usize,
 }
 
-/// Clé d'un résultat : dossier du projet + nom du hook
+/// Key of a result: folder of the project + name of the hook
 type RunKey = (PathBuf, String);
 
-/// Résultat du dernier lancement, dans la liste
+/// Result of the last run, in the list
 enum RunStatus {
     Passed,
     Failed,
@@ -78,7 +78,7 @@ enum RunStatus {
     Denied,
 }
 
-/// Formulaire ouvert dans le panneau de détail
+/// Form open in the detail pane
 struct OpenEditor {
     project: usize,
     view: Entity<HookEditor>,
@@ -86,7 +86,7 @@ struct OpenEditor {
 
 pub struct HookerApp {
     repo: Option<Repo>,
-    /// Erreur à l'ouverture du dépôt / au chargement des configs
+    /// Error when opening the repository / loading the configs
     error: Option<String>,
     /// Message temporaire (installation, enregistrement...)
     notice: Option<(String, bool)>,
@@ -98,15 +98,15 @@ pub struct HookerApp {
     results: HashMap<RunKey, HookResult>,
     running: HashSet<RunKey>,
     running_all: bool,
-    /// Dépôts ouverts récemment (page d'accueil)
+    /// Recently opened repositories (welcome page)
     recents: Vec<PathBuf>,
-    /// Dépôts trouvés sur l'ordinateur (`None` pendant la recherche)
+    /// Repositories found on the computer (`None` while searching)
     found: Option<Vec<FoundRepo>>,
     show_all_found: bool,
-    /// Éditeur de nœuds à la place de la liste
+    /// Node editor in place of the list
     graph_mode: bool,
     graph: Entity<GraphCanvas>,
-    /// Le graphe doit être recalculé (config ou résultats changés)
+    /// The graph must be computed again (config or results changed)
     graph_dirty: bool,
     pages: pages::PagesState,
     /// Config files before the last changes, and the undone ones
@@ -119,7 +119,7 @@ pub struct HookerApp {
     _subscriptions: Vec<Subscription>,
 }
 
-/// Icône Lucide ajoutée par l'app (voir `assets.rs`)
+/// Lucide icon added by the app (see `assets.rs`)
 fn lucide(name: &str) -> Icon {
     Icon::empty().path(format!("icons/{name}.svg"))
 }
@@ -162,7 +162,7 @@ fn plural(n: usize, word: &str) -> String {
     format!("{n} {word}{}", if n > 1 { "s" } else { "" })
 }
 
-/// Petite étiquette colorée
+/// Small colored label
 fn chip(text: impl Into<SharedString>, color: Hsla) -> Div {
     div()
         .px_1p5()
@@ -183,7 +183,7 @@ fn section(title: &'static str, cx: &App) -> Div {
 }
 
 impl HookerApp {
-    /// Sans dossier, l'app s'ouvre sur la page d'accueil
+    /// Without a folder, the app opens on the welcome page
     pub fn new(dir: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search hooks"));
         let subscription = cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
@@ -247,7 +247,7 @@ impl HookerApp {
         app
     }
 
-    // MARK: données
+    // MARK: data
 
     fn open(&mut self, dir: PathBuf) {
         self.filter = Filter::All;
@@ -296,7 +296,7 @@ impl HookerApp {
         (dir.canonicalize().unwrap_or(dir), hook.name.clone())
     }
 
-    /// Résultat d'un hook, ou de ses étapes réunies (`lint › eslint`, `lint › types`...)
+    /// Result of a hook, or of its steps together (`lint › eslint`, `lint › types`...)
     fn last_status(&self, key: &RunKey) -> Option<RunStatus> {
         let results: Vec<&HookResult> = match self.results.get(key) {
             Some(result) => vec![result],
@@ -329,7 +329,7 @@ impl HookerApp {
             .find(|p| p.hook == name && p.project_dir == dir)
     }
 
-    /// Hooks chargés depuis un fichier partagé (`path`) qui vont tourner au prochain commit
+    /// Hooks loaded from a shared file (`path`) that will run on the next commit
     fn shared_preview(&self, project: &Project) -> Vec<&PreviewItem> {
         let dir = project.dir();
         let dir = dir.canonicalize().unwrap_or(dir);
@@ -353,7 +353,7 @@ impl HookerApp {
         }
     }
 
-    /// Hooks de la liste du milieu, selon le filtre et la recherche
+    /// Hooks of the middle list, by filter and search
     fn visible_hooks(&self, cx: &App) -> Vec<HookRef> {
         self.hooks_for(self.filter, cx)
     }
@@ -444,7 +444,7 @@ impl HookerApp {
         .detach();
     }
 
-    /// Retour à la page d'accueil
+    /// Back to the welcome page
     fn go_home(&mut self, cx: &mut Context<Self>) {
         self.repo = None;
         self.error = None;
@@ -455,7 +455,7 @@ impl HookerApp {
         cx.notify();
     }
 
-    /// Cherche les dépôts git de l'ordinateur en tâche de fond
+    /// Searches the git repositories of the computer in the background
     fn scan_repositories(&mut self, cx: &mut Context<Self>) {
         self.found = None;
         let mut roots = discover::default_roots();
@@ -474,7 +474,7 @@ impl HookerApp {
         cx.notify();
     }
 
-    /// Ajoute un dossier aux dossiers scannés (ex : Documents, que l'app évite par défaut)
+    /// Adds a folder to the scanned folders (e.g. Documents, which the app avoids by default)
     fn pick_scan_folder(&mut self, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: false,
@@ -539,7 +539,7 @@ impl HookerApp {
         cx.notify();
     }
 
-    /// Projet où ajouter un hook : celui du filtre, sinon celui du hook sélectionné, sinon la racine
+    /// Project to add a hook to: the one of the filter, else the one of the selected hook, else the root
     fn target_project(&self) -> usize {
         match (self.filter, self.selected) {
             (Filter::Project(p), _) => p,
@@ -626,7 +626,7 @@ impl HookerApp {
         cx.notify();
     }
 
-    /// Lance un hook en tâche de fond
+    /// Runs a hook in the background
     fn run_hook(&mut self, hook_ref: HookRef, cx: &mut Context<Self>) {
         let (Some(repo), Some((project, hook))) = (self.repo.clone(), self.hook(hook_ref)) else {
             return;
@@ -657,12 +657,12 @@ impl HookerApp {
         .detach();
     }
 
-    /// Lance tout le pre-commit, comme `git commit`
+    /// Runs the whole pre-commit, like `git commit`
     fn run_pre_commit(&mut self, cx: &mut Context<Self>) {
         self.run_trigger(Trigger::PreCommit, cx);
     }
 
-    /// Lance tous les hooks d'un trigger, dans l'ordre du graphe
+    /// Runs all the hooks of a trigger, in the order of the graph
     fn run_trigger(&mut self, trigger: Trigger, cx: &mut Context<Self>) {
         let Some(repo) = self.repo.clone() else {
             return;
@@ -720,7 +720,7 @@ impl HookerApp {
 
     // MARK: graphe
 
-    /// Triggers qui ont au moins un hook (dans l'ordre de `Trigger::ALL`)
+    /// Triggers with at least one hook (in the order of `Trigger::ALL`)
     fn graph_triggers(&self) -> Vec<Trigger> {
         let Some(repo) = self.repo.as_ref() else {
             return vec![];
@@ -1549,7 +1549,7 @@ impl HookerApp {
         let running = self.running.contains(&key);
         let uses_files = matches!(hook.trigger, Some(Trigger::PreCommit | Trigger::PrePush));
 
-        // En-tête : projet / trigger, nom, actions
+        // Header: project / trigger, name, actions
         let header = v_flex()
             .gap_2()
             .child(
@@ -1881,7 +1881,7 @@ impl HookerApp {
             .into_any_element()
     }
 
-    /// Une ligne de dépôt sur la page d'accueil (clic : l'ouvre)
+    /// A repository row on the welcome page (click: opens it)
     fn repo_row(
         &self,
         id: impl Into<ElementId>,
@@ -1949,7 +1949,7 @@ impl HookerApp {
             .on_click(cx.listener(move |this, _, _, cx| this.open_recent(open_path.clone(), cx)))
     }
 
-    /// Page d'accueil : ouvrir un dépôt, dépôts récents, premiers pas
+    /// Welcome page: open a repository, recent repositories, getting started
     fn render_welcome(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
 
@@ -1971,7 +1971,7 @@ impl HookerApp {
             );
         }
 
-        // Dépôts trouvés sur l'ordinateur (sans ceux déjà dans les récents)
+        // Repositories found on the computer (without the recent ones)
         let mut on_computer = v_flex().gap_0p5();
         match self.found.as_ref() {
             None => {
@@ -2064,7 +2064,7 @@ impl HookerApp {
                     v_flex()
                         .w(px(560.))
                         .gap_8()
-                        // En-tête
+                        // Header
                         .child(
                             h_flex()
                                 .gap_4()
@@ -2105,14 +2105,14 @@ impl HookerApp {
                                 .label("Open a repository…")
                                 .on_click(cx.listener(|this, _, _, cx| this.pick_folder(cx))),
                         )
-                        // Dépôts récents
+                        // Recent repositories
                         .child(
                             v_flex()
                                 .gap_2()
                                 .child(section("RECENT", cx))
                                 .child(recent),
                         )
-                        // Dépôts de l'ordinateur
+                        // Repositories of the computer
                         .child(
                             v_flex()
                                 .gap_2()
@@ -2145,7 +2145,7 @@ impl HookerApp {
                                 )
                                 .child(on_computer),
                         )
-                        // Premiers pas
+                        // Getting started
                         .child(
                             v_flex()
                                 .gap_3()

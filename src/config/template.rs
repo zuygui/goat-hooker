@@ -1,5 +1,5 @@
-//! Paramètres des fichiers de hooks réutilisables :
-//! le fichier déclare des `params`, utilisés en `{{nom}}`, que le hook qui l'importe remplit avec `with`.
+//! Parameters of the reusable hooks files:
+//! the file declares `params`, used as `{{name}}`, that the hook importing it fills with `with`.
 //!
 //! ```json
 //! { "params": { "config": { "default": ".eslintrc.json" }, "files": {} },
@@ -7,8 +7,8 @@
 //!                "cmd": "eslint -c {{config}} {files}" } ] }
 //! ```
 //!
-//! Une chaîne qui est exactement `{{nom}}` est remplacée par la valeur telle quelle
-//! (une liste remplit un tableau) ; sinon la valeur est insérée dans le texte.
+//! A string that is exactly `{{name}}` is replaced with the value as is
+//! (a list fills an array); otherwise the value is inserted in the text.
 
 use std::collections::BTreeMap;
 
@@ -16,7 +16,7 @@ use serde_json::{Map, Value};
 
 use super::Param;
 
-/// Remplace les `{{nom}}` de `hooks` par les valeurs de `with` (ou les valeurs par défaut)
+/// Replaces the `{{name}}` of `hooks` with the values of `with` (or the default values)
 pub fn apply(
     hooks: &mut Value,
     params: &BTreeMap<String, Param>,
@@ -61,7 +61,7 @@ fn substitute(value: &mut Value, values: &Map<String, Value>) -> Result<(), Stri
             let mut expanded = Vec::with_capacity(items.len());
             for mut item in std::mem::take(items) {
                 substitute(&mut item, values)?;
-                // `["{{files}}"]` avec une liste : les éléments remplissent le tableau
+                // `["{{files}}"]` with a list: the items fill the array
                 match item {
                     Value::Array(inner) => expanded.extend(inner),
                     item => expanded.push(item),
@@ -79,9 +79,9 @@ fn substitute(value: &mut Value, values: &Map<String, Value>) -> Result<(), Stri
     Ok(())
 }
 
-/// Remplace les `{{nom}}` d'une chaîne
+/// Replaces the `{{name}}` of a string
 fn replace(text: &str, values: &Map<String, Value>) -> Result<Value, String> {
-    // La chaîne entière est un paramètre : on garde le type de la valeur
+    // The whole string is a parameter: the type of the value is kept
     if let Some(name) = whole_placeholder(text) {
         return values
             .get(name)
@@ -160,22 +160,22 @@ mod tests {
         let declared = params(json!({ "files": {} }));
         let mut hooks = json!([{ "cmd": "{{files}}" }]);
 
-        // paramètre requis manquant
+        // missing required parameter
         let err = apply(&mut hooks.clone(), &declared, None).unwrap_err();
         assert!(err.contains("is required"), "{err}");
 
-        // paramètre inconnu dans `with`
+        // unknown parameter in `with`
         let with = serde_json::from_value(json!({ "file": "x" })).unwrap();
         let err = apply(&mut hooks.clone(), &declared, Some(&with)).unwrap_err();
         assert!(err.contains("unknown parameter `file`"), "{err}");
 
-        // paramètre non déclaré dans le fichier
+        // parameter not declared in the file
         let mut undeclared = json!([{ "cmd": "lint {{nope}}" }]);
         let with = serde_json::from_value(json!({ "files": "x" })).unwrap();
         let err = apply(&mut undeclared, &declared, Some(&with)).unwrap_err();
         assert!(err.contains("unknown parameter `nope`"), "{err}");
 
-        // `{files}` (une accolade) est laissé au runner
+        // `{files}` (one brace) is left to the runner
         let with = serde_json::from_value(json!({ "files": "x" })).unwrap();
         apply(&mut hooks, &declared, Some(&with)).unwrap();
         let mut runtime = json!("cat {files}");

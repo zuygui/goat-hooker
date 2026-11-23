@@ -21,7 +21,7 @@ use crate::{
     matcher::{MatchedHook, Matcher},
 };
 
-/// Remplacé dans les commandes par les fichiers concernés (échappés pour le shell)
+/// Replaced in the commands with the targeted files (escaped for the shell)
 pub const FILES_PLACEHOLDER: &str = "{files}";
 
 /// Values of the variables during a run, shared by all the hooks
@@ -108,14 +108,14 @@ const BASIC_ENV: [&str; 22] = [
     "PROGRAMDATA",
 ];
 
-/// Ce que Git donne au hook
+/// What Git gives to the hook
 #[derive(Debug, Clone, Default)]
 pub struct HookInput {
-    /// Arguments du hook (`$1`, `$2`...)
+    /// Arguments of the hook (`$1`, `$2`...)
     pub args: Vec<String>,
-    /// stdin (refs du pre-push)
+    /// stdin (refs of the pre-push)
     pub stdin: Option<String>,
-    /// Garde les couleurs des outils même quand leur sortie est capturée
+    /// Keeps the colors of the tools even when their output is captured
     pub force_color: bool,
     /// Runs every hook, even the ones that passed with the same files
     pub no_cache: bool,
@@ -124,33 +124,33 @@ pub struct HookInput {
     pub ci_files: Option<Vec<PathBuf>>,
 }
 
-/// Avancement d'un lancement (pour afficher des spinners)
+/// Progress of a run (to show spinners)
 pub enum Progress<'a> {
-    /// Nœuds qui vont tourner, dans l'ordre du graphe
+    /// Nodes that will run, in the order of the graph
     Planned(&'a Graph<'a>),
-    /// Le nœud `index` démarre
+    /// The node `index` starts
     Started(usize),
-    /// Le nœud `index` est fini (ou passé, si une dépendance a échoué)
+    /// The node `index` is done (or skipped, if a dependency failed)
     Finished(usize, &'a HookResult),
 }
 
-/// Valeur reçue d'un autre nœud
+/// Value received from another node
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
     Text(String),
-    /// Une liste de fichiers (sortie `files`)
+    /// A list of files (output `files`)
     List(Vec<String>),
 }
 
-/// Reçoit l'avancement (peut être appelé depuis plusieurs threads)
+/// Receives the progress (can be called from several threads)
 pub type OnProgress<'a> = &'a (dyn Fn(Progress<'_>) + Sync);
 
-/// Où va la sortie des commandes
+/// Where the output of the commands goes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Output {
-    /// Directement dans le terminal, avec les messages de progression (CLI)
+    /// Straight to the terminal, with the progress messages (CLI)
     Inherit,
-    /// Capturée et retournée dans le résultat, sans rien afficher (parallèle, GUI)
+    /// Captured and returned in the result, without showing anything (parallel, GUI)
     Capture,
 }
 
@@ -164,12 +164,12 @@ pub struct CommandResult {
 
 #[derive(Debug, Clone, Default)]
 pub struct HookResult {
-    /// Nom du hook (`hook › étape` pour une étape)
+    /// Name of the hook (`hook › step` for a step)
     pub name: String,
-    /// Dossier du projet du hook
+    /// Folder of the project of the hook
     pub base_dir: PathBuf,
     pub success: bool,
-    /// Pas lancé : un nœud attendu a échoué
+    /// Not run: a node it waits for failed
     pub skipped: bool,
     /// Not allowed: not run (not trusted, forbidden variable) or stopped for doing what it
     /// may not do. The nodes after it (needs and variables) are skipped
@@ -178,11 +178,11 @@ pub struct HookResult {
     pub cached: bool,
     pub duration: Duration,
     pub commands: Vec<CommandResult>,
-    /// Fichiers ciblés, relatifs à `base_dir` (sortie `files`)
+    /// Targeted files, relative to `base_dir` (output `files`)
     pub files: Vec<PathBuf>,
-    /// Sorties écrites dans `$HOOKER_OUTPUT`
+    /// Outputs written to `$HOOKER_OUTPUT`
     pub outputs: BTreeMap<String, String>,
-    /// Fichiers à re-stager (`stage_fixed`), en chemins absolus
+    /// Files to stage again (`stage_fixed`), as absolute paths
     pub files_to_stage: Vec<PathBuf>,
 }
 
@@ -191,7 +191,7 @@ impl HookResult {
         !self.success && !self.skipped
     }
 
-    /// Sortie `stdout` : la sortie de toutes les commandes
+    /// Output `stdout`: the output of all the commands
     pub fn stdout(&self) -> String {
         self.commands
             .iter()
@@ -202,9 +202,9 @@ impl HookResult {
     }
 }
 
-/// Fichiers sur lesquels filtrer les hooks :
-/// fichiers stagés pour le pre-commit, fichiers des commits poussés pour le pre-push.
-/// `None` → les autres triggers lancent tous leurs hooks.
+/// Files to filter the hooks with:
+/// staged files for the pre-commit, files of the pushed commits for the pre-push.
+/// `None` → the other triggers run all their hooks.
 pub fn changed_files(
     trigger: Trigger,
     root: &Path,
@@ -220,7 +220,7 @@ pub fn changed_files(
     }
 }
 
-/// Lance des hooks sans liens entre eux (voir `run_graph`)
+/// Runs hooks without links between them (see `run_graph`)
 pub fn run_all(
     hooks: &[MatchedHook],
     input: &HookInput,
@@ -241,7 +241,7 @@ pub fn run_all(
     )
 }
 
-/// Nœud sans liens pour un hook seul
+/// Node without links for a single hook
 fn standalone_node<'a>(matched: &MatchedHook<'a>) -> Node<'a> {
     Node {
         hook: matched.hook,
@@ -259,10 +259,10 @@ fn standalone_node<'a>(matched: &MatchedHook<'a>) -> Node<'a> {
     }
 }
 
-/// Lance un graphe : chaque nœud démarre quand ceux qu'il attend ont réussi,
-/// avec leurs sorties en entrée. Si un nœud attendu échoue, le nœud est passé (`skipped`).
-/// En parallèle, tous les nœuds prêts tournent en même temps ; sinon un par un.
-/// En parallèle avec `Output::Inherit`, chaque nœud est affiché quand il a fini.
+/// Runs a graph: each node starts when the ones it waits for passed,
+/// with their outputs as inputs. If a node it waits for fails, the node is skipped.
+/// In parallel, all the ready nodes run at the same time; otherwise one by one.
+/// In parallel with `Output::Inherit`, each node is shown when it is done.
 pub fn run_graph(
     graph: &Graph,
     input: &HookInput,
@@ -294,7 +294,7 @@ pub fn run_graph(
     let mut ready: VecDeque<usize> = (0..count).filter(|&i| remaining[i] == 0).collect();
     let mut cut = vec![false; count];
 
-    // Les nœuds qui attendaient `index` sont peut-être prêts
+    // The nodes waiting for `index` may be ready
     let release = |index: usize, remaining: &mut Vec<usize>, ready: &mut VecDeque<usize>| {
         for &dependent in &dependents[index] {
             remaining[dependent] -= 1;
@@ -304,7 +304,7 @@ pub fn run_graph(
         }
     };
 
-    // En parallèle, les sorties sont capturées puis affichées nœud par nœud
+    // In parallel, the outputs are captured then shown node by node
     let node_output = if parallel { Output::Capture } else { output };
     let print_lock = Mutex::new(());
 
@@ -392,7 +392,7 @@ pub fn run_graph(
     Ok(results.into_iter().flatten().collect())
 }
 
-/// Valeurs des entrées d'un nœud, d'après les résultats des nœuds qu'il attend
+/// Values of the inputs of a node, from the results of the nodes it waits for
 fn input_values(
     node: &Node,
     results: &[Option<HookResult>],
@@ -457,9 +457,9 @@ fn relative_to(dir: &Path, path: &Path) -> PathBuf {
     relative
 }
 
-/// Lance tous les hooks d'un trigger, comme le ferait Git :
-/// filtre sur les fichiers, met de côté les modifs non stagées (pre-commit),
-/// re-stage les fichiers corrigés (`stage_fixed`).
+/// Runs all the hooks of a trigger, like Git would:
+/// filters on the files, puts aside the unstaged changes (pre-commit),
+/// stages the fixed files again (`stage_fixed`).
 pub fn run_trigger(
     root: &Path,
     configs: &[Config],
@@ -480,7 +480,7 @@ pub fn run_trigger(
         return Ok(vec![]);
     }
 
-    // Les hooks du pre-commit doivent voir exactement ce qui va être commité
+    // The pre-commit hooks must see exactly what will be committed
     let mut stash = if trigger == Trigger::PreCommit && input.ci_files.is_none() {
         UnstagedStash::save(root)?
     } else {
@@ -506,7 +506,7 @@ pub fn run_trigger(
         shared.save(root)?;
     }
 
-    // Re-stage les fichiers corrigés (formateurs) avant de remettre les modifs non stagées
+    // Stages the fixed files again (formatters) before putting the unstaged changes back
     let files_to_stage: Vec<PathBuf> = results
         .iter()
         .filter(|r| r.success)
@@ -523,7 +523,7 @@ pub fn run_trigger(
     Ok(results)
 }
 
-/// Affiche le résultat d'un hook lancé en mode `Capture`
+/// Shows the result of a hook run in `Capture` mode
 pub fn print_result(result: &HookResult) {
     println!("{}", format!("🐐 Hook `{}`", result.name).bold());
     for cmd in &result.commands {
@@ -537,7 +537,7 @@ pub fn print_result(result: &HookResult) {
     }
 }
 
-/// Lance les commandes d'un hook seul (sans ses dépendances) depuis le dossier de son projet
+/// Runs the commands of a single hook (without its dependencies) from the folder of its project
 pub fn run_hook(
     matched: &MatchedHook,
     input: &HookInput,
@@ -547,7 +547,7 @@ pub fn run_hook(
     run_node(&standalone_node(matched), input, &[], output, shared)
 }
 
-/// Lance les commandes d'un nœud, avec les valeurs de ses entrées
+/// Runs the commands of a node, with the values of its inputs
 fn run_node(
     node: &Node,
     input: &HookInput,
@@ -559,7 +559,7 @@ fn run_node(
         println!("{}", format!("🐐 Running hook `{}`", node.label()).bold());
     }
 
-    // Les sorties du nœud sont écrites dans ce fichier (`echo "name=value" >> $HOOKER_OUTPUT`)
+    // The outputs of the node are written to this file (`echo "name=value" >> $HOOKER_OUTPUT`)
     let output_file = std::env::temp_dir().join(format!(
         "goat-hooker-{}-{}.out",
         std::process::id(),
@@ -753,10 +753,10 @@ fn run_node(
     Ok(result)
 }
 
-/// Numéro des fichiers de sortie (un par nœud lancé)
+/// Number of the output files (one per node run)
 static OUTPUT_FILES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// Lit les lignes `name=value` de `$HOOKER_OUTPUT` (la dernière valeur gagne)
+/// Reads the `name=value` lines of `$HOOKER_OUTPUT` (the last value wins)
 fn parse_outputs(content: &str) -> BTreeMap<String, String> {
     content
         .lines()
@@ -837,7 +837,7 @@ pub fn shell() -> PathBuf {
         .clone()
 }
 
-/// Échappe un chemin pour le shell (`it's.rs` → `'it'\''s.rs'`)
+/// Escapes a path for the shell (`it's.rs` → `'it'\''s.rs'`)
 fn shell_quote(path: &Path) -> String {
     let path = path.to_string_lossy();
     // The shell of Git for Windows prefers `/`
@@ -849,10 +849,10 @@ fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.replace('\'', r"'\''"))
 }
 
-/// Exécute une commande shell depuis `dir`.
-/// - les arguments de Git sont passés en paramètres positionnels (`$1`, `$2`...)
-/// - `{files}` est remplacé par les fichiers concernés, aussi dispo dans `$HOOKER_FILES` (un par ligne)
-/// - stdin est redonné à la commande (refs du pre-push)
+/// Runs a shell command from `dir`.
+/// - the arguments of Git are given as positional parameters (`$1`, `$2`...)
+/// - `{files}` is replaced with the targeted files, also in `$HOOKER_FILES` (one per line)
+/// - stdin is given again to the command (refs of the pre-push)
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 fn execute_command(
@@ -894,7 +894,7 @@ fn execute_in(
 
     let quoted_files: Vec<String> = files.iter().map(|f| shell_quote(f)).collect();
     let mut shell_cmd = cmd.replace(FILES_PLACEHOLDER, &quoted_files.join(" "));
-    // `{name}` : valeur d'une entrée, échappée pour le shell
+    // `{name}`: value of an input, escaped for the shell
     for (name, value) in values {
         let quoted = match value {
             Value::Text(text) => shell_quote(Path::new(text)),
@@ -906,7 +906,7 @@ fn execute_in(
         };
         shell_cmd = shell_cmd.replace(&format!("{{{name}}}"), &quoted);
     }
-    // `$name` : même valeur en variable d'environnement (une ligne par fichier)
+    // `$name`: the same value as an environment variable (one line per file)
     let env_values: Vec<(String, String)> = values
         .iter()
         .map(|(name, value)| {
@@ -939,7 +939,7 @@ fn execute_in(
     command.envs(sandbox.extra_env.iter().cloned());
     command
         .arg("-c")
-        // stderr redirigé dans stdout pour garder l'ordre des messages en mode capture
+        // stderr redirected to stdout to keep the order of the messages in capture mode
         .arg(match output {
             Output::Inherit => shell_cmd,
             Output::Capture => format!("{{ {shell_cmd}\n}} 2>&1"),
@@ -965,7 +965,7 @@ fn execute_in(
         });
 
     match output {
-        // Rediriger la sortie standard et d'erreur vers le processus parent
+        // Redirect the standard output and error to the parent process
         Output::Inherit => command.stdout(Stdio::inherit()).stderr(Stdio::inherit()),
         Output::Capture => command.stdout(Stdio::piped()).stderr(Stdio::piped()),
     };
@@ -973,7 +973,7 @@ fn execute_in(
     let mut child = command.spawn()?;
 
     if let (Some(content), Some(mut child_stdin)) = (input.stdin.as_ref(), child.stdin.take()) {
-        // La commande peut ne pas lire stdin : on ignore un pipe fermé
+        // The command may not read stdin: a closed pipe is ignored
         let _ = child_stdin.write_all(content.as_bytes());
     }
 
@@ -1077,7 +1077,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let files = vec![PathBuf::from("src/a.rs"), PathBuf::from("it's a file.rs")];
 
-        // {files} est échappé : chaque fichier reste un seul argument
+        // {files} is escaped: each file stays a single argument
         let res = execute_command(
             r#"for f in {files}; do echo "$f"; done"#,
             dir.path(),
@@ -1118,7 +1118,7 @@ mod tests {
         .unwrap();
         assert_eq!(res.output, "refs/heads/main abc\n");
 
-        // une commande qui ne lit pas stdin ne doit pas planter
+        // a command that doesn't read stdin must not crash
         let big = "x".repeat(1 << 20);
         let res = execute_command(
             "true",
@@ -1172,7 +1172,7 @@ mod tests {
             "hooks didn't run in parallel"
         );
 
-        // en parallèle, tous les hooks tournent même si l'un échoue
+        // in parallel, all the hooks run even if one fails
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].commands[0].output, "a\n");
         assert!(!results[2].success);
@@ -1285,7 +1285,7 @@ mod tests {
         assert_eq!(res.output, "1\n");
     }
 
-    /// Graphe d'un monorepo de test, lancé sur tous les hooks pre-commit
+    /// Graph of a test monorepo, run on all the pre-commit hooks
     fn run_configs(files: &[(&str, &str)], parallel: bool) -> (tempfile::TempDir, Vec<HookResult>) {
         let dir = tempdir().unwrap();
         for (folder, json) in files {
@@ -1358,7 +1358,7 @@ mod tests {
             false,
         );
         let _ = dir;
-        // sans fichiers stagés (`None`), `codegen` n'a pas de fichiers : la liste est vide
+        // without staged files (`None`), `codegen` has no files: the list is empty
         assert_eq!(by_name(&results, "lint").stdout(), "");
         assert_eq!(
             relative_to(Path::new("/repo/web"), Path::new("/repo/api/src/lib.rs")),

@@ -1,4 +1,4 @@
-//! Données affichées par l'app : le dépôt, ses projets et leurs hooks (sans UI)
+//! Data shown by the app: the repository, its projects and their hooks (no UI)
 
 use std::path::{Path, PathBuf};
 
@@ -10,13 +10,13 @@ use goat_hooker::{
     runner::{self, HookInput, HookResult, Output},
 };
 
-/// Un projet du monorepo (un `hooker.config.json`)
+/// A project of the monorepo (a `hooker.config.json`)
 #[derive(Clone)]
 pub struct Project {
     pub file: PathBuf,
-    /// Dossier relatif à la racine du dépôt (`.` pour la racine)
+    /// Folder relative to the root of the repository (`.` for the root)
     pub name: String,
-    /// Config telle qu'elle est écrite dans le fichier (sans les hooks `path` chargés)
+    /// Config as written in the file (without the hooks loaded by `path`)
     pub raw: Config,
 }
 
@@ -29,7 +29,7 @@ impl Project {
         self.raw.hooks.as_deref().unwrap_or_default()
     }
 
-    /// Ajoute (`index = None`) ou remplace un hook, puis enregistre le fichier
+    /// Adds (`index = None`) or replaces a hook, then saves the file
     pub fn save_hook(&mut self, index: Option<usize>, hook: Hook) -> Result<(), GoatHookerError> {
         let hooks = self.raw.hooks.get_or_insert_with(Vec::new);
         match index {
@@ -48,7 +48,7 @@ impl Project {
     }
 }
 
-/// Hook qui se lancerait au prochain commit
+/// Hook that would run on the next commit
 #[derive(Clone)]
 pub struct PreviewItem {
     pub hook: String,
@@ -70,7 +70,7 @@ impl Repo {
         self.root.join(HOOK_CONFIG_FILENAME)
     }
 
-    /// Ouvre le dépôt git qui contient `dir`
+    /// Opens the git repository containing `dir`
     pub fn open(dir: &Path) -> Result<Self, GoatHookerError> {
         let root = git::repo_root(dir)?;
         let mut repo = Self {
@@ -84,7 +84,7 @@ impl Repo {
         Ok(repo)
     }
 
-    /// Recharge les configs depuis le disque
+    /// Reloads the configs from the disk
     pub fn reload(&mut self) -> Result<(), GoatHookerError> {
         self.installed = install::is_installed(&self.root);
         self.branch = git::current_branch(&self.root);
@@ -109,7 +109,7 @@ impl Repo {
         Ok(())
     }
 
-    /// Crée `hooker.config.json` à la racine (comme `hooker init`)
+    /// Creates `hooker.config.json` at the root (like `hooker init`)
     pub fn init_config(&mut self) -> Result<(), GoatHookerError> {
         if !self.config_file().exists() {
             Config {
@@ -135,7 +135,7 @@ impl Repo {
         ConfigLoader::new().load_recursive(&self.config_file())
     }
 
-    /// Hooks du pre-commit qui se lanceraient sur les fichiers stagés
+    /// Pre-commit hooks that would run on the staged files
     pub fn preview_pre_commit(&self) -> Result<Vec<PreviewItem>, GoatHookerError> {
         let configs = self.load_configs()?;
         let matcher = Matcher::new(&configs)?;
@@ -151,7 +151,7 @@ impl Repo {
             .collect())
     }
 
-    /// Lance tous les hooks d'un trigger, comme Git le ferait
+    /// Runs all the hooks of a trigger, like Git would
     pub fn run_trigger(&self, trigger: Trigger) -> Result<Vec<HookResult>, GoatHookerError> {
         let configs = self.load_configs()?;
         runner::run_trigger(
@@ -164,8 +164,8 @@ impl Repo {
         )
     }
 
-    /// Lance un seul hook d'un projet.
-    /// Pour un pre-commit, sur les fichiers stagés qui le concernent.
+    /// Runs a single hook of a project.
+    /// For a pre-commit, on the staged files it targets.
     pub fn run_hook(
         &self,
         project: &Project,

@@ -10,7 +10,7 @@ use goat_hooker::{
 
 use super::run::resolve_config;
 
-/// Met à jour les repos `from` en cache
+/// Updates the `from` repositories in cache
 pub fn update_remotes(config_path: Option<PathBuf>) -> Result<(), GoatHookerError> {
     let cwd = std::env::current_dir()?;
     let root = git::repo_root(&cwd)?;

@@ -9,7 +9,7 @@ license = "MIT"
 repository = "https://github.com/zuygui/goat-hooker"
 homepage = "https://github.com/zuygui/goat-hooker"
 
-# Binaires plus légers pour les releases
+# Smaller binaries for the releases
 [profile.release]
 strip = true
 lto = "thin"

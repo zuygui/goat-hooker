@@ -1,9 +1,9 @@
-//! Éditeur de nœuds : les hooks d'un trigger en nœuds reliés par des fils, comme dans Blender.
+//! Node editor: the hooks of a trigger as nodes linked by wires, like in Blender.
 //!
-//! - fil pointillé : ordre (`needs`), du haut d'un nœud vers la prise « waits for »
-//! - fil plein : donnée (`inputs`), d'une sortie vers une entrée
-//! - tirer depuis une sortie et lâcher sur un nœud : crée une entrée (ou une attente sur « waits for »)
-//! - glisser le fond : se déplacer ; Ctrl/Cmd + molette : zoomer
+//! - dashed wire: order (`needs`), from the top of a node to the “waits for” socket
+//! - solid wire: data (`inputs`), from an output to an input
+//! - drag from an output and drop on a node: creates an input (or a wait on “waits for”)
+//! - drag the background: move; Ctrl/Cmd + scroll: zoom
 
 use std::{cell::Cell, collections::HashMap, path::PathBuf, rc::Rc, time::Duration};
 
@@ -21,7 +21,7 @@ use goat_hooker::config::Trigger;
 
 use crate::graph_view::{Link, ViewNode};
 
-// Géométrie des nœuds, à zoom 1
+// Geometry of the nodes, at zoom 1
 const NODE_WIDTH: f32 = 240.;
 const HEADER: f32 = 36.;
 const ROW: f32 = 24.;
@@ -30,7 +30,7 @@ const COLUMN_GAP: f32 = 120.;
 const ROW_GAP: f32 = 32.;
 const ORIGIN: (f32, f32) = (40., 76.);
 const SOCKET: f32 = 10.;
-/// Prise « done » de l'en-tête : le fil tiré depuis elle crée une attente (`needs`)
+/// “done” socket of the header: a wire dragged from it creates a wait (`needs`)
 const DONE: usize = usize::MAX;
 
 gpui_kit::actions!(graph_canvas, [UndoGraph, RedoGraph]);
@@ -60,7 +60,7 @@ pub enum CanvasEvent {
         target: usize,
         name: String,
     },
-    /// Ouvrir le hook dans la vue liste
+    /// Open the hook in the list view
     Select(usize),
     /// New hook of the current trigger, linked to `link` (source node, output or order)
     Create {
@@ -87,7 +87,7 @@ struct Wire {
     emphasis: f32,
 }
 
-/// Résultat du dernier lancement d'un nœud
+/// Result of the last run of a node
 #[derive(Clone, Copy)]
 pub struct NodeStatus {
     pub success: bool,
@@ -102,7 +102,7 @@ enum Drag {
         mouse: Point<Pixels>,
         offset: Point<Pixels>,
     },
-    /// Fil tiré depuis la sortie `output` du nœud `from`
+    /// Wire dragged from the output `output` of the node `from`
     Wire {
         from: usize,
         output: usize,
@@ -141,13 +141,13 @@ pub struct GraphCanvas {
     offset: Point<Pixels>,
     zoom: f32,
     drag: Option<Drag>,
-    /// Position du canvas dans la fenêtre (pour les événements souris)
+    /// Position of the canvas in the window (for the mouse events)
     bounds: Rc<Cell<Bounds<Pixels>>>,
 }
 
 impl EventEmitter<CanvasEvent> for GraphCanvas {}
 
-/// Lignes à gauche d'un nœud : « waits for », une par attente, une par entrée, « + input »
+/// Rows on the left of a node: “waits for”, one per wait, one per input, “+ input”
 fn left_rows(node: &ViewNode) -> usize {
     1 + node.needs.len() + node.inputs.len() + usize::from(node.editable)
 }
@@ -190,7 +190,7 @@ fn trigger_color(trigger: Trigger, cx: &App) -> Hsla {
     }
 }
 
-/// Nom d'entrée libre pour une sortie (`schema`, sinon `codegen_files`...)
+/// Free input name for an output (`schema`, else `codegen_files`...)
 fn input_name(target: &ViewNode, source: &ViewNode, output: &str) -> String {
     let base = if ["files", "stdout", "status"].contains(&output) {
         let hook: String = source
@@ -359,7 +359,7 @@ impl GraphCanvas {
         cx.notify();
     }
 
-    /// Position (en haut à gauche) de chaque nœud, à zoom 1
+    /// Position (top left) of each node, at zoom 1
     fn layout(&self) -> Vec<(f32, f32)> {
         let mut order: Vec<usize> = (0..self.nodes.len()).collect();
         order.sort_by_key(|&i| (self.nodes[i].column, self.nodes[i].row));
@@ -378,7 +378,7 @@ impl GraphCanvas {
         positions
     }
 
-    /// Point du canvas (zoom 1) → point local à l'écran
+    /// Point of the canvas (zoom 1) → local point on the screen
     fn to_screen(&self, (x, y): (f32, f32)) -> Point<Pixels> {
         point(
             self.offset.x + px(x * self.zoom),
@@ -386,7 +386,7 @@ impl GraphCanvas {
         )
     }
 
-    /// Point local à l'écran → point du canvas (zoom 1)
+    /// Local point on the screen → point of the canvas (zoom 1)
     fn to_canvas(&self, local: Point<Pixels>) -> (f32, f32) {
         (
             f32::from(local.x - self.offset.x) / self.zoom,
@@ -475,7 +475,7 @@ impl GraphCanvas {
     fn on_scroll(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
         let delta = event.delta.pixel_delta(window.line_height());
         if event.modifiers.secondary(cx) {
-            // Zoom autour du pointeur
+            // Zoom around the pointer
             let local = self.local(event.position);
             let old = self.zoom;
             let step = (f32::from(delta.y) * 0.0025).clamp(-0.15, 0.15);
@@ -494,7 +494,7 @@ impl GraphCanvas {
 
     // MARK: rendu
 
-    /// Fils à dessiner (points locaux) : (départ, arrivée, couleur, pointillé)
+    /// Wires to paint (local points): (start, end, color, dashed)
     fn wires(&self, layout: &[(f32, f32)], cx: &App) -> Vec<Wire> {
         let theme = cx.theme();
         let data_color = trigger_color(self.trigger, cx);
@@ -595,7 +595,7 @@ impl GraphCanvas {
             .get(&(node.project_dir.clone(), node.label.clone()))
             .copied();
 
-        // Ligne de texte à gauche ou à droite, à la ligne `row` sous l'en-tête
+        // Text row on the left or on the right, at the row `row` under the header
         let row_box = |row: usize| {
             div()
                 .absolute()
@@ -642,10 +642,10 @@ impl GraphCanvas {
                 }
                 cx.notify();
             }))
-            // Le fond ne doit pas bouger quand on clique sur un nœud
+            // The background must not move when a node is clicked
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
 
-        // En-tête : nom, projet, résultat
+        // Header: name, project, result
         card = card.child(
             h_flex()
                 .id(("node-header", index))
@@ -747,7 +747,7 @@ impl GraphCanvas {
                 .on_click(cx.listener(move |_, _, _, cx| cx.emit(CanvasEvent::Select(index)))),
         );
 
-        // Prise « done » : ce qui attend ce nœud part d'ici
+        // “done” socket: what waits for this node starts from here
         let waited = self.nodes.iter().any(|n| n.needs.contains(&index));
         card = card.child(
             socket(theme.muted_foreground, waited)
@@ -770,7 +770,7 @@ impl GraphCanvas {
                 ),
         );
 
-        // Gauche : « waits for », attentes, entrées, « + input »
+        // Left: “waits for”, waits, inputs, “+ input”
         let mut row = 0;
         card = card.child(
             row_box(row)
@@ -849,7 +849,7 @@ impl GraphCanvas {
             );
         }
 
-        // Droite : sorties (on tire un fil depuis leur prise)
+        // Right: outputs (a wire is dragged from their socket)
         for (k, output) in node.outputs.iter().enumerate() {
             let builtin = k < 3;
             let used = self.nodes.iter().any(|n| {
@@ -1111,7 +1111,7 @@ impl GraphCanvas {
             }))
     }
 
-    /// Nom d'un nœud vu depuis un autre (avec son projet s'il est ailleurs)
+    /// Name of a node seen from another one (with its project when it is elsewhere)
     fn label_from(&self, from: usize, node: usize) -> String {
         let target = &self.nodes[node];
         if target.project == self.nodes[from].project {
@@ -1255,7 +1255,7 @@ impl Render for GraphCanvas {
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_scroll(cx.listener(Self::on_scroll))
-            // Grille de points et fils, sous les nœuds
+            // Grid of dots and wires, under the nodes
             .child(
                 canvas(
                     move |b, _, _| bounds.set(b),

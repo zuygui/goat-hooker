@@ -7,7 +7,7 @@ use goat_hooker::{
     errors::GoatHookerError,
 };
 
-/// Crée `hooker.config.json` dans le dossier donné
+/// Creates `hooker.config.json` in the given folder
 pub fn init_configuration(dir: &Path) -> Result<(), GoatHookerError> {
     if !dir.is_dir() {
         return Err(GoatHookerError::ReadError(io::Error::new(

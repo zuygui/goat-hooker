@@ -1,11 +1,11 @@
-//! Graphe des hooks d'un trigger : chaque hook (ou chaque étape d'un hook) est un nœud,
-//! relié aux nœuds qu'il attend (`needs`) ou dont il reçoit des valeurs (`inputs`).
+//! Graph of the hooks of a trigger: each hook (or each step of a hook) is a node,
+//! linked to the nodes it waits for (`needs`) or receives values from (`inputs`).
 //!
-//! Références :
-//! - `lint` : un hook du même projet (ou une étape sœur, depuis une étape)
-//! - `lint/types` : une étape d'un hook
-//! - `packages/api:codegen` : un hook d'un autre projet (`root:` pour la racine)
-//! - `codegen.schema` (dans `inputs`) : la sortie `schema` du nœud `codegen`
+//! References:
+//! - `lint`: a hook of the same project (or a sibling step, from a step)
+//! - `lint/types`: a step of a hook
+//! - `packages/api:codegen`: a hook of another project (`root:` for the root)
+//! - `codegen.schema` (in `inputs`): the output `schema` of the node `codegen`
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -18,14 +18,14 @@ use crate::{
     matcher::MatchedHook,
 };
 
-/// Une valeur reçue d'un autre nœud
+/// A value received from another node
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Input {
-    /// Nom dans les commandes (`{name}`, `$name`)
+    /// Name in the commands (`{name}`, `$name`)
     pub name: String,
-    /// Nœud qui fournit la valeur
+    /// Node giving the value
     pub node: usize,
-    /// Sortie de ce nœud (`files`, `stdout`, `status` ou déclarée)
+    /// Output of that node (`files`, `stdout`, `status` or declared)
     pub output: String,
 }
 
@@ -33,15 +33,15 @@ pub struct Input {
 pub struct Node<'a> {
     pub hook: &'a Hook,
     pub step: Option<&'a Step>,
-    /// Projet : `root` ou son dossier relatif à la racine
+    /// Project: `root` or its folder relative to the root
     pub project: String,
     pub base_dir: PathBuf,
-    /// Fichiers ciblés, relatifs à `base_dir` (vide si le hook est lancé comme dépendance)
+    /// Targeted files, relative to `base_dir` (empty when the hook runs as a dependency)
     pub files: Vec<PathBuf>,
-    /// Nœuds attendus (explicites et via `inputs`), sans doublons
+    /// Nodes it waits for (explicit and through `inputs`), without duplicates
     pub needs: Vec<usize>,
     pub inputs: Vec<Input>,
-    /// Sorties déclarées
+    /// Declared outputs
     pub outputs: Vec<String>,
     /// Variables read and written (`reads`, `writes` of the hook)
     pub reads: Vec<String>,
@@ -62,7 +62,7 @@ impl Node<'_> {
         }
     }
 
-    /// Référence complète : `packages/web:lint/types`
+    /// Full reference: `packages/web:lint/types`
     pub fn reference(&self) -> String {
         let step = self.step.map(|s| format!("/{}", s.id)).unwrap_or_default();
         format!("{}:{}{step}", self.project, self.hook.name)
@@ -76,20 +76,20 @@ impl Node<'_> {
     }
 }
 
-/// Les nœuds, dans un ordre où chacun vient après ceux qu'il attend
+/// The nodes, in an order where each one comes after the ones it waits for
 #[derive(Debug, Default)]
 pub struct Graph<'a> {
     pub nodes: Vec<Node<'a>>,
 }
 
-/// Un hook du trigger, avant d'être découpé en nœuds
+/// A hook of the trigger, before being split into nodes
 struct Entry<'a> {
     hook: &'a Hook,
     project: String,
     base_dir: PathBuf,
 }
 
-/// Cible d'une référence
+/// Target of a reference
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Target {
     Hook(usize),
@@ -111,7 +111,7 @@ fn normalize_project(project: &str) -> String {
     }
 }
 
-/// Nom d'un projet à partir de son dossier
+/// Name of a project from its folder
 pub fn project_name(root: &Path, dir: &Path) -> String {
     match dir.strip_prefix(root) {
         Ok(rel) => normalize_project(&rel.to_string_lossy()),
@@ -119,9 +119,9 @@ pub fn project_name(root: &Path, dir: &Path) -> String {
     }
 }
 
-/// Construit le graphe des hooks à lancer.
-/// `selected` : les hooks qui matchent (trigger + fichiers) ; les hooks qu'ils attendent
-/// sont ajoutés même s'ils ne matchent aucun fichier.
+/// Builds the graph of the hooks to run.
+/// `selected`: the matching hooks (trigger + files); the hooks they wait for
+/// are added even if they match no file.
 pub fn build<'a>(
     configs: &'a [Config],
     trigger: Trigger,
@@ -132,7 +132,7 @@ pub fn build<'a>(
         .and_then(|c| c.base_dir.clone())
         .unwrap_or_default();
 
-    // Tous les hooks, pour résoudre les références
+    // All the hooks, to resolve the references
     let mut entries = Vec::new();
     for config in configs {
         let base_dir = config.base_dir.clone().unwrap_or_default();
@@ -153,7 +153,7 @@ pub fn build<'a>(
         trigger,
     };
 
-    // Hooks à lancer : ceux qui matchent, puis ceux qu'ils attendent
+    // Hooks to run: the matching ones, then the ones they wait for
     let mut files: HashMap<usize, Vec<PathBuf>> = HashMap::new();
     let mut queue = VecDeque::new();
     for matched in selected {
@@ -179,7 +179,7 @@ pub fn build<'a>(
         }
     }
 
-    // Un nœud par hook, ou par étape
+    // One node per hook, or per step
     let mut included: Vec<usize> = files.keys().copied().collect();
     included.sort();
     let mut nodes = Vec::new();
@@ -221,7 +221,7 @@ pub fn build<'a>(
         }
     }
 
-    // Les nœuds d'une cible (toutes les étapes pour un hook qui en a)
+    // The nodes of a target (all the steps for a hook with steps)
     let targets_nodes = |target: Target| -> Vec<usize> {
         match target {
             Target::Step(..) => node_of.get(&target).copied().into_iter().collect(),
@@ -235,7 +235,7 @@ pub fn build<'a>(
         let hook = entry.hook;
         let hook_nodes = nodes_of_hook[&index].clone();
 
-        // `needs` et `inputs` du hook : valent pour toutes ses étapes
+        // `needs` and `inputs` of the hook: they apply to all its steps
         let mut hook_needs = Vec::new();
         for reference in hook.needs.iter().flatten() {
             let target = resolver.resolve(index, None, reference, &hook.name)?;
@@ -325,7 +325,7 @@ fn untrusted(root: &Path, hook: &Hook) -> Option<String> {
     ))
 }
 
-/// Résout `hook.output` en (nœud, sortie)
+/// Resolves `hook.output` into (node, output)
 fn resolve_input(
     resolver: &Resolver,
     nodes: &[Node],
@@ -380,7 +380,7 @@ struct Resolver<'e, 'a> {
 }
 
 impl Resolver<'_, '_> {
-    /// Toutes les cibles référencées par un hook (et ses étapes)
+    /// All the targets referenced by a hook (and its steps)
     fn references_of(&self, index: usize) -> Result<Vec<Target>, GoatHookerError> {
         let hook = self.entries[index].hook;
         let mut targets = Vec::new();
@@ -409,7 +409,7 @@ impl Resolver<'_, '_> {
         Ok(targets)
     }
 
-    /// Résout une référence vue depuis le hook `index` (et son étape `step`)
+    /// Resolves a reference seen from the hook `index` (and its step `step`)
     fn resolve(
         &self,
         index: usize,
@@ -427,7 +427,7 @@ impl Resolver<'_, '_> {
             None => (path, None),
         };
 
-        // Depuis une étape, `types` désigne d'abord une étape sœur
+        // From a step, `types` is first a sibling step
         if step.is_some()
             && !reference.contains([':', '/'])
             && let Some(position) = entry
@@ -481,7 +481,7 @@ impl Resolver<'_, '_> {
     }
 }
 
-/// Tri topologique (stable : ordre du fichier à égalité), avec détection des cycles
+/// Topological sort (stable: order of the file on ties), with detection of the cycles
 fn sort(mut nodes: Vec<Node>) -> Result<Graph, GoatHookerError> {
     let count = nodes.len();
     let mut remaining: Vec<usize> = nodes
@@ -523,7 +523,7 @@ fn sort(mut nodes: Vec<Node>) -> Result<Graph, GoatHookerError> {
         ));
     }
 
-    // Renumérote les nœuds dans l'ordre trouvé
+    // Numbers the nodes again in the found order
     let mut new_index = vec![0; count];
     for (new, &old) in order.iter().enumerate() {
         new_index[old] = new;
@@ -551,7 +551,7 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
-    /// Configs d'un monorepo de test : (dossier, json)
+    /// Configs of a test monorepo: (folder, json)
     fn load(files: &[(&str, &str)]) -> (tempfile::TempDir, Vec<Config>) {
         let dir = tempdir().unwrap();
         for (folder, json) in files {
@@ -565,7 +565,7 @@ mod tests {
         (dir, configs)
     }
 
-    /// Graphe de tous les hooks pre-commit
+    /// Graph of all the pre-commit hooks
     fn graph_of(configs: &[Config]) -> Result<Graph<'_>, GoatHookerError> {
         let matcher = Matcher::new(configs).unwrap();
         let hooks = matcher.hooks_to_run(Trigger::PreCommit, None);
@@ -634,7 +634,7 @@ mod tests {
             ),
         ]);
 
-        // seul `lint` matche : `codegen` est ajouté comme dépendance, sans fichiers
+        // only `lint` matches: `codegen` is added as a dependency, without files
         let matcher = Matcher::new(&configs).unwrap();
         let lint: Vec<_> = matcher
             .hooks_to_run(Trigger::PreCommit, None)

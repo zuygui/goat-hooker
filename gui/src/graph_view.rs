@@ -1,5 +1,5 @@
-//! Graphe affiché dans l'éditeur de nœuds : les nœuds d'un trigger, placés automatiquement,
-//! et les modifications des liens (`needs`, `inputs`) écrites dans les `hooker.config.json`.
+//! Graph shown in the node editor: the nodes of a trigger, placed automatically,
+//! and the changes of the links (`needs`, `inputs`) written to the `hooker.config.json` files.
 
 use std::path::{Path, PathBuf};
 
@@ -12,21 +12,21 @@ use goat_hooker::{
 
 use crate::repo::Repo;
 
-/// Un nœud de l'éditeur
+/// A node of the editor
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ViewNode {
-    /// `lint` ou `lint › types` (comme dans les résultats)
+    /// `lint` or `lint › types` (like in the results)
     pub label: String,
     pub hook: String,
     pub step: Option<String>,
-    /// `root` ou dossier relatif
+    /// `root` or relative folder
     pub project: String,
     pub project_dir: PathBuf,
-    /// Sorties : `files`, `stdout`, `status` puis les sorties déclarées
+    /// Outputs: `files`, `stdout`, `status` then the declared outputs
     pub outputs: Vec<String>,
-    /// Entrées : (nom, nœud source, sortie)
+    /// Inputs: (name, source node, output)
     pub inputs: Vec<(String, usize, String)>,
-    /// Nœuds attendus sans passer de valeur
+    /// Nodes it waits for without receiving a value
     pub needs: Vec<usize>,
     /// Variables read and written, and the nodes writing what this one reads
     pub reads: Vec<String>,
@@ -34,9 +34,9 @@ pub struct ViewNode {
     pub after: Vec<usize>,
     /// Why it isn't allowed to run (its lineage is cut)
     pub denied: Option<String>,
-    /// Hook écrit dans un `hooker.config.json` du dépôt (pas chargé depuis un fichier partagé)
+    /// Hook written in a `hooker.config.json` of the repository (not loaded from a shared file)
     pub editable: bool,
-    /// Colonne (niveau de dépendance) et ligne dans la colonne
+    /// Column (dependency level) and row in the column
     pub column: usize,
     pub row: usize,
 }
@@ -48,17 +48,17 @@ impl ViewNode {
     }
 }
 
-/// Lien à ajouter
+/// Link to add
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Link {
-    /// La cible attend la source
+    /// The target waits for the source
     Needs,
-    /// La cible reçoit la sortie `output` de la source, sous le nom `name`
+    /// The target receives the output `output` of the source, named `name`
     Input { name: String, output: String },
 }
 
 impl Repo {
-    /// Nœuds d'un trigger (tous les hooks, sans filtre sur les fichiers)
+    /// Nodes of a trigger (all the hooks, without filtering on the files)
     pub fn graph_view(&self, trigger: Trigger) -> Result<Vec<ViewNode>, GoatHookerError> {
         let configs = self.load_configs()?;
         let mut selected = Vec::new();
@@ -114,7 +114,7 @@ impl Repo {
             })
             .collect();
 
-        // Colonnes : un nœud est à droite de tous ceux qu'il attend (les nœuds sont triés)
+        // Columns: a node is right of all the ones it waits for (the nodes are sorted)
         let mut columns: Vec<Vec<usize>> = Vec::new();
         for index in 0..nodes.len() {
             let column = graph.nodes[index]
@@ -131,7 +131,7 @@ impl Repo {
             columns[column].push(index);
         }
 
-        // Lignes : chaque nœud près de ceux auxquels il est relié, pour éviter les fils croisés
+        // Rows: each node near the ones it is linked to, to avoid crossed wires
         let needs: Vec<&Vec<usize>> = graph.nodes.iter().map(|n| &n.needs).collect();
         let mut row = vec![0usize; nodes.len()];
         let place = |columns: &mut Vec<Vec<usize>>, row: &mut Vec<usize>, from_dependents: bool| {
@@ -185,7 +185,7 @@ impl Repo {
         Ok(nodes)
     }
 
-    /// Projet (index) et hook (index) écrits dans le dépôt pour un dossier et un nom
+    /// Project (index) and hook (index) written in the repository for a folder and a name
     fn raw_hook(&self, dir: &Path, name: &str) -> Option<(usize, usize)> {
         let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
         self.projects.iter().enumerate().find_map(|(p, project)| {
@@ -202,7 +202,7 @@ impl Repo {
         })
     }
 
-    /// Ajoute un lien `source → target`, puis vérifie le graphe (annulé en cas d'erreur, ex : cycle)
+    /// Adds a link `source → target`, then checks the graph (reverted on error, e.g. a cycle)
     pub fn add_link(
         &mut self,
         trigger: Trigger,
@@ -240,7 +240,7 @@ impl Repo {
         })
     }
 
-    /// Retire `source` des `needs` de `target`
+    /// Removes `source` from the `needs` of `target`
     pub fn remove_need(
         &mut self,
         trigger: Trigger,
@@ -270,7 +270,7 @@ impl Repo {
         })
     }
 
-    /// Retire l'entrée `name` de `target`
+    /// Removes the input `name` of `target`
     pub fn remove_input(
         &mut self,
         trigger: Trigger,
@@ -366,7 +366,7 @@ impl Repo {
         Ok(())
     }
 
-    /// Modifie un hook écrit dans le dépôt, enregistre, et vérifie que le graphe est toujours valide
+    /// Changes a hook written in the repository, saves it, and checks that the graph is still valid
     fn edit_hook(
         &mut self,
         trigger: Trigger,
@@ -395,7 +395,7 @@ impl Repo {
     }
 }
 
-/// Référence vers `source`, écrite dans la config de `target`
+/// Reference to `source`, written in the config of `target`
 fn reference_from(target: &ViewNode, source: &ViewNode) -> String {
     if source.project_dir == target.project_dir {
         match (&source.step, source.hook == target.hook) {
@@ -413,7 +413,7 @@ fn reference_from(target: &ViewNode, source: &ViewNode) -> String {
     }
 }
 
-/// Toutes les façons d'écrire la référence vers `source` (pour la retirer)
+/// Every way to write the reference to `source` (to remove it)
 fn reference_forms(target: &ViewNode, source: &ViewNode) -> Vec<String> {
     let step = source
         .step
@@ -501,7 +501,7 @@ mod tests {
         let trigger = Trigger::PreCommit;
         let nodes = repo.graph_view(trigger).unwrap();
 
-        // entrée depuis un autre projet + attente d'une étape sœur
+        // input from another project + wait for a sibling step
         repo.add_link(
             trigger,
             node(&nodes, "lint › types"),
@@ -534,7 +534,7 @@ mod tests {
         assert_eq!(types.inputs[0].0, "schema");
         assert_eq!(types.column, 1);
 
-        // retirer les liens
+        // remove the links
         repo.remove_input(trigger, types, "schema").unwrap();
         repo.remove_need(trigger, types, node(&nodes, "lint › eslint"))
             .unwrap();
@@ -549,7 +549,7 @@ mod tests {
         let trigger = Trigger::PreCommit;
         let nodes = repo.graph_view(trigger).unwrap();
 
-        // `lint` attend `test`, qui attend déjà `lint` → cycle
+        // `lint` waits for `test`, which already waits for `lint` → cycle
         let err = repo
             .add_link(
                 trigger,
