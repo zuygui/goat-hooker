@@ -296,6 +296,17 @@ pub fn staged_files(root: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
     Ok(split_paths(root, &output))
 }
 
+/// Tracked files with unstaged changes, as absolute paths
+pub fn unstaged_files(root: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
+    let output = git(root, &["diff", "--name-only", "-z"])?;
+    Ok(split_paths(root, &output))
+}
+
+/// Path of a file in the `.git` folder, like `index` (handles worktrees)
+pub fn git_file(root: &Path, name: &str) -> Result<PathBuf, GoatHookerError> {
+    git_path(root, name)
+}
+
 /// Files changed by the pushed commits (added, copied, modified, renamed).
 /// `refs` is what Git gives to the pre-push on stdin:
 /// `<local ref> <local sha> <remote ref> <remote sha>` (one line per ref).

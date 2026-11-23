@@ -193,6 +193,10 @@ pub enum AppCommands {
         verbose: bool,
     },
 
+    /// Run the cached pre-commit hooks as soon as files are staged, so that commits are instant
+    #[command()]
+    Watch,
+
     /// Check the setup: Git hooks, missing tools, patterns matching nothing, variables, trust
     #[command()]
     Doctor,

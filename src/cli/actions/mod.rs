@@ -14,3 +14,4 @@ pub mod status;
 pub mod trust;
 pub mod update;
 pub mod vars;
+pub mod watch;

@@ -358,7 +358,7 @@ fn from_history(root: &Path, configs: &[Config]) -> Vec<Finding> {
                 ),
             );
             findings.push(if cached(&project, &name) {
-                finding.detail("it is already cached: move it to pre-push if it doesn't need to block commits")
+                finding.detail("`hooker watch` runs it as soon as files are staged, so the commit takes it from the cache")
             } else {
                 finding.detail(
                     "add `\"cache\": true` to skip it when its files didn't change, or move it to pre-push",

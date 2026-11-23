@@ -310,6 +310,18 @@ Add `share` to the root `hooker.config.json` of a repository: `hooker search` (a
 
 A hooks file can have a `description`. GitHub's code search needs a token: `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth login`. `HOOKER_HUB_REPOS=owner/name,owner/other@branch` adds repositories the search can't find (private ones, branches).
 
+## Watch 👀
+
+`hooker watch` runs the pre-commit hooks each time files are staged, so `git commit` takes their results from the cache and finishes at once (and you know a hook fails before you commit):
+
+```
+$ hooker watch
+👀 Watching the staged files · 2 hooks: clippy, test
+✔ clippy 5.61s  ✔ test 8.02s  ready to commit
+```
+
+Only the hooks that the commit would take from the cache run ahead: cached, with `include`, not fixing files (`stage_fixed`), without `needs`, `inputs` or variables. They run on the files as they are, so a staged file that also has unstaged changes is waited for. Nothing is staged or put aside.
+
 ## Doctor 🩺
 
 `hooker doctor` checks the setup and says how to fix what it finds:

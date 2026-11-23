@@ -16,3 +16,4 @@ pub mod remote;
 pub mod runner;
 pub mod trust;
 pub mod variables;
+pub mod watch;
