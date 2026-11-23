@@ -27,7 +27,7 @@ pub fn resolve_config(root: &Path, config_path: Option<PathBuf>) -> Option<PathB
     }
 }
 
-/// Options de `hooker run`
+/// Options of `hooker run`
 pub struct RunFlags {
     pub dry_run: bool,
     pub verbose: bool,

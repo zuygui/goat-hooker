@@ -91,7 +91,7 @@ pub struct HookerApp {
     repo: Option<Repo>,
     /// Error when opening the repository / loading the configs
     error: Option<String>,
-    /// Message temporaire (installation, enregistrement...)
+    /// Temporary message (install, save...)
     notice: Option<(String, bool)>,
     filter: Filter,
     selected: Option<HookRef>,
@@ -778,7 +778,7 @@ impl HookerApp {
         .detach();
     }
 
-    // MARK: graphe
+    // MARK: graph
 
     /// Triggers with at least one hook (in the order of `Trigger::ALL`)
     fn graph_triggers(&self) -> Vec<Trigger> {
@@ -1141,7 +1141,7 @@ impl HookerApp {
         self.reload();
     }
 
-    // MARK: rendu
+    // MARK: render
 
     fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
@@ -1840,7 +1840,7 @@ impl HookerApp {
         }
         body = body.child(self.source_card(project, hook, cx));
 
-        // Dernier lancement
+        // Last run
         let mut last_run = card().child(section("LAST RUN", cx));
         match self.results.get(&key) {
             None => {
@@ -2230,7 +2230,7 @@ impl HookerApp {
                                     "From the status bar: from now on, Git runs them for you",
                                 )),
                         )
-                        // Liens
+                        // Links
                         .child(
                             h_flex()
                                 .gap_1()

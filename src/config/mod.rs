@@ -594,7 +594,7 @@ impl Hook {
     }
 }
 
-/// JSON Schema de `hooker.config.json`
+/// JSON Schema of `hooker.config.json`
 pub fn json_schema() -> String {
     let schema = schemars::schema_for!(Config);
     serde_json::to_string_pretty(&schema).unwrap() + "\n"
@@ -1010,7 +1010,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join(HOOK_CONFIG_FILENAME);
 
-        // ni cmd ni cmds
+        // neither cmd nor cmds
         write_json(
             &config_path,
             r#"{ "hooks": [ { "name": "empty", "trigger": "pre-commit" } ] }"#,

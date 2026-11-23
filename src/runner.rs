@@ -158,7 +158,7 @@ pub enum Output {
 pub struct CommandResult {
     pub cmd: String,
     pub success: bool,
-    /// Sortie (stdout + stderr) en mode `Capture`
+    /// Output (stdout + stderr) in `Capture` mode
     pub output: String,
 }
 
@@ -436,7 +436,7 @@ fn input_values(
         .collect()
 }
 
-/// Chemin de `path` vu depuis `dir` (`../api/src/lib.rs`)
+/// Path of `path` seen from `dir` (`../api/src/lib.rs`)
 fn relative_to(dir: &Path, path: &Path) -> PathBuf {
     let dir: Vec<Component> = dir.components().collect();
     let path_components: Vec<Component> = path.components().collect();

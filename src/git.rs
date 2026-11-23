@@ -508,7 +508,7 @@ mod tests {
             vec![root.join("api/new.rs")]
         );
 
-        // suppression de branche → rien
+        // deletion of a branch → nothing
         let refs = format!(
             "(delete) {} refs/heads/old {}\n",
             "0".repeat(40),

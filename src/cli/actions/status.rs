@@ -29,7 +29,7 @@ pub fn show_status() -> Result<(), GoatHookerError> {
     );
     println!();
 
-    // Hooks Git
+    // Git hooks
     if install::is_installed(&root) {
         println!(
             "  {:<11} {} {}",
@@ -78,7 +78,7 @@ pub fn show_status() -> Result<(), GoatHookerError> {
         .dimmed()
     );
 
-    // Projets
+    // Projects
     println!();
     println!("  {}", "Projects".bold());
     let labels: Vec<String> = configs
@@ -104,7 +104,7 @@ pub fn show_status() -> Result<(), GoatHookerError> {
         );
     }
 
-    // Prochain commit
+    // Next commit
     let staged = git::staged_files(&root)?;
     println!();
     println!(

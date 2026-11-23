@@ -1,5 +1,5 @@
 //! Lucide icons besides the ones of gpui-kit (license in `assets/LICENSE-LUCIDE`)
-//! et images de l'app
+//! and images of the app
 
 use std::borrow::Cow;
 
