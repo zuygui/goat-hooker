@@ -1,0 +1,17 @@
+{
+  "name": "goat-hooker-site",
+  "type": "module",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "sync": "node scripts/sync-docs.mjs",
+    "dev": "npm run sync && astro dev",
+    "build": "npm run sync && astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.41.7",
+    "astro": "^7.1.6",
+    "sharp": "^0.35.3"
+  }
+}

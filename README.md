@@ -6,7 +6,8 @@
 </p>
 
 <p align="center">
-  <a href="docs/README.md">Documentation</a> ·
+  <a href="https://zuygui.github.io/goat-hooker/">Website</a> ·
+  <a href="https://zuygui.github.io/goat-hooker/docs/">Documentation</a> ·
   <a href="docs/installation.md">Install</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="https://github.com/zuygui/goat-hooker/releases/latest">Latest release</a>
