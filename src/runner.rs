@@ -1081,59 +1081,68 @@ fn execute_in(
         let _ = child_stdin.write_all(content.as_bytes());
     }
 
-    // The output is read while the command runs (live output, timeout)
-    let collected = Mutex::new(Vec::<u8>::new());
-    let (status, timed_out) = std::thread::scope(|scope| -> std::io::Result<_> {
-        let pipes: Vec<Box<dyn std::io::Read + Send>> = [
-            child
-                .stdout
-                .take()
-                .map(|p| Box::new(p) as Box<dyn std::io::Read + Send>),
-            child
-                .stderr
-                .take()
-                .map(|p| Box::new(p) as Box<dyn std::io::Read + Send>),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        let readers: Vec<_> = pipes
-            .into_iter()
-            .map(|mut pipe| {
-                let collected = &collected;
-                let live = sandbox.live;
-                scope.spawn(move || {
-                    let mut buffer = [0u8; 8192];
-                    while let Ok(n) = pipe.read(&mut buffer) {
-                        if n == 0 {
-                            break;
-                        }
-                        collected.lock().unwrap().extend_from_slice(&buffer[..n]);
-                        if let Some(live) = live {
-                            live(&String::from_utf8_lossy(&buffer[..n]));
-                        }
-                    }
-                })
-            })
-            .collect();
+    // The output is read while the command runs (live output, timeout). The readers send
+    // what they read: the command can then be waited for without waiting for the processes it
+    // started, which may keep its output open (`sleep` started by Git Bash on Windows survives
+    // the end of `sh`).
+    let (sender, chunks) = std::sync::mpsc::channel::<Vec<u8>>();
+    for mut pipe in [
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn std::io::Read + Send>),
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn std::io::Read + Send>),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let sender = sender.clone();
+        std::thread::spawn(move || {
+            let mut buffer = [0u8; 8192];
+            while let Ok(n) = pipe.read(&mut buffer) {
+                if n == 0 || sender.send(buffer[..n].to_vec()).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    drop(sender);
 
-        let mut timed_out = false;
-        let status = loop {
-            if let Some(status) = child.try_wait()? {
-                break status;
-            }
-            if sandbox.deadline.is_some_and(|d| Instant::now() >= d) {
-                kill_tree(&mut child);
-                timed_out = true;
-                break child.wait()?;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        };
-        for reader in readers {
-            let _ = reader.join();
+    let mut collected = Vec::<u8>::new();
+    let mut receive = |chunk: Vec<u8>| {
+        if let Some(live) = sandbox.live {
+            live(&String::from_utf8_lossy(&chunk));
         }
-        Ok((status, timed_out))
-    })?;
+        collected.extend_from_slice(&chunk);
+    };
+    let mut timed_out = false;
+    let status = loop {
+        match chunks.recv_timeout(Duration::from_millis(10)) {
+            Ok(chunk) => receive(chunk),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                // Output closed: only the end of the process is left
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if sandbox.deadline.is_some_and(|d| Instant::now() >= d) {
+            kill_tree(&mut child);
+            timed_out = true;
+            break child.wait()?;
+        }
+    };
+    // The rest of the output: until it is closed, or a moment without anything once the
+    // command is over (processes it left behind keep it open)
+    let grace = Duration::from_millis(if timed_out { 200 } else { 1000 });
+    while let Ok(chunk) = chunks.recv_timeout(grace) {
+        receive(chunk);
+    }
     let success = status.success() && !timed_out;
 
     if output == Output::Inherit {
@@ -1150,7 +1159,7 @@ fn execute_in(
     if let Some(note) = network_note {
         captured.push_str(note);
     }
-    captured.push_str(&String::from_utf8_lossy(&collected.into_inner().unwrap()));
+    captured.push_str(&String::from_utf8_lossy(&collected));
     if timed_out {
         captured.push_str("\n⏱ stopped: the hook took longer than its `timeout`\n");
     }

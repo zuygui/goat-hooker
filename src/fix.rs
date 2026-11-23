@@ -61,8 +61,9 @@ pub fn diff(file: &Path, original: Option<&[u8]>) -> String {
     }
     let output = std::process::Command::new("git")
         .args(["diff", "--no-index", "--no-color", "-U2", "--"])
-        .arg(&before)
-        .arg(file)
+        // Without the `\\?\` prefix of canonical paths on Windows, that git doesn't read
+        .arg(git::plain(&before))
+        .arg(git::plain(file))
         .output();
     let _ = std::fs::remove_file(&before);
     let Ok(output) = output else {
