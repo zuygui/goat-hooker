@@ -43,6 +43,18 @@ fn git_path(root: &Path, name: &str) -> Result<PathBuf, GoatHookerError> {
     })
 }
 
+/// A path Git understands: without the `\\?\` prefix of canonical paths on Windows
+pub fn plain(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) => match rest.strip_prefix(r"UNC\") {
+            Some(unc) => PathBuf::from(format!(r"\\{unc}")),
+            None => PathBuf::from(rest),
+        },
+        None => path.to_path_buf(),
+    }
+}
+
 /// Ajoute des fichiers à l'index (pour `stage_fixed`)
 pub fn add(root: &Path, files: &[PathBuf]) -> Result<(), GoatHookerError> {
     if files.is_empty() {
@@ -50,7 +62,7 @@ pub fn add(root: &Path, files: &[PathBuf]) -> Result<(), GoatHookerError> {
     }
     let files: Vec<String> = files
         .iter()
-        .map(|f| f.to_string_lossy().to_string())
+        .map(|f| plain(f).to_string_lossy().to_string())
         .collect();
     let mut args = vec!["add", "--"];
     args.extend(files.iter().map(String::as_str));
@@ -232,7 +244,7 @@ fn merge_file(
     let output = Command::new("git")
         .arg("merge-file")
         .arg("-p")
-        .args([&current_file, &base_file, &other_file])
+        .args([plain(&current_file), plain(&base_file), plain(&other_file)])
         .current_dir(root)
         .output();
     let _ = fs::remove_dir_all(&dir);
@@ -392,6 +404,16 @@ mod tests {
         git(dir, &["config", "user.email", "test@test"]).unwrap();
         // The files are compared byte by byte (Windows converts the line endings by default)
         git(dir, &["config", "core.autocrlf", "false"]).unwrap();
+    }
+
+    #[test]
+    fn plain_paths() {
+        assert_eq!(plain(Path::new(r"\\?\C:\repo")), PathBuf::from(r"C:\repo"));
+        assert_eq!(
+            plain(Path::new(r"\\?\UNC\server\share")),
+            PathBuf::from(r"\\server\share")
+        );
+        assert_eq!(plain(Path::new("/home/repo")), PathBuf::from("/home/repo"));
     }
 
     #[test]

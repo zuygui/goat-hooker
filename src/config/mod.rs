@@ -855,14 +855,7 @@ fn resolve_import(base_dir: &Path, inc: &str) -> Result<Vec<PathBuf>, GoatHooker
 
     // Le dossier de base est échappé pour qu'un `[` dans son chemin ne casse pas le glob
     // Without the `\\?\` prefix of canonical paths on Windows, glob doesn't support it
-    let base = base_dir.to_string_lossy();
-    let base = match base.strip_prefix(r"\\?\") {
-        Some(rest) => match rest.strip_prefix(r"UNC\") {
-            Some(unc) => format!(r"\\{unc}"),
-            None => rest.to_string(),
-        },
-        None => base.to_string(),
-    };
+    let base = crate::git::plain(base_dir).to_string_lossy().to_string();
     let pattern = format!(
         "{}/{}/{}",
         glob::Pattern::escape(&base),
