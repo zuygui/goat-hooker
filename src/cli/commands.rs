@@ -26,6 +26,11 @@ pub enum AppCommands {
     Init {
         #[arg(short = 'w', default_value = ".", value_parser, value_hint = clap::ValueHint::DirPath)]
         work_dir: PathBuf,
+
+        /// Hooks to start with: rust, javascript, python, checks, commits, or `auto` (from the
+        /// files of the project). Asked in a terminal when missing
+        #[arg(short = 't', long, value_delimiter = ',')]
+        template: Vec<String>,
     },
 
     /// Install Git Hooks
@@ -193,6 +198,18 @@ pub enum AppCommands {
         verbose: bool,
     },
 
+    /// Run the hooks fixing files (`stage_fixed`) on the changed files, without staging them
+    #[command()]
+    Fix {
+        /// Files to fix (default: the files changed since the last commit)
+        #[arg(value_hint = clap::ValueHint::FilePath)]
+        files: Vec<PathBuf>,
+
+        /// Show the output of every hook
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
     /// Run the cached pre-commit hooks as soon as files are staged, so that commits are instant
     #[command()]
     Watch,
@@ -204,9 +221,17 @@ pub enum AppCommands {
     /// Show the last runs of the hooks and the slowest hooks
     #[command()]
     History {
-        /// Number of runs
-        #[arg(short = 'n', long, default_value_t = 20)]
-        limit: usize,
+        /// Number of runs (default: 20, every run with `--export`)
+        #[arg(short = 'n', long)]
+        limit: Option<usize>,
+
+        /// Totals by hook for the team: `csv` (one line per hook) or `json` (totals and runs)
+        #[arg(long, value_parser = ["csv", "json"])]
+        export: Option<String>,
+
+        /// File to write the export to (default: stdout)
+        #[arg(short = 'o', long, requires = "export")]
+        output: Option<PathBuf>,
     },
 
     /// Forget the results of the hooks that passed (they all run again)

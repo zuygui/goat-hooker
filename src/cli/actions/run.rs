@@ -14,6 +14,7 @@ use goat_hooker::{
     git,
     graph::{self, Graph},
     matcher::Matcher,
+    notify,
     runner::{self, HookInput, HookResult, Output, Progress},
 };
 
@@ -27,7 +28,7 @@ pub fn resolve_config(root: &Path, config_path: Option<PathBuf>) -> Option<PathB
     }
 }
 
-/// Options de `hooker run`
+/// Options of `hooker run`
 pub struct RunFlags {
     pub dry_run: bool,
     pub verbose: bool,
@@ -48,10 +49,11 @@ pub fn run_hooks(
         from_git,
         no_cache,
     } = flags;
-    // `HOOKER_SKIP=1 git commit` to skip the hooks
-    if std::env::var(git::SKIP_ENV).is_ok_and(|v| !v.is_empty() && v != "0") {
-        return Ok(());
-    }
+    // `HOOKER_SKIP=1 git commit` skips every hook, `HOOKER_SKIP=lint,test` only these ones
+    let skip = match git::skip_setting() {
+        git::Skip::All => return Ok(()),
+        git::Skip::Hooks(hooks) => hooks,
+    };
 
     let root = ui::current_repo()?;
 
@@ -70,6 +72,10 @@ pub fn run_hooks(
     };
 
     let configs = ConfigLoader::new().load_recursive(&config_path)?;
+    // The Git hooks follow the configs: a trigger they start to use gets its hook
+    if from_git {
+        let _ = goat_hooker::install::sync(&root, &configs);
+    }
 
     // Git gives the pushed refs to the pre-push on stdin.
     // It is read to filter the hooks, then given again to each command.
@@ -79,6 +85,7 @@ pub fn run_hooks(
         force_color: std::io::stderr().is_terminal(),
         no_cache,
         ci_files: None,
+        skip,
     };
 
     if dry_run {
@@ -123,6 +130,26 @@ pub fn run_hooks(
         .filter(|r| r.failed())
         .map(|r| r.name.as_str())
         .collect();
+
+    // A long run started by Git: you may be doing something else
+    if from_git && notify::threshold().is_some_and(|min| start.elapsed() >= min) {
+        let repo = root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let took = ui::duration(start.elapsed());
+        if failed.is_empty() {
+            notify::send(
+                &format!("✔ {} passed", trigger.as_str()),
+                &format!("{repo}: {} in {took}", ui::plural(results.len(), "hook")),
+            );
+        } else {
+            notify::send(
+                &format!("✘ {} failed", trigger.as_str()),
+                &format!("{repo}: {} ({took})", failed.join(", ")),
+            );
+        }
+    }
     if !failed.is_empty() {
         return Err(GoatHookerError::HookFailed(failed.join("`, `")));
     }
@@ -207,7 +234,11 @@ impl Reporter {
                         "cached".dimmed().to_string(),
                     )
                 } else if result.skipped {
-                    ("–".dimmed().to_string(), "skipped".to_string())
+                    let extra = match result.note.as_deref() {
+                        Some(note) => format!("skipped ({note})"),
+                        None => "skipped".to_string(),
+                    };
+                    ("–".dimmed().to_string(), extra.dimmed().to_string())
                 } else if result.denied {
                     ("⛔".to_string(), "denied".red().to_string())
                 } else if result.success {
@@ -234,6 +265,7 @@ impl Reporter {
                     _ => eprintln!("{line}"),
                 }
             }
+            Progress::Output(..) => {}
         }
     }
 
@@ -383,10 +415,15 @@ pub(crate) fn print_summary(results: &[HookResult], elapsed: Duration) {
                 ui::command("hooker trust")
             );
         } else {
+            let names: Vec<&str> = results
+                .iter()
+                .filter(|r| r.failed())
+                .map(|r| r.name.split(" › ").next().unwrap_or(&r.name))
+                .collect();
             eprintln!(
-                "  {} fix the errors above, or skip the hooks once with {}",
+                "  {} fix the errors above, or skip them once with {}",
                 "hint:".dimmed(),
-                ui::command("HOOKER_SKIP=1 git ...")
+                ui::command(&format!("HOOKER_SKIP={} git ...", names.join(",")))
             );
         }
     }

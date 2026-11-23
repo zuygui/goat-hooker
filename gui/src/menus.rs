@@ -25,6 +25,11 @@ gpui_kit::actions!(
         GoReview,
         GoHistory,
         GoDoctor,
+        GoImpact,
+        GoProjects,
+        GoFixes,
+        RunPrePush,
+        TogglePalette,
         OpenDocs,
         ReportIssue,
         OpenReleases,
@@ -54,10 +59,13 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(key!("1"), ShowList, None),
         KeyBinding::new(key!("2"), ShowGraph, None),
         KeyBinding::new(key!("shift-d"), ToggleTheme, None),
+        KeyBinding::new(key!("k"), TogglePalette, None),
+        KeyBinding::new(key!("shift-p"), TogglePalette, None),
+        KeyBinding::new(key!("shift-f"), GoFixes, None),
     ]);
 
     cx.on_action(|_: &Quit, cx| cx.quit());
-    cx.on_action(|_: &OpenDocs, cx| cx.open_url(&format!("{REPOSITORY}#readme")));
+    cx.on_action(|_: &OpenDocs, cx| cx.open_url(&format!("{REPOSITORY}/tree/main/docs")));
     cx.on_action(|_: &ReportIssue, cx| cx.open_url(&format!("{REPOSITORY}/issues/new")));
     cx.on_action(|_: &OpenReleases, cx| cx.open_url(crate::update::RELEASES));
 
@@ -88,6 +96,8 @@ fn menus() -> Vec<Menu> {
         Menu::new("Hooks").items([
             MenuItem::action("New Hook…", NewHook),
             MenuItem::action("Run Pre-commit", RunPreCommit),
+            MenuItem::action("Run Pre-push", RunPrePush),
+            MenuItem::action("Fix Changed Files…", GoFixes),
             MenuItem::separator(),
             MenuItem::action("Install Git Hooks", InstallHooks),
             MenuItem::action("Reload Configs", ReloadConfigs),
@@ -95,6 +105,7 @@ fn menus() -> Vec<Menu> {
         Menu::new("View").items([
             MenuItem::action("List", ShowList),
             MenuItem::action("Graph", ShowGraph),
+            MenuItem::action("Command Palette…", TogglePalette),
             MenuItem::separator(),
             MenuItem::action("Toggle Dark Mode", ToggleTheme),
         ]),
@@ -105,6 +116,8 @@ fn menus() -> Vec<Menu> {
             MenuItem::action("Variables", GoVariables),
             MenuItem::action("Browse Shared Hooks", GoBrowse),
             MenuItem::action("Review Updates", GoReview),
+            MenuItem::action("Impact of a File", GoImpact),
+            MenuItem::action("Project Graph", GoProjects),
             MenuItem::action("History", GoHistory),
             MenuItem::action("Doctor", GoDoctor),
         ]),

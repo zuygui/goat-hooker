@@ -41,6 +41,7 @@ pub struct PagesState {
     hub_project: usize,
     /// Last commit of the repositories of hooks: (url, rev) → checking / result
     remote_latest: std::collections::HashMap<RemoteKey, Option<RemoteCheck>>,
+    pub tools: super::tools::ToolsState,
     _subscription: Subscription,
 }
 
@@ -55,6 +56,7 @@ impl PagesState {
             }
         });
         Self {
+            tools: super::tools::ToolsState::new(window, cx),
             _subscription: subscription,
             remote_latest: Default::default(),
             variables: vec![],
@@ -117,7 +119,7 @@ fn permission_chips(hook: &Hook, cx: &App) -> Div {
         )
 }
 
-fn code_line(text: impl Into<SharedString>, cx: &App) -> Div {
+pub(super) fn code_line(text: impl Into<SharedString>, cx: &App) -> Div {
     let theme = cx.theme();
     div()
         .w_full()
@@ -173,7 +175,7 @@ impl HookerApp {
     }
 
     /// Opens a hook of the list from its `project:name` reference
-    fn select_reference(&mut self, reference: &str, cx: &mut Context<Self>) {
+    pub(super) fn select_reference(&mut self, reference: &str, cx: &mut Context<Self>) {
         let Some(repo) = self.repo.as_ref() else {
             return;
         };
@@ -224,6 +226,33 @@ impl HookerApp {
                 cx,
             ))
             .child(self.nav_row(
+                "impact",
+                lucide("crosshair"),
+                None,
+                "Impact",
+                None,
+                Filter::Impact,
+                cx,
+            ))
+            .child(self.nav_row(
+                "projects",
+                lucide("network"),
+                None,
+                "Project graph",
+                None,
+                Filter::Projects,
+                cx,
+            ))
+            .child(self.nav_row(
+                "fixes",
+                lucide("wand"),
+                None,
+                "Fix files",
+                None,
+                Filter::Fixes,
+                cx,
+            ))
+            .child(self.nav_row(
                 "doctor",
                 lucide("stethoscope"),
                 problems.then_some(theme.warning),
@@ -264,11 +293,20 @@ impl HookerApp {
             Filter::Review => self.render_review(cx),
             Filter::History => self.render_history(cx),
             Filter::Doctor => self.render_doctor(cx),
+            Filter::Impact => self.render_impact(cx),
+            Filter::Projects => self.render_projects(cx),
+            Filter::Fixes => self.render_fixes(cx),
             _ => self.render_browse(window, cx),
         }
     }
 
-    fn page(&self, title: &str, subtitle: &str, body: impl IntoElement, cx: &App) -> AnyElement {
+    pub(super) fn page(
+        &self,
+        title: &str,
+        subtitle: &str,
+        body: impl IntoElement,
+        cx: &App,
+    ) -> AnyElement {
         let theme = cx.theme();
         div()
             .size_full()
@@ -1149,7 +1187,7 @@ impl HookerApp {
     }
 }
 
-fn card_div(cx: &App) -> Div {
+pub(super) fn card_div(cx: &App) -> Div {
     card(cx)
 }
 

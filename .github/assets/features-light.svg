@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="830" height="856" viewBox="0 0 830 856" fill="none">
+<defs><clipPath id="card"><rect width="830" height="856" rx="20"/></clipPath></defs>
+<g clip-path="url(#card)">
+<rect width="830" height="856" rx="20" fill="#FFFFFF"/>
+<path transform="translate(0 741.0) scale(1.0)" d="M0 117.369L12.525 113.907C25.05 110.445 50.7958 103.521 75.8458 100.059C100.896 96.5975 126.642 96.5975 151.692 86.2116C177.437 75.8257 202.487 55.0539 227.537 79.2876C253.283 103.521 278.333 172.761 303.383 190.071C329.129 207.38 354.179 172.761 379.229 141.603C404.975 110.445 430.025 82.7496 455.771 79.2876C480.821 75.8257 505.871 96.5975 531.617 113.907C556.667 131.217 581.717 145.065 607.462 141.603C632.512 138.141 657.562 117.369 683.308 103.521C708.358 89.6735 734.104 82.7496 759.154 93.1355C784.204 103.521 809.95 131.217 822.475 145.065L835 158.913V242H822.475C809.95 242 784.204 242 759.154 242C734.104 242 708.358 242 683.308 242C657.562 242 632.512 242 607.462 242C581.717 242 556.667 242 531.617 242C505.871 242 480.821 242 455.771 242C430.025 242 404.975 242 379.229 242C354.179 242 329.129 242 303.383 242C278.333 242 253.283 242 227.537 242C202.487 242 177.437 242 151.692 242C126.642 242 100.896 242 75.8458 242C50.7958 242 25.05 242 12.525 242H0V117.369Z" fill="#65DDDB" fill-opacity="0.28"/>
+<text x="40" y="52" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" font-weight="700" fill="#F3678B" text-anchor="start" >How Goat Hooker compares</text>
+<text x="40" y="78" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#6E6868" text-anchor="start" >Features of the Git hooks managers, built in or with their usual setup</text>
+<rect x="364" y="86" width="104" height="658" rx="12" fill="#E8FAFA"/>
+<text x="416.0" y="114" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#F3678B" text-anchor="middle" >Goat Hooker</text>
+<text x="528.0" y="114" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#1F1D1D" text-anchor="middle" >lefthook</text>
+<text x="640.0" y="114" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#1F1D1D" text-anchor="middle" >pre-commit</text>
+<text x="752.0" y="106" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1F1D1D" text-anchor="middle" >husky +</text>
+<text x="752.0" y="121" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1F1D1D" text-anchor="middle" >lint-staged</text>
+<text x="40" y="154" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#F3678B" text-anchor="start" letter-spacing="1.2">EVERYDAY HOOKS</text>
+<line x1="40" x2="790" y1="172" y2="172" stroke="#ECEAEA"/>
+<text x="40" y="193" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Runs hooks on the staged files they target</text>
+<circle cx="416.0" cy="188" r="9" fill="#65DDDB"/><path d="M412.0 188 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="528.0" cy="188" r="9" fill="#65DDDB"/><path d="M524.0 188 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="640.0" cy="188" r="9" fill="#65DDDB"/><path d="M636.0 188 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="752.0" cy="188" r="8" stroke="#65DDDB" stroke-width="2" fill="none"/><path d="M752.0 180 a8 8 0 0 1 0 16 z" fill="#65DDDB"/>
+<line x1="40" x2="790" y1="204" y2="204" stroke="#ECEAEA"/>
+<text x="40" y="225" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Hides unstaged changes while hooks run</text>
+<circle cx="416.0" cy="220" r="9" fill="#65DDDB"/><path d="M412.0 220 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="528.0" cy="220" r="9" fill="#65DDDB"/><path d="M524.0 220 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="640.0" cy="220" r="9" fill="#65DDDB"/><path d="M636.0 220 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="752.0" cy="220" r="8" stroke="#65DDDB" stroke-width="2" fill="none"/><path d="M752.0 212 a8 8 0 0 1 0 16 z" fill="#65DDDB"/>
+<line x1="40" x2="790" y1="236" y2="236" stroke="#ECEAEA"/>
+<text x="40" y="257" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Stages again the files formatters fixed</text>
+<circle cx="416.0" cy="252" r="9" fill="#65DDDB"/><path d="M412.0 252 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="528.0" cy="252" r="9" fill="#65DDDB"/><path d="M524.0 252 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="634.0" y="250.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<circle cx="752.0" cy="252" r="8" stroke="#65DDDB" stroke-width="2" fill="none"/><path d="M752.0 244 a8 8 0 0 1 0 16 z" fill="#65DDDB"/>
+<line x1="40" x2="790" y1="268" y2="268" stroke="#ECEAEA"/>
+<text x="40" y="289" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Runs hooks in parallel</text>
+<circle cx="416.0" cy="284" r="9" fill="#65DDDB"/><path d="M412.0 284 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="528.0" cy="284" r="9" fill="#65DDDB"/><path d="M524.0 284 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="640.0" cy="284" r="8" stroke="#65DDDB" stroke-width="2" fill="none"/><path d="M640.0 276 a8 8 0 0 1 0 16 z" fill="#65DDDB"/>
+<circle cx="752.0" cy="284" r="8" stroke="#65DDDB" stroke-width="2" fill="none"/><path d="M752.0 276 a8 8 0 0 1 0 16 z" fill="#65DDDB"/>
+<line x1="40" x2="790" y1="300" y2="300" stroke="#ECEAEA"/>
+<text x="40" y="321" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Shared hooks from Git repositories</text>
+<circle cx="416.0" cy="316" r="9" fill="#65DDDB"/><path d="M412.0 316 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="528.0" cy="316" r="9" fill="#65DDDB"/><path d="M524.0 316 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="640.0" cy="316" r="9" fill="#65DDDB"/><path d="M636.0 316 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="746.0" y="314.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<line x1="40" x2="790" y1="332" y2="332" stroke="#ECEAEA"/>
+<text x="40" y="353" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Local changes for one computer</text>
+<circle cx="416.0" cy="348" r="9" fill="#65DDDB"/><path d="M412.0 348 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="528.0" cy="348" r="9" fill="#65DDDB"/><path d="M524.0 348 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="634.0" y="346.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="746.0" y="346.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<line x1="40" x2="790" y1="364" y2="364" stroke="#ECEAEA"/>
+<text x="40" y="385" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Skips one hook by name</text>
+<circle cx="416.0" cy="380" r="9" fill="#65DDDB"/><path d="M412.0 380 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="528.0" cy="380" r="9" fill="#65DDDB"/><path d="M524.0 380 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="640.0" cy="380" r="9" fill="#65DDDB"/><path d="M636.0 380 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="746.0" y="378.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<line x1="40" x2="790" y1="396" y2="396" stroke="#ECEAEA"/>
+<text x="40" y="417" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >A config per project of a mono-repo</text>
+<circle cx="416.0" cy="412" r="9" fill="#65DDDB"/><path d="M412.0 412 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="528.0" cy="412" r="8" stroke="#65DDDB" stroke-width="2" fill="none"/><path d="M528.0 404 a8 8 0 0 1 0 16 z" fill="#65DDDB"/>
+<rect x="634.0" y="410.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="746.0" y="410.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<line x1="40" x2="790" y1="428" y2="428" stroke="#ECEAEA"/>
+<text x="40" y="449" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Installs the tools the hooks need</text>
+<rect x="410.0" y="442.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="522.0" y="442.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<circle cx="640.0" cy="444" r="9" fill="#65DDDB"/><path d="M636.0 444 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="746.0" y="442.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<text x="40" y="482" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#F3678B" text-anchor="start" letter-spacing="1.2">ONLY IN GOAT HOOKER</text>
+<line x1="40" x2="790" y1="500" y2="500" stroke="#ECEAEA"/>
+<text x="40" y="521" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Skips hooks whose files didn&#x27;t change (cache)</text>
+<circle cx="416.0" cy="516" r="9" fill="#65DDDB"/><path d="M412.0 516 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="522.0" y="514.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="634.0" y="514.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="746.0" y="514.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<line x1="40" x2="790" y1="532" y2="532" stroke="#ECEAEA"/>
+<text x="40" y="553" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Runs the hooks of the projects a change affects</text>
+<circle cx="416.0" cy="548" r="9" fill="#65DDDB"/><path d="M412.0 548 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="522.0" y="546.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="634.0" y="546.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="746.0" y="546.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<line x1="40" x2="790" y1="564" y2="564" stroke="#ECEAEA"/>
+<text x="40" y="585" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Hooks that pass values to each other (graph)</text>
+<circle cx="416.0" cy="580" r="9" fill="#65DDDB"/><path d="M412.0 580 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="522.0" y="578.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="634.0" y="578.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="746.0" y="578.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<line x1="40" x2="790" y1="596" y2="596" stroke="#ECEAEA"/>
+<text x="40" y="617" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Sandbox: read-only files, no network</text>
+<circle cx="416.0" cy="612" r="9" fill="#65DDDB"/><path d="M412.0 612 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="522.0" y="610.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="634.0" y="610.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="746.0" y="610.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<line x1="40" x2="790" y1="628" y2="628" stroke="#ECEAEA"/>
+<text x="40" y="649" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Review of shared hooks before they run</text>
+<circle cx="416.0" cy="644" r="9" fill="#65DDDB"/><path d="M412.0 644 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="522.0" y="642.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="634.0" y="642.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="746.0" y="642.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<line x1="40" x2="790" y1="660" y2="660" stroke="#ECEAEA"/>
+<text x="40" y="681" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Runs hooks while you stage (hooker watch)</text>
+<circle cx="416.0" cy="676" r="9" fill="#65DDDB"/><path d="M412.0 676 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="522.0" y="674.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="634.0" y="674.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="746.0" y="674.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<line x1="40" x2="790" y1="692" y2="692" stroke="#ECEAEA"/>
+<text x="40" y="713" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Desktop app</text>
+<circle cx="416.0" cy="708" r="9" fill="#65DDDB"/><path d="M412.0 708 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="522.0" y="706.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="634.0" y="706.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="746.0" y="706.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<line x1="40" x2="790" y1="724" y2="724" stroke="#ECEAEA"/>
+<text x="40" y="745" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Imports husky, lefthook and pre-commit configs</text>
+<circle cx="416.0" cy="740" r="9" fill="#65DDDB"/><path d="M412.0 740 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="522.0" y="738.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="634.0" y="738.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<rect x="746.0" y="738.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<circle cx="48" cy="778" r="9" fill="#65DDDB"/><path d="M44 778 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<text x="64" y="783" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6E6868" text-anchor="start" >built in</text>
+<circle cx="148" cy="778" r="8" stroke="#65DDDB" stroke-width="2" fill="none"/><path d="M148 770 a8 8 0 0 1 0 16 z" fill="#65DDDB"/>
+<text x="164" y="783" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6E6868" text-anchor="start" >partly, or with another tool</text>
+<rect x="356" y="776.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
+<text x="378" y="783" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6E6868" text-anchor="start" >no</text>
+<text x="40" y="808" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#6E6868" text-anchor="start" >lefthook 2.2, pre-commit 4.7, husky 9.1 + lint-staged 17.6, November 2026</text>
+</g>
+</svg>

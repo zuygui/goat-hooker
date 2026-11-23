@@ -1,0 +1,33 @@
+{
+  "runs": 15,
+  "scenarios": {
+    "noop": {
+      "none": 6,
+      "goat-hooker": 30,
+      "lefthook": 28,
+      "pre-commit": 146,
+      "husky + lint-staged": 395
+    },
+    "five": {
+      "none": 6,
+      "goat-hooker": 238,
+      "lefthook": 241,
+      "pre-commit": 1173,
+      "husky + lint-staged": 541
+    },
+    "retry": {
+      "goat-hooker": 24,
+      "lefthook": 233,
+      "pre-commit": 1176,
+      "husky + lint-staged": 567
+    }
+  },
+  "versions": {
+    "goat-hooker": "goat-hooker 0.2.0",
+    "lefthook": "2.2.2",
+    "pre-commit": "pre-commit 4.7.0",
+    "husky": "9.1.7",
+    "lint-staged": "17.6.2",
+    "git": "git version 2.43.0"
+  }
+}

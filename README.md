@@ -1,426 +1,153 @@
 ![Goat Hooker is a open-source Git hooks manager](https://raw.githubusercontent.com/zuygui/goat-hooker/refs/heads/main/.github/assets/banner-light.svg#gh-light-mode-only)
 ![Goat Hooker is a open-source Git hooks manager](https://raw.githubusercontent.com/zuygui/goat-hooker/refs/heads/main/.github/assets/banner-dark.svg#gh-dark-mode-only)
 
-# Goat Hooker
+<p align="center">
+  <b>Git hooks that only run what changed, for every project of your mono-repo, from the terminal or a desktop app.</b>
+</p>
 
-> Goat-Hooker is a free, open-source and easy-to-use Git Hooks Manager to enhance your projects.
+<p align="center">
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="docs/installation.md">Install</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="https://github.com/zuygui/goat-hooker/releases/latest">Latest release</a>
+</p>
 
-> [!IMPORTANT] 
-> The project still in development and is not ready to use in production.
+> [!IMPORTANT]
+> Goat Hooker is under active development and is not ready for production use yet. Current release: **v0.2.0**.
 
-## Features 🚀
-
-- [x] Easy to write/read configuration files
-- [x] Mono-repos support: each sub-project owns its config, with glob imports (`packages/*`) or automatic discovery
-- [x] Shell commands support
-- [x] All types of Git Hooks supported
-- [x] Run `pre-commit` hooks only on the staged files they target, `pre-push` hooks only on the pushed files they target
-- [x] Pass the targeted files to commands (`{files}` / `$HOOKER_FILES`)
-- [x] Pre-commit hooks only see what is going to be committed (unstaged changes are put aside)
-- [x] Re-stage files fixed by formatters (`stage_fixed`)
-- [x] Run hooks in parallel
-- [x] Shared hooks files, local or from a git repository (`path` / `from`)
-- [x] Hooks graph: hooks and steps that wait for each other and pass values to each other
-- [x] Variables shared between hooks, with who may write and read them
-- [x] Permissions: read-only files, no network, filtered environment
-- [x] Hooks from other repositories run only once trusted, again when they change
-- [x] Ready-to-use hooks (Rust, JavaScript, Python, conventional commits, common checks) and a search of the hooks shared on GitHub
-- [x] Import from husky / lint-staged, lefthook and pre-commit
-- [x] JSON schema for autocompletion in editors
-- [x] A desktop app for those who prefer not to use the CLI
-
-## Installation 📦
-
-**CLI** (`hooker`):
+## Install
 
 ```sh
-brew install zuygui/tap/goat-hooker        # macOS, Linux
 curl -fsSL https://raw.githubusercontent.com/zuygui/goat-hooker/main/install.sh | sh
-cargo binstall goat-hooker                  # prebuilt, with cargo-binstall
-cargo install goat-hooker                   # from the sources
 ```
 
-or download the archive of your platform from the [latest release](https://github.com/zuygui/goat-hooker/releases/latest).
+This installs the `hooker` CLI. It's also on Homebrew (`brew install zuygui/tap/goat-hooker`) and crates.io (`cargo binstall goat-hooker`). The desktop app ships as a `.dmg`, an `.exe` installer, a `.deb` and an `.AppImage` in the [latest release](https://github.com/zuygui/goat-hooker/releases/latest). More in the [installation guide](docs/installation.md).
 
-**Desktop app** with Homebrew: `brew install --cask zuygui/tap/goat-hooker`. The app tells when a new version is out.
-
-**Desktop app**: download the installer of your platform from the [latest release](https://github.com/zuygui/goat-hooker/releases/latest):
-
-| Platform | Installer | CLI included |
-|----------|-----------|--------------|
-| macOS (Apple Silicon / Intel) | `.dmg` | `Goat Hooker.app/Contents/MacOS/hooker` |
-| Windows | `-setup.exe` | `hooker.exe` next to the app |
-| Linux | `.deb` / `.AppImage` | `/usr/bin/hooker` (`.deb`) |
-
-> [!NOTE]
-> The installers aren't signed yet: on macOS, right click on the app → Open the first time; on Windows, SmartScreen → More info → Run anyway.
-
-From the sources:
+## A taste of Goat Hooker
 
 ```sh
-cargo install --path .        # the `hooker` CLI
-cargo install --path gui      # the `goat-hooker-gui` desktop app
+hooker init -t auto   # start from the hooks found for your project
+hooker install        # plug them into Git
 ```
 
-On Linux, the desktop app needs `libxkbcommon`, `wayland`, `vulkan`, `fontconfig` and `xcb` development packages to build.
-
-## Releasing 🚀
-
-Releases are automatic, from the [conventional commits](https://www.conventionalcommits.org):
-
-1. every push on `main` opens or updates a `chore: release` pull request, with the new version and the `CHANGELOG.md`
-2. merging it publishes `goat-hooker` on crates.io, creates the `vX.Y.Z` tag and the GitHub release
-3. the CLI archives and the app installers are built for every platform and added to the release
-
-The repository needs a `CARGO_REGISTRY_TOKEN` secret (crates.io token with the `publish-new` and `publish-update` scopes), and GitHub Actions allowed to create pull requests (Settings → Actions → General).
-
-The Homebrew tap (`zuygui/homebrew-tap`, with `Formula/` and `Casks/`) is updated by the release workflow when the `HOMEBREW_TAP_TOKEN` secret holds a token allowed to push to it.
-
-## Usage 🐐
-
-```sh
-hooker             # status: Git hooks, projects, hooks of the next commit
-hooker init        # create hooker.config.json
-hooker add         # add a hook (an assistant asks what's missing)
-hooker install     # install the Git hooks in .git/hooks (or core.hooksPath)
-hooker run pre-commit   # run manually the hooks of a trigger
-hooker run pre-commit -v   # also show the output of the hooks that passed
-hooker run pre-commit --dry-run   # show the hooks that would run, and on which files
-hooker list        # list the configurations and their hooks
-hooker update      # update the hooks loaded from git repositories
-hooker search rust # find hooks shared on GitHub and add them
-hooker ci          # run the hooks on the files changed by a pull request (CI)
-hooker cache-clear # forget the results of the hooks that passed
-hooker history     # last runs and slowest hooks
-hooker trust       # review and trust the hooks loaded from other repositories
-hooker outdated    # hooks of other repositories with a newer version
-hooker pin         # pin them to the commit in use
-hooker vars        # variables shared between hooks: value, writers, readers
-hooker import      # convert a husky / lint-staged, lefthook or pre-commit config
-hooker schema      # print the JSON schema of the configuration
-hooker completion zsh > ~/.zfunc/_hooker   # shell completion
-```
-
-`hooker add` also works without a terminal:
-
-```sh
-hooker add -n "ESLint" -t pre-commit -i "src/**/*.ts" -c "eslint {files}" -p packages/web
-```
-
-Hooks show a spinner while running, then a summary. Only the output of the failed hooks is shown (all of them with `-v`).
-
-`hooker install` doesn't overwrite hooks it didn't install, use `--force` for that.
-
-`HOOKER_SKIP=1 git commit` skips the hooks.
-
-## Desktop app 🖥️
-
-`goat-hooker-gui [repository]` opens a repository in a desktop app (built with [GPUI](https://www.gpui.rs) and [GPUI Kit](https://gpui-kit.com)):
-
-- browse the hooks by trigger or by project of the mono-repo
-- see which hooks will run on the next commit, and on which staged files
-- run a hook, or the whole pre-commit, and read its output
-- add, edit and delete hooks without touching the JSON
-- install the Git hooks
-- **Graph** view: the hooks of a trigger as connected nodes, like in Blender
-  - nodes are laid out from the config (no positions to save): each node sits right of what it waits for
-  - drag from an output to a node to pass it as an input (`inputs`), or to its *waits for* row to add an order dependency (`needs`)
-  - `×` on a link removes it; cycles are refused
-  - run the trigger and see each node's result and duration
-  - edits are written to the `hooker.config.json` files, so the JSON stays the source of truth
-  - double-click the background (or drop a wire on it) to create a hook, hover a node to delete it
-  - variables are drawn from the hooks writing them to the hooks reading them
-- **History**: the last runs and the slowest hooks
-- **Doctor**: what could keep the hooks from running, with a button for the fixes the app can do
-- the **Source** of a hook: its JSON in the config file, the scripts it runs, the hooks file it loads; **Edit the JSON** opens an editor with colors and autocompletion (keys, triggers, hooks, variables, outputs) that checks the file while you type
-- the graph edits a node in a panel next to it, and its changes can be undone (⌘/Ctrl+Z)
-- **Variables**: value, writers and readers of each variable
-- **Browse hooks**: search the hooks shared on GitHub, set their parameters and add them
-- **To review**: the commands and permissions of the hooks of other repositories, to trust them
-- a repository without config offers to import husky, lint-staged, lefthook or pre-commit
-- a menu bar (native on macOS, in the title bar on Linux and Windows) with shortcuts: ⌘/Ctrl+O open a repository, ⌘/Ctrl+N new hook, ⌘/Ctrl+R run the pre-commit, ⌘/Ctrl+Shift+R reload the configs, ⌘/Ctrl+1 / 2 list or graph, ⌘/Ctrl+Shift+D dark mode
-
-## Contributing 🤝
-
-goat-hooker runs its own hooks (see [`hooker.config.json`](hooker.config.json)): `rustfmt` and `clippy` on commit, the JSON schema regenerated when the config changes, a conventional commit message (release-plz builds the changelog from it) and the tests before a push.
-
-```sh
-cargo install --path . && hooker install
-```
-
-## Configuration ⚙️
-
-`hooker.config.json` at the root of the repository:
+`hooker.config.json`:
 
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json",
-  "imports": ["api", "front"],
   "hooks": [
-    {
-      "name": "fmt",
-      "trigger": "pre-commit",
-      "include": ["src/**/*.rs"],
-      "exclude": ["src/generated/*.rs"],
-      "cmd": "rustfmt --check {files}"
-    },
-    {
-      "name": "commit message",
-      "trigger": "commit-msg",
-      "cmds": ["grep -qE '^(feat|fix|chore|docs|refactor|test|ci)' \"$1\""]
-    }
+    { "name": "fmt", "trigger": "pre-commit", "include": ["**/*.rs"], "cmd": "rustfmt {files}", "stage_fixed": true },
+    { "name": "clippy", "trigger": "pre-commit", "include": ["**/*.rs"], "cmd": "cargo clippy -- -D warnings", "needs": ["fmt"], "cache": true },
+    { "name": "test", "trigger": "pre-push", "include": ["**/*.rs"], "cmd": "cargo test" },
+    { "name": "message", "trigger": "commit-msg", "cmd": "grep -qE '^(feat|fix|docs|chore)(\\(.+\\))?: ' \"$1\"" }
   ]
 }
 ```
 
-| Field     | Description |
-|-----------|-------------|
-| `imports` | Sub-projects folders, each one with its own `hooker.config.json`. Globs are supported (`packages/*`) |
-| `discover` | `true` to load every `hooker.config.json` of the repository (files ignored by git are skipped) |
-| `name`    | Hook name |
-| `trigger` | Git hook: `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit`, `pre-rebase`, `post-rewrite`, `pre-push`, `applypatch-msg`, `pre-applypatch`, `post-applypatch`, `pre-auto-gc`, `post-checkout`, `post-merge` |
-| `include` | Glob patterns, relative to the config folder. Without it, the hook targets all files |
-| `exclude` | Glob patterns of files to ignore |
-| `cmd` / `cmds` | Shell command(s) to run, from the config folder. Git arguments are available as `$1`, `$2`... |
-| `stage_fixed` | `true` to re-stage the targeted files after the hook (formatters) |
-| `path` | Hooks file to load (`{ "hooks": [...] }`), relative to the config folder |
-| `from` / `rev` | Git repository (and branch or tag) to load `path` from, cloned once in `~/.cache/goat-hooker` |
-| `parallel` | Root config only: `true` to run hooks in parallel |
+<p align="center">
+  <img src=".github/assets/cli-light.svg#gh-light-mode-only" alt="Two git commits: the first runs fmt then clippy, the second takes both from the cache and stops on the commit message" />
+  <img src=".github/assets/cli-dark.svg#gh-dark-mode-only" alt="Two git commits: the first runs fmt then clippy, the second takes both from the cache and stops on the commit message" />
+</p>
 
-`*` doesn't cross folders, use `**` for that.
+`fmt` formats the staged Rust files and stages them again, and `clippy` waits for it. The second commit has the same files, so both come from the cache. Only the commit message fails, with a hint to skip just that hook.
 
-## Mono-repos 🗂️
+## Why Goat Hooker?
 
-Each sub-project keeps its own `hooker.config.json` next to its code:
+Goats keep their footing on the steepest cliffs. Goat Hooker keeps your commits steady on the steepest mono-repos.
 
-```
-my-repo/
-├── hooker.config.json          { "imports": ["packages/*"] }
-└── packages/
-    ├── api/hooker.config.json
-    └── front/hooker.config.json
-```
+- **Only what changed.** Each hook runs on the staged files it targets and sees exactly what will be committed: unstaged changes are put aside. A hook whose files didn't change since it last passed is skipped.
+- **Built for mono-repos.** Each project owns its `hooker.config.json`. Dependencies between projects are read from Cargo, `package.json`, `go.mod` and `pyproject.toml`, so a change in `core` also runs the tests of `api`.
+- **Fast.** One native binary, hooks in parallel and a cache. `hooker watch` runs the hooks while you stage, so the commit itself is instant.
+- **Hooks that work together.** Hooks wait for each other and pass values: `codegen` hands its schema to `client`. Shared variables record who may read and write them.
+- **Safe with other people's hooks.** Hooks from other repositories run only once you reviewed them, and again only after you review their changes. They get read-only files, no network and a filtered environment unless they are allowed more.
+- **A desktop app.** See what the next commit will run, edit hooks without touching the JSON, wire them like nodes in Blender, and read their output live.
+- **Easy to adopt.**
+  - `hooker import` converts husky / lint-staged, lefthook and pre-commit configs.
+  - `hooker init` starts from ready-made hooks for Rust, JavaScript and Python.
+  - `hooker doctor` says what is wrong and how to fix it.
 
-Or let goat-hooker find them all with `{ "discover": true }`.
+## How it compares
 
-For each sub-project:
+<p align="center">
+  <img src=".github/assets/features-light.svg#gh-light-mode-only" alt="Features of Goat Hooker, lefthook, pre-commit and husky + lint-staged" />
+  <img src=".github/assets/features-dark.svg#gh-dark-mode-only" alt="Features of Goat Hooker, lefthook, pre-commit and husky + lint-staged" />
+</p>
 
-- `include` / `exclude` patterns are relative to its folder
-- commands run from its folder
-- `pre-commit` hooks only run if a staged file belongs to it, `pre-push` hooks only if a pushed commit changed one of its files
-- `{files}` in a command is replaced by the targeted files (relative to its folder, shell-escaped), also available in `$HOOKER_FILES` (one per line)
+lefthook and pre-commit are great tools, and pre-commit still does something Goat Hooker doesn't: it installs the tools your hooks need. Spotted a mistake in this table? [Open an issue](https://github.com/zuygui/goat-hooker/issues/new).
 
-```json
-{ "name": "lint", "trigger": "pre-commit", "include": ["src/**/*.ts"], "cmd": "eslint {files}" }
-```
+## Speed
 
-Other triggers (`commit-msg`, `post-merge`...) run all their hooks.
+<p align="center">
+  <img src=".github/assets/speed-light.svg#gh-light-mode-only" alt="Time of a git commit. One hook doing nothing: Goat Hooker 30 ms, lefthook 28 ms, pre-commit 146 ms, husky + lint-staged 395 ms. Five hooks of 200 ms: Goat Hooker 238 ms, lefthook 241 ms, pre-commit 1173 ms, husky + lint-staged 541 ms. The same commit again: Goat Hooker 24 ms, lefthook 233 ms, pre-commit 1176 ms, husky + lint-staged 567 ms" />
+  <img src=".github/assets/speed-dark.svg#gh-dark-mode-only" alt="Time of a git commit. One hook doing nothing: Goat Hooker 30 ms, lefthook 28 ms, pre-commit 146 ms, husky + lint-staged 395 ms. Five hooks of 200 ms: Goat Hooker 238 ms, lefthook 241 ms, pre-commit 1173 ms, husky + lint-staged 541 ms. The same commit again: Goat Hooker 24 ms, lefthook 233 ms, pre-commit 1176 ms, husky + lint-staged 567 ms" />
+</p>
 
-## Hooks graph 🕸️
+- **The tool itself:** Goat Hooker adds about as much to a commit as lefthook, a fifth of what pre-commit adds, and a sixteenth of what husky + lint-staged adds through `npx`.
+- **Five hooks:** they run in parallel, like with lefthook, where pre-commit runs them one after the other.
+- **The same commit again**, after a rejected commit message for example: the hooks come from the cache, so the commit takes 24 ms instead of 233 ms or more.
 
-Hooks can wait for each other, and pass values to each other, like nodes connected by wires:
+These are small numbers on a 2-core VM. Method and caveats are in [`benchmarks/`](benchmarks/README.md), and you can reproduce them with `python3 benchmarks/run.py`.
 
-```json
-{
-  "hooks": [
-    {
-      "name": "codegen",
-      "trigger": "pre-commit",
-      "outputs": ["schema"],
-      "cmd": "npm run codegen && echo \"schema=gen/schema.ts\" >> $HOOKER_OUTPUT"
-    },
-    {
-      "name": "lint",
-      "trigger": "pre-commit",
-      "steps": [
-        { "id": "eslint", "cmd": "eslint {files}" },
-        { "id": "types", "needs": ["eslint"], "inputs": { "schema": "codegen.schema" }, "cmd": "tsc --noEmit {schema}" }
-      ]
-    },
-    { "name": "e2e", "trigger": "pre-commit", "needs": ["lint", "packages/api:build"], "cmd": "npm run e2e" }
-  ]
-}
-```
+## The desktop app
 
-| Field | Description |
-|-------|-------------|
-| `needs` | Hooks to wait for: `hook`, `hook/step`, or `project:hook` for a hook of another project of the mono-repo (`root:hook` for the root). Same trigger only |
-| `steps` | Steps of a hook (`id`, `cmd`, and their own `needs` / `inputs` / `outputs`). A step can wait for the other steps of its hook by their `id` |
-| `outputs` | Values a hook writes with `echo "name=value" >> $HOOKER_OUTPUT` |
-| `inputs` | Values from other hooks: `{ "name": "hook.output" }`, available as `{name}` (shell-escaped) and `$name` in the commands. Every hook also has the `files`, `stdout` and `status` outputs |
+<p align="center">
+  <img src=".github/assets/app-light.png#gh-light-mode-only" alt="The hooks of a mono-repo, with the staged files each one will check and its last run" />
+  <img src=".github/assets/app-dark.png#gh-dark-mode-only" alt="The hooks of a mono-repo, with the staged files each one will check and its last run" />
+</p>
 
-- every hook starts as soon as the hooks it waits for have passed (in parallel with `"parallel": true`)
-- when a hook fails, the hooks waiting for it are skipped
-- a hook a matching hook waits for runs too, even if none of the staged files match it
-- `hooker run pre-commit --dry-run` shows the graph: order, dependencies, inputs and files
+<p align="center">
+  <img src=".github/assets/graph-light.png#gh-light-mode-only" alt="The pre-commit hooks as a graph of nodes: secrets, lint steps, codegen passing its schema to client" />
+  <img src=".github/assets/graph-dark.png#gh-dark-mode-only" alt="The pre-commit hooks as a graph of nodes: secrets, lint steps, codegen passing its schema to client" />
+</p>
 
-## Shared hooks 📦
+`goat-hooker-gui [repository]` opens a repository:
+- **Hooks**: the hooks of the next commit and the files they will check. You can run a hook and follow its output live.
+- **Graph**: wire the hooks together.
+- **Impact**: what a file triggers.
+- **Fix files**: review a formatter's changes before you stage them.
+- **Doctor**: problems with the setup, and buttons to fix them.
+- **Command palette**: ⌘/Ctrl+K reaches everything.
 
-Hooks can be shared between projects in a hooks file (`{ "hooks": [...] }`), loaded with `path`, from the repository or from another git repository:
+More in [the app's documentation](docs/desktop-app.md).
 
-```json
-{
-  "hooks": [
-    { "name": "local rules", "path": "tools/hooks/rust.json" },
-    { "name": "team rules", "from": "https://github.com/acme/hooks", "rev": "v1", "path": "rust.json" }
-  ]
-}
+## How it works
+
+```text
+ git commit ─▶ .git/hooks/pre-commit ─▶ hooker run pre-commit
+                                              │
+   configs ─▶ staged files ─▶ Matcher ─▶ Graph ─▶ Runner ──────────▶ Git
+   (projects,   (unstaged      (include,   (needs,   (parallel, cache,   (fixed files
+    shared       changes        affected    inputs)   sandbox, timeout)   staged again,
+    files,       put aside)     projects)                                 changes put back)
+    local)
 ```
 
-Loaded hooks run from the project that loads them. Repositories are cloned once: `hooker outdated` shows the ones with a newer version, `hooker update` fetches it (you review what changed with `hooker trust` before it runs), and `hooker pin` sets `rev` to the commit in use so it never changes. `rev` can be a branch, a tag or a commit.
+Each stage is its own module in [`src/`](src/): [`config`](src/config/mod.rs), [`matcher`](src/matcher.rs), [`graph`](src/graph.rs), [`runner`](src/runner.rs) and [`cache`](src/cache.rs). The desktop app in [`gui/`](gui/) uses the same library, so the CLI and the app always run hooks the same way.
 
-A hooks file can declare `params`, used as `{{name}}` in its hooks, and set with `with` by the hook loading it. This makes reusable nodes:
+## Documentation
 
-```json
-// eslint.json, in the repository acme/hooks
-{
-  "params": {
-    "files": { "description": "Files to lint" },
-    "config": { "default": ".eslintrc.json" }
-  },
-  "hooks": [
-    { "name": "eslint", "trigger": "pre-commit", "include": ["{{files}}"], "cmd": "eslint -c {{config}} {files}" }
-  ]
-}
+- [Installation](docs/installation.md)
+- [The `hooker` CLI](docs/cli.md): commands, skipping hooks, `watch`, `doctor`, CI, cache
+- [Configuration](docs/configuration.md): every field, branches, timeout, local changes
+- [Mono-repos](docs/monorepos.md) and [affected projects](docs/monorepos.md#affected-projects)
+- [Hooks graph and variables](docs/graph.md)
+- [Shared hooks](docs/shared-hooks.md): hooks files, the catalogue, permissions and trust, imports
+- [Desktop app](docs/desktop-app.md)
+
+## Building from source
+
+```sh
+cargo build --workspace         # the hooker CLI and the desktop app
+cargo test --workspace
+cargo run -p goat-hooker-gui    # the app
 ```
 
-```json
-{ "name": "lint", "from": "https://github.com/acme/hooks", "rev": "v1", "path": "eslint.json",
-  "with": { "files": ["src/**/*.ts", "src/**/*.tsx"] } }
-```
+On Linux, the app needs the development packages of `libxkbcommon`, `wayland`, `vulkan`, `fontconfig` and `xcb`. Goat Hooker checks itself with its own hooks (`hooker.config.json`). See [CONTRIBUTING.md](CONTRIBUTING.md) and [how releases work](docs/releasing.md).
 
-`{{name}}` (two braces) is replaced when the config is loaded; `{files}` and the inputs (one brace) when the hook runs. A string that is exactly `{{name}}` takes the value as is, so a list fills an array.
+## Contributors
 
-### Ready-to-use hooks
-
-goat-hooker shares the hooks of [`hooks/`](hooks): `rust.json`, `javascript.json`, `python.json`, `commits.json` and `checks.json`.
-
-```json
-{ "name": "rust", "from": "https://github.com/zuygui/goat-hooker", "path": "hooks/rust.json",
-  "with": { "clippy_args": "--all-targets" } }
-```
-
-### Share your hooks
-
-Add `share` to the root `hooker.config.json` of a repository: `hooker search` (and the app) find it on GitHub.
-
-```json
-"share": { "description": "Hooks of the Acme team", "tags": ["go", "lint"], "hooks": ["hooks/*.json"] }
-```
-
-A hooks file can have a `description`. GitHub's code search needs a token: `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth login`. `HOOKER_HUB_REPOS=owner/name,owner/other@branch` adds repositories the search can't find (private ones, branches).
-
-## Watch 👀
-
-`hooker watch` runs the pre-commit hooks each time files are staged, so `git commit` takes their results from the cache and finishes at once (and you know a hook fails before you commit):
-
-```
-$ hooker watch
-👀 Watching the staged files · 2 hooks: clippy, test
-✔ clippy 5.61s  ✔ test 8.02s  ready to commit
-```
-
-Only the hooks that the commit would take from the cache run ahead: cached, with `include`, not fixing files (`stage_fixed`), without `needs`, `inputs` or variables. They run on the files as they are, so a staged file that also has unstaged changes is waited for. Nothing is staged or put aside.
-
-## Doctor 🩺
-
-`hooker doctor` checks the setup and says how to fix what it finds:
-
-- Git hooks not installed, overwritten by hand, or bypassed by `core.hooksPath`
-- tools the commands use that aren't installed
-- `include` patterns that match no file (the hook never runs)
-- variables nobody reads or writes, and denied accesses
-- hooks of other repositories that aren't trusted
-- from the history: slow pre-commit hooks (cache them or move them to pre-push) and hooks that fail most of the time
-
-It exits with an error when it finds one, so it can run in CI. The app shows the same checks on its **Doctor** page.
-
-## Affected projects 🧬
-
-A hook with `"affected": true` also runs when a project its project depends on changes: change `core`, and the tests of `api` (which uses `core`) run too.
-
-```json
-{ "name": "test", "trigger": "pre-commit", "cmd": "cargo test", "include": ["**/*.rs"], "affected": true }
-```
-
-The dependencies are read from the manifests (Cargo `path` dependencies, packages of the repository in `package.json`, `replace` in `go.mod`, `path` dependencies in `pyproject.toml`), plus `depends_on` in a config (`"depends_on": ["../core"]`). `hooker run --dry-run` says why each hook runs.
-
-## CI 🤖
-
-`hooker ci` runs the hooks of a trigger (`--trigger`, `pre-commit` by default) on the files changed since a base commit (`--base`, by default the base of the pull request or `origin/HEAD`). Nothing is staged: a formatter that changes a file fails, the file should have been fixed before the commit. Hooks of other repositories are trusted, since the CI runs the code of the repository anyway.
-
-On GitHub, use the action (it installs `hooker` from the releases and annotates the failed hooks):
-
-```yaml
-on: [pull_request, push]
-jobs:
-  hooks:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: zuygui/goat-hooker@main
-        with:
-          trigger: pre-commit # default
-```
-
-## Cache ⚡
-
-A hook that already passed with the same files (their content), commands, inputs and variables isn't run again: its output, outputs and variables are replayed. Hooks with `include` are cached by default, `"cache": true` / `false` chooses for a hook. Formatters are cached on the fixed files, so unformatted files always go through them. `hooker run --no-cache` runs everything, `hooker cache-clear` forgets the results.
-
-## Variables 🔤
-
-Variables are values shared between hooks, kept between commits (in `.git/goat-hooker`):
-
-```json
-{
-  "variables": {
-    "version": { "description": "Next version", "default": "0.1.0", "writers": ["bump"], "readers": ["*"] }
-  },
-  "hooks": [
-    { "name": "bump", "trigger": "pre-commit", "writes": ["version"], "cmd": "echo version=0.2.0 >> $HOOKER_VARS" },
-    { "name": "changelog", "trigger": "pre-commit", "reads": ["version"], "cmd": "echo \"## $version\" >> CHANGELOG.md" }
-  ]
-}
-```
-
-- a hook declares what it `writes` (`echo "name=value" >> $HOOKER_VARS`) and `reads` (`$name`)
-- readers run after the writers of the same trigger
-- `writers` and `readers` (`name`, `project:name`, `project:*` or `*`) say who may use it, any other hook is refused
-- a hook writing a variable it didn't declare fails
-- the values are saved when the whole run passes; `hooker vars --reset name` goes back to the default
-
-## Permissions and trust 🔐
-
-`permissions` says what a hook may do:
-
-```json
-{ "name": "license check", "trigger": "pre-commit", "cmd": "...",
-  "permissions": { "files": "read", "network": false, "env": ["LICENSE_KEY"] } }
-```
-
-- `files`: `read` (the targeted files modified by the hook are reverted and the hook fails) or `write`
-- `network`: blocked when false, with Linux user namespaces (`unshare`) or the macOS sandbox
-- `env`: the environment variables it gets besides the basic ones (`PATH`, `HOME`, `GIT_*`...)
-
-Without `permissions`, a hook of the repository can do everything. A hook loaded with `from` only reads files, without network and with the basic environment, unless its hooks file asks for more.
-
-A hook without permission is **denied**: it doesn't run (not trusted, forbidden variable) or fails (it modified a read-only file, wrote an undeclared variable), and every hook after it, through `needs` or variables, is skipped. The other hooks still run, and the commit is stopped.
-
-Hooks loaded with `from` don't run until they are trusted: `hooker trust` (or the app) shows their commands and permissions. They must be trusted again when their file or their `with` values change. `HOOKER_TRUST_ALL=1` skips the check (CI).
-
-## Import 📥
-
-`hooker import` converts the config of another hooks manager (`--dry-run` to only show it):
-
-- husky (`.husky/*`, or `husky.hooks` in package.json) and its lint-staged config (one hook per command, in order)
-- lefthook (`lefthook.yml`): commands, jobs, scripts, `root` becomes a sub-project, `piped` becomes `needs`
-- pre-commit (`.pre-commit-config.yaml`): local hooks, the well-known hooks (pre-commit-hooks, ruff, black, prettier, eslint, Rust, conventional commits), the other ones through `pre-commit run`
-
-What can't be converted exactly (regexes, `skip` conditions...) is listed.
-
-## Thanks to all contributors 🧡
 <p align="center">
   <img src="https://contrib.rocks/image?repo=zuygui/goat-hooker" />
 </p>
+
+MIT licensed.

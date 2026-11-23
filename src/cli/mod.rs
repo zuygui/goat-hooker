@@ -12,7 +12,9 @@ pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
         return actions::status::show_status();
     };
     match cmd {
-        AppCommands::Init { work_dir } => actions::init::init_configuration(&work_dir),
+        AppCommands::Init { work_dir, template } => {
+            actions::init::init_configuration(&work_dir, &template)
+        }
         AppCommands::Install { force } => actions::install::install_hooks(force),
         AppCommands::Completion { shell } => {
             actions::generator::print_completion(shell);
@@ -70,9 +72,17 @@ pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
             base,
             verbose,
         } => actions::ci::run_ci(trigger, base, verbose),
-        AppCommands::History { limit } => actions::history::show_history(limit),
+        AppCommands::History {
+            limit,
+            export,
+            output,
+        } => match export {
+            Some(format) => actions::history::export(limit, &format, output.as_deref()),
+            None => actions::history::show_history(limit.unwrap_or(20)),
+        },
         AppCommands::Doctor => actions::doctor::check(),
         AppCommands::Watch => actions::watch::watch(),
+        AppCommands::Fix { files, verbose } => actions::fix::fix_files(files, verbose),
         AppCommands::CacheClear => {
             goat_hooker::cache::clear(&cli_root()?)?;
             println!("✔ Cache cleared");

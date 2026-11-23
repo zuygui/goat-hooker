@@ -56,7 +56,7 @@ pub struct Node<'a> {
 }
 
 impl Node<'_> {
-    /// `lint` ou `lint › types`
+    /// `lint` or `lint › types`
     pub fn label(&self) -> String {
         match self.step {
             Some(step) => format!("{} › {}", self.hook.name, step.id),
@@ -236,7 +236,7 @@ pub fn build<'a>(
         }
     };
 
-    // Liens
+    // Links
     for &index in &included {
         let entry = &entries[index];
         let hook = entry.hook;
