@@ -65,7 +65,7 @@ pub fn init(cx: &mut App) {
     ]);
 
     cx.on_action(|_: &Quit, cx| cx.quit());
-    cx.on_action(|_: &OpenDocs, cx| cx.open_url(&format!("{REPOSITORY}#readme")));
+    cx.on_action(|_: &OpenDocs, cx| cx.open_url(&format!("{REPOSITORY}/tree/main/docs")));
     cx.on_action(|_: &ReportIssue, cx| cx.open_url(&format!("{REPOSITORY}/issues/new")));
     cx.on_action(|_: &OpenReleases, cx| cx.open_url(crate::update::RELEASES));
 

@@ -2439,7 +2439,7 @@ impl HookerApp {
                                         .icon(lucide("book-open"))
                                         .label("Documentation")
                                         .on_click(|_, _, cx| {
-                                            cx.open_url(&format!("{REPOSITORY_URL}#readme"))
+                                            cx.open_url(&format!("{REPOSITORY_URL}/tree/main/docs"))
                                         }),
                                 )
                                 .child(
