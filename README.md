@@ -12,9 +12,6 @@
   <a href="https://github.com/zuygui/goat-hooker/releases/latest">Latest release</a>
 </p>
 
-> [!IMPORTANT]
-> Goat Hooker is under active development and is not ready for production use yet. Current release: **v0.2.0**.
-
 ## Install
 
 ```sh
