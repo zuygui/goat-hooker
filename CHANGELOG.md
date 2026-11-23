@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/zuygui/goat-hooker/compare/v0.2.0...v0.3.0) - 2026-11-23
+
+### Added
+
+- Windows support
+- Homebrew, cargo-binstall, install script and update notice
+- history of the runs
+- *(gui)* JSON editor with autocompletion and colors
+- updates, changes and pinning of the hooks of other repositories
+- hooker ci and a GitHub Action
+- cache the hooks that passed
+- a hook without permission cuts its lineage
+- *(gui)* create and delete hooks on the canvas, show variables, legend
+- *(gui)* variables, browse and review pages, import from other hooks managers
+- *(cli)* search hooks shared on GitHub and add them
+- variables shared between hooks, hook permissions and trusted remote hooks
+- *(cli)* import the configs of husky, lint-staged, lefthook and pre-commit
+- *(config)* share hooks files and add a catalog of ready-to-use hooks
+
+### Fixed
+
+- *(git)* give Git plain paths on Windows (without the \\?\ prefix)
+- glob imports on Windows, and tests independent of line endings
+
+### Other
+
+- translate all the comments to English
+- translate a comment to English
+- Merge remote-tracking branch 'origin/main' into feat/cache-ci
+- denied hooks cut their lineage
+
 ## [0.2.0](https://github.com/zuygui/goat-hooker/compare/v0.1.0...v0.2.0) - 2026-11-22
 
 ### Added
