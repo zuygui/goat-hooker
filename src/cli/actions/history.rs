@@ -7,6 +7,40 @@ use goat_hooker::{
 
 use crate::cli::ui;
 
+/// Writes the totals by hook (`csv`) or the totals and the runs (`json`)
+pub fn export(
+    limit: Option<usize>,
+    format: &str,
+    output: Option<&std::path::Path>,
+) -> Result<(), GoatHookerError> {
+    let root = ui::current_repo()?;
+    let runs = history::load(&root, limit.unwrap_or(usize::MAX));
+    let stats = history::stats(&runs);
+    let content = if format == "csv" {
+        history::stats_csv(&stats)
+    } else {
+        let export = serde_json::json!({
+            "repository": root.file_name().map(|n| n.to_string_lossy().to_string()),
+            "hooks": stats,
+            "runs": runs,
+        });
+        serde_json::to_string_pretty(&export).unwrap_or_default() + "\n"
+    };
+    match output {
+        Some(file) => {
+            std::fs::write(file, content)?;
+            eprintln!(
+                "{} {} {}",
+                ui::OK.green(),
+                format!("{} hooks, {} runs →", stats.len(), runs.len()).dimmed(),
+                file.display()
+            );
+        }
+        None => print!("{content}"),
+    }
+    Ok(())
+}
+
 /// Shows the last runs and the slowest hooks
 pub fn show_history(limit: usize) -> Result<(), GoatHookerError> {
     let root = ui::current_repo()?;

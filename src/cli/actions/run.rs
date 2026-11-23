@@ -14,6 +14,7 @@ use goat_hooker::{
     git,
     graph::{self, Graph},
     matcher::Matcher,
+    notify,
     runner::{self, HookInput, HookResult, Output, Progress},
 };
 
@@ -125,6 +126,26 @@ pub fn run_hooks(
         .filter(|r| r.failed())
         .map(|r| r.name.as_str())
         .collect();
+
+    // A long run started by Git: you may be doing something else
+    if from_git && notify::threshold().is_some_and(|min| start.elapsed() >= min) {
+        let repo = root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let took = ui::duration(start.elapsed());
+        if failed.is_empty() {
+            notify::send(
+                &format!("✔ {} passed", trigger.as_str()),
+                &format!("{repo}: {} in {took}", ui::plural(results.len(), "hook")),
+            );
+        } else {
+            notify::send(
+                &format!("✘ {} failed", trigger.as_str()),
+                &format!("{repo}: {} ({took})", failed.join(", ")),
+            );
+        }
+    }
     if !failed.is_empty() {
         return Err(GoatHookerError::HookFailed(failed.join("`, `")));
     }
@@ -390,10 +411,15 @@ pub(crate) fn print_summary(results: &[HookResult], elapsed: Duration) {
                 ui::command("hooker trust")
             );
         } else {
+            let names: Vec<&str> = results
+                .iter()
+                .filter(|r| r.failed())
+                .map(|r| r.name.split(" › ").next().unwrap_or(&r.name))
+                .collect();
             eprintln!(
-                "  {} fix the errors above, or skip the hooks once with {}",
+                "  {} fix the errors above, or skip them once with {}",
                 "hint:".dimmed(),
-                ui::command("HOOKER_SKIP=1 git ...")
+                ui::command(&format!("HOOKER_SKIP={} git ...", names.join(",")))
             );
         }
     }

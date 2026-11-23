@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use goat_hooker::{
-    config::{Config, ConfigLoader, HOOK_CONFIG_FILENAME, Hook, SCHEMA_URL, Trigger},
+    config::{Config, ConfigLoader, HOOK_CONFIG_FILENAME, Hook, Trigger},
     errors::GoatHookerError,
     git, install,
     matcher::{MatchedHook, Matcher},
@@ -109,15 +109,12 @@ impl Repo {
         Ok(())
     }
 
-    /// Creates `hooker.config.json` at the root (like `hooker init`)
+    /// Creates `hooker.config.json` at the root, with the hooks found for the project
+    /// (like `hooker init --template auto`)
     pub fn init_config(&mut self) -> Result<(), GoatHookerError> {
         if !self.config_file().exists() {
-            Config {
-                schema: Some(SCHEMA_URL.to_string()),
-                hooks: Some(vec![]),
-                ..Default::default()
-            }
-            .write_to_dir(&self.root)?;
+            let detected = goat_hooker::templates::detect(&self.root);
+            goat_hooker::templates::config_with(&detected)?.write_to_dir(&self.root)?;
         }
         self.reload()
     }

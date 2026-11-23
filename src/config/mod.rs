@@ -677,11 +677,21 @@ impl Config {
         importer: &str,
     ) -> Result<Config, GoatHookerError> {
         let content = fs::read_to_string(path).map_err(GoatHookerError::ReadError)?;
+        Self::parse_with(path, &content, with, importer)
+    }
+
+    /// Like `load_with`, from the content of a file (`path`: for the errors and `base_dir`)
+    pub fn parse_with(
+        path: &Path,
+        content: &str,
+        with: Option<&BTreeMap<String, serde_json::Value>>,
+        importer: &str,
+    ) -> Result<Config, GoatHookerError> {
         let parse_error = |source| GoatHookerError::ParseError {
             path: path.to_path_buf(),
             source,
         };
-        let mut value: serde_json::Value = serde_json::from_str(&content).map_err(parse_error)?;
+        let mut value: serde_json::Value = serde_json::from_str(content).map_err(parse_error)?;
 
         // Parameters: replaced in the hooks before reading them
         if let Some(params) = value.get("params").cloned() {

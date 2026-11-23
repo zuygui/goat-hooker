@@ -152,6 +152,94 @@ pub fn slowest(runs: &[Run]) -> Vec<(String, String, Duration, usize)> {
     slowest
 }
 
+/// Totals of a hook over runs (`hooker history --export`)
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct HookStats {
+    pub project: String,
+    pub name: String,
+    pub trigger: String,
+    pub runs: usize,
+    pub passed: usize,
+    pub failed: usize,
+    pub cached: usize,
+    pub skipped: usize,
+    /// Average duration of the runs that really ran
+    pub average_ms: u64,
+    /// Time spent in this hook
+    pub total_ms: u64,
+    /// Seconds since the epoch
+    pub last_run: u64,
+}
+
+/// Totals by hook, the ones taking the most time first
+pub fn stats(runs: &[Run]) -> Vec<HookStats> {
+    let mut stats: BTreeMap<(String, String, String), HookStats> = BTreeMap::new();
+    for run in runs {
+        for hook in &run.hooks {
+            let entry = stats
+                .entry((run.trigger.clone(), hook.project.clone(), hook.name.clone()))
+                .or_insert_with(|| HookStats {
+                    project: hook.project.clone(),
+                    name: hook.name.clone(),
+                    trigger: run.trigger.clone(),
+                    ..Default::default()
+                });
+            entry.runs += 1;
+            entry.last_run = entry.last_run.max(run.at);
+            match hook.status {
+                Status::Passed => entry.passed += 1,
+                Status::Failed | Status::Denied => entry.failed += 1,
+                Status::Cached => entry.cached += 1,
+                Status::Skipped => entry.skipped += 1,
+            }
+            if matches!(hook.status, Status::Passed | Status::Failed) {
+                entry.total_ms += hook.duration_ms;
+            }
+        }
+    }
+    let mut stats: Vec<HookStats> = stats
+        .into_values()
+        .map(|mut s| {
+            let ran = (s.passed + s.failed) as u64;
+            s.average_ms = s.total_ms.checked_div(ran).unwrap_or_default();
+            s
+        })
+        .collect();
+    stats.sort_by_key(|s| std::cmp::Reverse(s.total_ms));
+    stats
+}
+
+/// The totals as CSV (one line per hook)
+pub fn stats_csv(stats: &[HookStats]) -> String {
+    let field = |text: &str| {
+        if text.contains([',', '"', '\n']) {
+            format!("\"{}\"", text.replace('"', "\"\""))
+        } else {
+            text.to_string()
+        }
+    };
+    let mut csv = String::from(
+        "project,name,trigger,runs,passed,failed,cached,skipped,average_ms,total_ms,last_run\n",
+    );
+    for s in stats {
+        csv.push_str(&format!(
+            "{},{},{},{},{},{},{},{},{},{},{}\n",
+            field(&s.project),
+            field(&s.name),
+            field(&s.trigger),
+            s.runs,
+            s.passed,
+            s.failed,
+            s.cached,
+            s.skipped,
+            s.average_ms,
+            s.total_ms,
+            s.last_run
+        ));
+    }
+    csv
+}
+
 /// `3 min ago`, `2 h ago`, `5 d ago`
 pub fn ago(at: u64) -> String {
     let now = SystemTime::now()
@@ -164,5 +252,65 @@ pub fn ago(at: u64) -> String {
         60..3600 => format!("{} min ago", seconds / 60),
         3600..86400 => format!("{} h ago", seconds / 3600),
         _ => format!("{} d ago", seconds / 86400),
+    }
+}
+
+#[cfg(test)]
+mod stats_tests {
+    use super::*;
+
+    fn run(at: u64, hooks: &[(&str, Status, u64)]) -> Run {
+        Run {
+            at,
+            trigger: "pre-commit".into(),
+            branch: None,
+            duration_ms: 0,
+            hooks: hooks
+                .iter()
+                .map(|(name, status, ms)| HookRun {
+                    name: name.to_string(),
+                    project: "root".into(),
+                    status: status.clone(),
+                    duration_ms: *ms,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn totals_by_hook() {
+        let runs = [
+            run(
+                1,
+                &[
+                    ("lint", Status::Passed, 100),
+                    ("test, slow", Status::Failed, 4000),
+                ],
+            ),
+            run(
+                2,
+                &[
+                    ("lint", Status::Cached, 0),
+                    ("test, slow", Status::Passed, 2000),
+                ],
+            ),
+        ];
+        let stats = stats(&runs);
+        assert_eq!(stats[0].name, "test, slow");
+        assert_eq!(
+            (stats[0].runs, stats[0].failed, stats[0].average_ms),
+            (2, 1, 3000)
+        );
+        assert_eq!(
+            (stats[1].cached, stats[1].average_ms, stats[1].last_run),
+            (1, 100, 2)
+        );
+        let csv = stats_csv(&stats);
+        assert!(
+            csv.lines()
+                .nth(1)
+                .unwrap()
+                .starts_with("root,\"test, slow\",pre-commit,2,1,1")
+        );
     }
 }

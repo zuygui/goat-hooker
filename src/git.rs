@@ -328,6 +328,12 @@ pub fn unstaged_files(root: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
     Ok(split_paths(root, &output))
 }
 
+/// New files, not ignored by git, as absolute paths
+pub fn untracked_files(root: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
+    let output = git(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    Ok(split_paths(root, &output))
+}
+
 /// Path of a file in the `.git` folder, like `index` (handles worktrees)
 pub fn git_file(root: &Path, name: &str) -> Result<PathBuf, GoatHookerError> {
     git_path(root, name)
