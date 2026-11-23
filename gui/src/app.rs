@@ -382,19 +382,27 @@ impl HookerApp {
         (dir.canonicalize().unwrap_or(dir), hook.name.clone())
     }
 
-    /// Result of a hook, or of its steps together (`lint › eslint`, `lint › types`...)
-    fn last_status(&self, key: &RunKey) -> Option<RunStatus> {
-        let results: Vec<&HookResult> = match self.results.get(key) {
+    /// Last results of a hook: its own, or the ones of its steps (`lint › eslint`...)
+    fn results_for(&self, key: &RunKey) -> Vec<&HookResult> {
+        match self.results.get(key) {
             Some(result) => vec![result],
             None => {
                 let prefix = format!("{} › ", key.1);
-                self.results
+                let mut results: Vec<&HookResult> = self
+                    .results
                     .iter()
                     .filter(|((dir, name), _)| *dir == key.0 && name.starts_with(&prefix))
                     .map(|(_, result)| result)
-                    .collect()
+                    .collect();
+                results.sort_by(|a, b| a.name.cmp(&b.name));
+                results
             }
-        };
+        }
+    }
+
+    /// Result of a hook, or of its steps together (`lint › eslint`, `lint › types`...)
+    fn last_status(&self, key: &RunKey) -> Option<RunStatus> {
+        let results = self.results_for(key);
         if results.is_empty() {
             None
         } else if results.iter().any(|r| r.denied) {
@@ -2014,63 +2022,78 @@ impl HookerApp {
                 )
                 .when(!lines.is_empty(), |this| this.child(output));
         } else {
-            match self.results.get(&key) {
-                None => {
-                    last_run = last_run.child(
+            let results = self.results_for(&key);
+            let steps = results.len() > 1 || results.iter().any(|r| r.name.contains(" › "));
+            if results.is_empty() {
+                last_run = last_run.child(
+                    div()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(if running { "Running…" } else { "Not run yet" }),
+                );
+            }
+            for result in results {
+                let mut output = code_block();
+                for cmd in &result.commands {
+                    output = output.child(
                         div()
-                            .text_sm()
                             .text_color(theme.muted_foreground)
-                            .child(if running { "Running…" } else { "Not run yet" }),
+                            .child(format!("$ {}", cmd.cmd)),
                     );
-                }
-                Some(result) => {
-                    let mut output = code_block();
-                    for cmd in &result.commands {
-                        output = output.child(
-                            div()
-                                .text_color(theme.muted_foreground)
-                                .child(format!("$ {}", cmd.cmd)),
-                        );
-                        for line in cmd.output.lines() {
-                            output = output.child(div().child(line.to_string()));
-                        }
+                    for line in cmd.output.lines() {
+                        output = output.child(div().child(line.to_string()));
                     }
-                    last_run =
-                        last_run
-                            .child(
-                                h_flex()
-                                    .gap_1p5()
-                                    .text_sm()
-                                    .child(if result.skipped {
-                                        Icon::new(IconName::Minus)
-                                            .small()
-                                            .text_color(theme.muted_foreground)
-                                    } else if result.success {
-                                        Icon::new(IconName::CircleCheck)
-                                            .small()
-                                            .text_color(theme.success)
-                                    } else {
-                                        Icon::new(IconName::CircleX)
-                                            .small()
-                                            .text_color(theme.danger)
-                                    })
-                                    .child(if result.skipped {
-                                        "Skipped (a hook before it failed or was denied)"
-                                    } else if result.denied {
-                                        "Denied: it did or needed what it isn't allowed to"
-                                    } else if result.cached {
-                                        "Passed (cached: same files as a run that passed)"
-                                    } else if result.success {
-                                        "Passed"
-                                    } else {
-                                        "Failed"
-                                    })
-                                    .child(div().text_color(theme.muted_foreground).child(
-                                        format!("in {:.2}s", result.duration.as_secs_f64()),
-                                    )),
-                            )
-                            .child(output);
                 }
+                last_run = last_run
+                    .child(
+                        h_flex()
+                            .gap_1p5()
+                            .text_sm()
+                            .child(if result.skipped {
+                                Icon::new(IconName::Minus)
+                                    .small()
+                                    .text_color(theme.muted_foreground)
+                            } else if result.success {
+                                Icon::new(IconName::CircleCheck)
+                                    .small()
+                                    .text_color(theme.success)
+                            } else {
+                                Icon::new(IconName::CircleX)
+                                    .small()
+                                    .text_color(theme.danger)
+                            })
+                            .when(steps, |this| {
+                                this.child(
+                                    div().font_weight(FontWeight::MEDIUM).child(
+                                        result
+                                            .name
+                                            .split(" › ")
+                                            .last()
+                                            .unwrap_or_default()
+                                            .to_string(),
+                                    ),
+                                )
+                            })
+                            .child(if let Some(note) = result.note.as_deref() {
+                                format!("Skipped ({note})")
+                            } else if result.skipped {
+                                "Skipped (a hook before it failed or was denied)".into()
+                            } else if result.denied {
+                                "Denied: it did or needed what it isn't allowed to".into()
+                            } else if result.cached {
+                                "Passed (cached: same files as a run that passed)".into()
+                            } else if result.success {
+                                "Passed".to_string()
+                            } else {
+                                "Failed".to_string()
+                            })
+                            .child(
+                                div()
+                                    .text_color(theme.muted_foreground)
+                                    .child(format!("in {:.2}s", result.duration.as_secs_f64())),
+                            ),
+                    )
+                    .when(!result.commands.is_empty(), |this| this.child(output));
             }
         }
         body = body.child(last_run);
