@@ -80,7 +80,9 @@ The Homebrew tap (`zuygui/homebrew-tap`, with `Formula/` and `Casks/`) is update
 
 ```sh
 hooker             # status: Git hooks, projects, hooks of the next commit
-hooker init        # create hooker.config.json
+hooker init        # create hooker.config.json (pick hooks to start with)
+hooker init -t auto   # with the hooks found for the project (rust, javascript, python...)
+hooker fix         # run the hooks fixing files on the changed files, without staging
 hooker add         # add a hook (an assistant asks what's missing)
 hooker install     # install the Git hooks in .git/hooks (or core.hooksPath)
 hooker run pre-commit   # run manually the hooks of a trigger
@@ -92,6 +94,7 @@ hooker search rust # find hooks shared on GitHub and add them
 hooker ci          # run the hooks on the files changed by a pull request (CI)
 hooker cache-clear # forget the results of the hooks that passed
 hooker history     # last runs and slowest hooks
+hooker history --export csv -o hooks.csv   # totals by hook, for the team
 hooker trust       # review and trust the hooks loaded from other repositories
 hooker outdated    # hooks of other repositories with a newer version
 hooker pin         # pin them to the commit in use
@@ -111,7 +114,9 @@ Hooks show a spinner while running, then a summary. Only the output of the faile
 
 `hooker install` doesn't overwrite hooks it didn't install, use `--force` for that.
 
-`HOOKER_SKIP=1 git commit` skips the hooks.
+`HOOKER_SKIP=1 git commit` skips the hooks, `HOOKER_SKIP=lint,test git commit` only these ones (by name, `project:name` or `hook/step`); what waits for them still runs.
+
+A run started by Git that takes 10 seconds or more ends with a desktop notification (a long pre-push, say). `HOOKER_NOTIFY=0` turns it off, `HOOKER_NOTIFY=60` only notifies after a minute.
 
 ## Desktop app 🖥️
 
@@ -131,6 +136,12 @@ Hooks show a spinner while running, then a summary. Only the output of the faile
   - double-click the background (or drop a wire on it) to create a hook, hover a node to delete it
   - variables are drawn from the hooks writing them to the hooks reading them
 - **History**: the last runs and the slowest hooks
+- the output of a hook shows while it runs
+- **Impact**: pick a file and see the hooks it triggers on commit and push, and the projects depending on it
+- **Project graph**: the projects of the mono-repo and their dependencies
+- **Fix files**: runs the fixers on the changed files and shows their diff, to stage or revert each file
+- turn a hook off on this computer only (written to `hooker.local.json`, used by Git too)
+- **Command palette** (⌘/Ctrl+K): search the actions, the pages and the hooks, open or run them
 - **Doctor**: what could keep the hooks from running, with a button for the fixes the app can do
 - the **Source** of a hook: its JSON in the config file, the scripts it runs, the hooks file it loads; **Edit the JSON** opens an editor with colors and autocompletion (keys, triggers, hooks, variables, outputs) that checks the file while you type
 - the graph edits a node in a panel next to it, and its changes can be undone (⌘/Ctrl+Z)
@@ -186,8 +197,27 @@ cargo install --path . && hooker install
 | `path` | Hooks file to load (`{ "hooks": [...] }`), relative to the config folder |
 | `from` / `rev` | Git repository (and branch or tag) to load `path` from, cloned once in `~/.cache/goat-hooker` |
 | `parallel` | Root config only: `true` to run hooks in parallel |
+| `branches` / `skip_branches` | Run the hook only on these branches, or not on these ones (globs: `main`, `release/*`) |
+| `timeout` | Stop the hook (and what it started) after this time and fail it: `30s`, `2m`, `500ms` |
 
 `*` doesn't cross folders, use `**` for that.
+
+### Local changes
+
+`hooker.local.json`, next to a `hooker.config.json`, holds the changes of your computer only (add it to `.gitignore`; `hooker doctor` warns when it is committed). A hook with the name of an existing one changes its fields, `"disabled": true` turns it off, another name adds a hook, and the other keys replace the ones of the config:
+
+```json
+{
+  "parallel": true,
+  "hooks": [
+    { "name": "test", "disabled": true },
+    { "name": "clippy", "timeout": "2m" },
+    { "name": "notes", "trigger": "post-commit", "cmd": "./my-notes.sh" }
+  ]
+}
+```
+
+It also applies to the hooks loaded from a hooks file (`path`).
 
 ## Mono-repos 🗂️
 
