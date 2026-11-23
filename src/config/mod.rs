@@ -833,6 +833,70 @@ pub fn apply_local(config: &mut Config, local_file: &Path) -> Result<(), GoatHoo
     Ok(())
 }
 
+/// Hooks turned off in the `hooker.local.json` of a project folder
+pub fn locally_disabled(dir: &Path) -> Vec<String> {
+    fs::read_to_string(dir.join(LOCAL_CONFIG_FILENAME))
+        .ok()
+        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        .and_then(|v| v.get("hooks")?.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter(|h| h.get("disabled").and_then(|d| d.as_bool()) == Some(true))
+        .filter_map(|h| h.get("name")?.as_str().map(String::from))
+        .collect()
+}
+
+/// Turns a hook off (or on again) on this computer, in the `hooker.local.json` of `dir`
+pub fn set_locally_disabled(dir: &Path, name: &str, disabled: bool) -> Result<(), GoatHookerError> {
+    let file = dir.join(LOCAL_CONFIG_FILENAME);
+    let mut local: serde_json::Value = fs::read_to_string(&file)
+        .ok()
+        .and_then(|c| serde_json::from_str(&c).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !local.is_object() {
+        local = serde_json::json!({});
+    }
+    let hooks = local
+        .as_object_mut()
+        .unwrap()
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!([]));
+    if !hooks.is_array() {
+        *hooks = serde_json::json!([]);
+    }
+    let hooks = hooks.as_array_mut().unwrap();
+    let index = hooks
+        .iter()
+        .position(|h| h.get("name").and_then(|n| n.as_str()) == Some(name));
+    match (index, disabled) {
+        (Some(i), true) => {
+            hooks[i]["disabled"] = serde_json::json!(true);
+        }
+        (Some(i), false) => {
+            if let Some(entry) = hooks[i].as_object_mut() {
+                entry.remove("disabled");
+                // Only the name left: nothing changes this hook anymore
+                if entry.len() <= 1 {
+                    hooks.remove(i);
+                }
+            }
+        }
+        (None, true) => hooks.push(serde_json::json!({ "name": name, "disabled": true })),
+        (None, false) => {}
+    }
+    if hooks.is_empty() && local.as_object().is_some_and(|o| o.len() == 1) {
+        if file.exists() {
+            fs::remove_file(&file)?;
+        }
+        return Ok(());
+    }
+    fs::write(
+        &file,
+        serde_json::to_string_pretty(&local).unwrap_or_default() + "\n",
+    )?;
+    Ok(())
+}
+
 /// Max number of nested hooks files (`path` loading a `path`...)
 const MAX_HOOKS_FILES_DEPTH: usize = 10;
 
@@ -1444,6 +1508,16 @@ mod tests {
             err.to_string().contains("parameter `files` is required"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn hooks_are_turned_off_and_on_locally() {
+        let dir = tempfile::tempdir().unwrap();
+        set_locally_disabled(dir.path(), "test", true).unwrap();
+        assert_eq!(locally_disabled(dir.path()), ["test"]);
+        set_locally_disabled(dir.path(), "test", false).unwrap();
+        assert!(locally_disabled(dir.path()).is_empty());
+        assert!(!dir.path().join(LOCAL_CONFIG_FILENAME).exists());
     }
 
     #[test]

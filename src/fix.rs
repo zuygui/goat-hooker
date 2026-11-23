@@ -49,6 +49,33 @@ fn is_fixer(hook: &crate::config::Hook) -> bool {
         && hook.steps.is_none()
 }
 
+/// Unified diff of a file against its content before a fix (`git diff --no-index`)
+pub fn diff(file: &Path, original: Option<&[u8]>) -> String {
+    let before = std::env::temp_dir().join(format!(
+        "goat-hooker-fix-{}-{}",
+        std::process::id(),
+        file.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    if std::fs::write(&before, original.unwrap_or_default()).is_err() {
+        return String::new();
+    }
+    let output = std::process::Command::new("git")
+        .args(["diff", "--no-index", "--no-color", "-U2", "--"])
+        .arg(&before)
+        .arg(file)
+        .output();
+    let _ = std::fs::remove_file(&before);
+    let Ok(output) = output else {
+        return String::new();
+    };
+    // The header names the temporary file: only the changes are kept
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .skip_while(|l| !l.starts_with("@@"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Files changed since the last commit: staged, not staged and new (not ignored)
 pub fn changed_files(root: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
     let mut files: BTreeSet<PathBuf> = git::staged_files(root)?.into_iter().collect();
@@ -61,6 +88,8 @@ pub struct Fixed {
     pub results: Vec<HookResult>,
     /// Files whose content changed, as absolute paths
     pub changed: Vec<PathBuf>,
+    /// Content of the changed files before the fix (`None`: the file didn't exist)
+    pub originals: BTreeMap<PathBuf, Option<Vec<u8>>>,
 }
 
 /// Runs the fixers on `files` (the changed files when `None`)
@@ -81,11 +110,14 @@ pub fn run(
         return Ok(Fixed {
             results: vec![],
             changed: vec![],
+            originals: BTreeMap::new(),
         });
     }
 
-    let before: BTreeMap<&PathBuf, Option<Vec<u8>>> =
-        files.iter().map(|f| (f, std::fs::read(f).ok())).collect();
+    let before: BTreeMap<PathBuf, Option<Vec<u8>>> = files
+        .iter()
+        .map(|f| (f.clone(), std::fs::read(f).ok()))
+        .collect();
     let graph = graph::build(&prepared, Trigger::PreCommit, &hooks)?;
     let shared = Shared::load(root, &prepared)?;
     let parallel = configs.first().and_then(|c| c.parallel).unwrap_or(false);
@@ -97,12 +129,15 @@ pub fn run(
         on_progress,
         &shared,
     )?;
-    let changed = before
+    let originals: BTreeMap<PathBuf, Option<Vec<u8>>> = before
         .into_iter()
         .filter(|(file, content)| std::fs::read(file).ok() != *content)
-        .map(|(file, _)| file.clone())
         .collect();
-    Ok(Fixed { results, changed })
+    Ok(Fixed {
+        results,
+        changed: originals.keys().cloned().collect(),
+        originals,
+    })
 }
 
 #[cfg(test)]
@@ -148,5 +183,10 @@ mod tests {
         );
         // nothing staged
         assert!(git::staged_files(&root).unwrap().is_empty());
+        let diff = diff(
+            &root.join("new.txt"),
+            fixed.originals[&root.join("new.txt")].as_deref(),
+        );
+        assert_eq!(diff, "@@ -1 +1 @@\n-hello\n+HELLO");
     }
 }

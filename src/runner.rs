@@ -610,7 +610,18 @@ pub fn run_hook(
     output: Output,
     shared: &Shared,
 ) -> Result<HookResult, GoatHookerError> {
-    run_node(&standalone_node(matched), input, &[], output, shared, None)
+    run_hook_live(matched, input, output, shared, None)
+}
+
+/// Like `run_hook`, with the output of the commands while they run (captured output only)
+pub fn run_hook_live(
+    matched: &MatchedHook,
+    input: &HookInput,
+    output: Output,
+    shared: &Shared,
+    live: Option<Live>,
+) -> Result<HookResult, GoatHookerError> {
+    run_node(&standalone_node(matched), input, &[], output, shared, live)
 }
 
 /// Runs the commands of a node, with the values of its inputs

@@ -170,6 +170,24 @@ impl Dependencies {
         None
     }
 
+    /// Every project, with the projects it depends on directly
+    pub fn all(&self) -> Vec<(PathBuf, Vec<PathBuf>)> {
+        self.direct
+            .iter()
+            .map(|(project, deps)| (project.clone(), deps.iter().cloned().collect()))
+            .collect()
+    }
+
+    /// Projects depending on `project`, directly or not
+    pub fn dependents(&self, project: &Path) -> Vec<PathBuf> {
+        let changed: BTreeSet<PathBuf> = [normalize(project)].into();
+        self.direct
+            .keys()
+            .filter(|p| **p != normalize(project) && self.affected_by(p, &changed).is_some())
+            .cloned()
+            .collect()
+    }
+
     /// Projects containing the files (the deepest project of each file)
     pub fn changed_projects(&self, files: &[PathBuf]) -> BTreeSet<PathBuf> {
         let projects: Vec<PathBuf> = self.direct.keys().cloned().collect();

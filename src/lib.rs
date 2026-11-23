@@ -10,6 +10,7 @@ pub mod git;
 pub mod graph;
 pub mod history;
 pub mod hub;
+pub mod impact;
 pub mod import;
 pub mod install;
 pub mod matcher;
