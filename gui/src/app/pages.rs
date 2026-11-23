@@ -13,6 +13,11 @@ use goat_hooker::{
 use super::*;
 use crate::repo::Untrusted;
 
+/// A repository of hooks: (url, rev)
+type RemoteKey = (String, Option<String>);
+/// Last commit found on the remote (`None`: pinned)
+type RemoteCheck = Result<Option<String>, String>;
+
 type SearchResult = Result<(Vec<SharedRepo>, Option<String>), String>;
 
 /// State of the pages
@@ -22,6 +27,8 @@ pub struct PagesState {
     pub untrusted: Vec<Untrusted>,
     /// Configs of other hooks managers found in a repository without hooker.config.json
     pub import: Option<Imported>,
+    /// The source card of the hook detail is expanded
+    pub show_source: bool,
     hub_query: Entity<InputState>,
     hub_loading: bool,
     hub_results: Option<SearchResult>,
@@ -30,6 +37,8 @@ pub struct PagesState {
     hub_params: Vec<(String, String, Entity<InputState>)>,
     hub_name: Option<Entity<InputState>>,
     hub_project: usize,
+    /// Last commit of the repositories of hooks: (url, rev) → checking / result
+    remote_latest: std::collections::HashMap<RemoteKey, Option<RemoteCheck>>,
     _subscription: Subscription,
 }
 
@@ -45,10 +54,12 @@ impl PagesState {
         });
         Self {
             _subscription: subscription,
+            remote_latest: Default::default(),
             variables: vec![],
             variables_error: None,
             untrusted: vec![],
             import: None,
+            show_source: false,
             hub_query,
             hub_loading: false,
             hub_results: None,
@@ -198,6 +209,15 @@ impl HookerApp {
                 cx,
             ))
             .child(self.nav_row(
+                "history",
+                lucide("clock"),
+                None,
+                "History",
+                None,
+                Filter::History,
+                cx,
+            ))
+            .child(self.nav_row(
                 "browse",
                 lucide("globe"),
                 None,
@@ -227,6 +247,7 @@ impl HookerApp {
         match self.filter {
             Filter::Variables => self.render_variables(cx),
             Filter::Review => self.render_review(cx),
+            Filter::History => self.render_history(cx),
             _ => self.render_browse(window, cx),
         }
     }
@@ -527,6 +548,25 @@ impl HookerApp {
                                     })),
                             ),
                     )
+                    .when_some(untrusted.changes.clone(), |this, changes| {
+                        this.child(
+                            v_flex()
+                                .gap_1()
+                                .p_2()
+                                .rounded_md()
+                                .bg(theme.warning.opacity(0.08))
+                                .child(section("CHANGED SINCE YOU TRUSTED IT", cx))
+                                .children(changes.into_iter().map(|change| {
+                                    let color = match change.chars().next() {
+                                        Some('!') => theme.danger,
+                                        Some('+') => theme.success,
+                                        Some('-') => theme.muted_foreground,
+                                        _ => theme.foreground,
+                                    };
+                                    div().text_sm().text_color(color).child(change)
+                                })),
+                        )
+                    })
                     .child(hooks),
             );
         }
@@ -965,5 +1005,286 @@ impl HookerApp {
         let has_access =
             hook.permissions.is_some() || hook.reads.is_some() || hook.writes.is_some();
         has_access.then(|| permission_chips(hook, cx))
+    }
+
+    /// Repository a hook loads its hooks from: version, updates, pin
+    pub(super) fn remote_card(
+        &self,
+        hook_ref: HookRef,
+        hook: &Hook,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        let url = hook.from.clone()?;
+        let theme = cx.theme().clone();
+        let rev = hook.rev.clone();
+        let current =
+            goat_hooker::remote::head(&goat_hooker::remote::repo_dir(&url, rev.as_deref()));
+        let pinned = rev.as_deref().is_some_and(goat_hooker::remote::is_commit);
+        let key = (url.clone(), rev.clone());
+        let short = |sha: &str| sha.chars().take(8).collect::<String>();
+
+        let status: Div = match self.pages.remote_latest.get(&key) {
+            _ if pinned => div().child(format!(
+                "Pinned to {}",
+                short(rev.as_deref().unwrap_or_default())
+            )),
+            None => div()
+                .text_color(theme.muted_foreground)
+                .child("Not checked"),
+            Some(None) => div().text_color(theme.muted_foreground).child("Checking…"),
+            Some(Some(Err(err))) => div().text_color(theme.danger).child(err.clone()),
+            Some(Some(Ok(Some(latest)))) if current.as_deref() == Some(latest.as_str()) => {
+                div().text_color(theme.success).child("Up to date")
+            }
+            Some(Some(Ok(Some(latest)))) => div()
+                .text_color(theme.warning)
+                .child(format!("{} available", short(latest))),
+            Some(Some(Ok(None))) => div().child("Pinned"),
+        };
+
+        let check_key = key.clone();
+        let update_key = key.clone();
+        Some(
+            card_div(cx)
+                .child(section("REPOSITORY", cx))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .text_sm()
+                        .child(lucide("github").small())
+                        .child(url.clone())
+                        .when_some(rev.clone().filter(|_| !pinned), |this, rev| {
+                            this.child(chip(rev, theme.info))
+                        })
+                        .child(
+                            div().text_xs().text_color(theme.muted_foreground).child(
+                                current
+                                    .as_deref()
+                                    .map(short)
+                                    .unwrap_or_else(|| "not fetched".into()),
+                            ),
+                        ),
+                )
+                .child(h_flex().gap_2().text_sm().child(status))
+                .child(h_flex().gap_2().when(!pinned, |this| {
+                    this.child(
+                        Button::new("remote-check")
+                            .small()
+                            .ghost()
+                            .label("Check for updates")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let (url, rev) = check_key.clone();
+                                this.pages.remote_latest.insert(check_key.clone(), None);
+                                let key = check_key.clone();
+                                cx.spawn(async move |this, cx| {
+                                    let latest = cx
+                                        .background_spawn(async move {
+                                            goat_hooker::remote::latest(&url, rev.as_deref())
+                                                .map_err(|e| e.to_string())
+                                        })
+                                        .await;
+                                    this.update(cx, |this, cx| {
+                                        this.pages.remote_latest.insert(key, Some(latest));
+                                        cx.notify();
+                                    })
+                                    .ok();
+                                })
+                                .detach();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("remote-update")
+                            .small()
+                            .ghost()
+                            .label("Update")
+                            .tooltip("Fetch the last version: you'll review it before it runs")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let (url, rev) = update_key.clone();
+                                if let Some(repo) = this.repo.as_mut() {
+                                    match repo.update_remote(&url, rev.as_deref()) {
+                                        Ok(()) => this.notice = Some(("Updated".into(), true)),
+                                        Err(err) => this.notice = Some((err.to_string(), false)),
+                                    }
+                                }
+                                this.pages.remote_latest.remove(&update_key);
+                                this.reload();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("remote-pin")
+                            .small()
+                            .ghost()
+                            .label("Pin this version")
+                            .tooltip("Set `rev` to the commit in use: it won't change anymore")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(repo) = this.repo.as_mut()
+                                    && let Err(err) = repo.pin_hook(hook_ref.project, hook_ref.hook)
+                                {
+                                    this.notice = Some((err.to_string(), false));
+                                }
+                                this.reload();
+                                cx.notify();
+                            })),
+                    )
+                })),
+        )
+    }
+}
+
+fn card_div(cx: &App) -> Div {
+    card(cx)
+}
+
+impl HookerApp {
+    // MARK: history
+
+    fn render_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        use goat_hooker::history::{self, Status};
+        let theme = cx.theme().clone();
+        let subtitle = "The last runs of the hooks (commits, pushes, runs from the app) and the hooks that take the most time.";
+        let Some(repo) = self.repo.as_ref() else {
+            return div().into_any_element();
+        };
+        let runs = history::load(&repo.root, 100);
+        if runs.is_empty() {
+            return self.page(
+                "History",
+                subtitle,
+                div()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child("No runs yet: they show up here after a commit or a run."),
+                cx,
+            );
+        }
+
+        let status_color = |status: &Status| match status {
+            Status::Passed => theme.success,
+            Status::Cached => theme.success.opacity(0.6),
+            Status::Failed | Status::Denied => theme.danger,
+            Status::Skipped => theme.muted_foreground,
+        };
+
+        // Slowest hooks, as bars
+        let slowest = history::slowest(&runs);
+        let longest = slowest.first().map(|s| s.2.as_millis().max(1)).unwrap_or(1) as f32;
+        let mut bars = v_flex().gap_1p5();
+        for (project, name, average, count) in slowest.iter().take(8) {
+            let ratio = average.as_millis() as f32 / longest;
+            bars = bars.child(
+                h_flex()
+                    .gap_3()
+                    .text_sm()
+                    .child(
+                        div()
+                            .w(px(180.))
+                            .truncate()
+                            .child(format!("{name} · {project}")),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .h(px(10.))
+                            .rounded_full()
+                            .bg(theme.secondary)
+                            .child(
+                                div()
+                                    .h_full()
+                                    .rounded_full()
+                                    .bg(theme.primary.opacity(0.7))
+                                    .w(relative(ratio.max(0.02))),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(px(110.))
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(format!("{:.2}s · {count} runs", average.as_secs_f32())),
+                    ),
+            );
+        }
+
+        // Timeline
+        let mut timeline = v_flex().gap_2();
+        for run in runs.iter().take(50) {
+            let passed = run.passed();
+            let mut hooks = h_flex().gap_1().flex_wrap();
+            for hook in &run.hooks {
+                let color = status_color(&hook.status);
+                hooks = hooks.child(
+                    h_flex()
+                        .gap_1()
+                        .px_1p5()
+                        .py_0p5()
+                        .rounded_md()
+                        .text_xs()
+                        .bg(color.opacity(0.12))
+                        .text_color(color)
+                        .child(hook.name.clone())
+                        .when(
+                            matches!(hook.status, Status::Passed | Status::Failed),
+                            |this| {
+                                this.child(
+                                    div()
+                                        .text_color(theme.muted_foreground)
+                                        .child(format!("{:.1}s", hook.duration_ms as f32 / 1000.)),
+                                )
+                            },
+                        ),
+                );
+            }
+            timeline = timeline.child(
+                h_flex()
+                    .gap_3()
+                    .items_start()
+                    .child(
+                        div()
+                            .mt_1()
+                            .size(px(10.))
+                            .flex_shrink_0()
+                            .rounded_full()
+                            .bg(if passed { theme.success } else { theme.danger }),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .gap_1()
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .text_sm()
+                                    .child(
+                                        div()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .child(run.trigger.clone()),
+                                    )
+                                    .children(run.branch.clone().map(|b| chip(b, theme.info)))
+                                    .child(
+                                        div().text_xs().text_color(theme.muted_foreground).child(
+                                            format!(
+                                                "{} · {:.2}s",
+                                                history::ago(run.at),
+                                                run.duration_ms as f32 / 1000.
+                                            ),
+                                        ),
+                                    ),
+                            )
+                            .child(hooks),
+                    ),
+            );
+        }
+
+        self.page(
+            "History",
+            subtitle,
+            v_flex()
+                .gap_4()
+                .child(card(cx).child(section("SLOWEST HOOKS", cx)).child(bars))
+                .child(card(cx).child(section("LAST RUNS", cx)).child(timeline)),
+            cx,
+        )
     }
 }

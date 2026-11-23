@@ -1,9 +1,12 @@
 pub mod add;
+pub mod ci;
 pub mod generator;
+pub mod history;
 pub mod import;
 pub mod init;
 pub mod install;
 pub mod list;
+pub mod remotes;
 pub mod run;
 pub mod search;
 pub mod status;

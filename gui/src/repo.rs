@@ -1,4 +1,4 @@
-//! Données affichées par l'app : le dépôt, ses projets et leurs hooks (sans UI)
+//! Data shown by the app: the repository, its projects and their hooks (no UI)
 
 use std::path::{Path, PathBuf};
 
@@ -10,13 +10,13 @@ use goat_hooker::{
     runner::{self, HookInput, HookResult, Output},
 };
 
-/// Un projet du monorepo (un `hooker.config.json`)
+/// A project of the monorepo (a `hooker.config.json`)
 #[derive(Clone)]
 pub struct Project {
     pub file: PathBuf,
-    /// Dossier relatif à la racine du dépôt (`.` pour la racine)
+    /// Folder relative to the root of the repository (`.` for the root)
     pub name: String,
-    /// Config telle qu'elle est écrite dans le fichier (sans les hooks `path` chargés)
+    /// Config as written in the file (without the hooks loaded by `path`)
     pub raw: Config,
 }
 
@@ -29,7 +29,7 @@ impl Project {
         self.raw.hooks.as_deref().unwrap_or_default()
     }
 
-    /// Ajoute (`index = None`) ou remplace un hook, puis enregistre le fichier
+    /// Adds (`index = None`) or replaces a hook, then saves the file
     pub fn save_hook(&mut self, index: Option<usize>, hook: Hook) -> Result<(), GoatHookerError> {
         let hooks = self.raw.hooks.get_or_insert_with(Vec::new);
         match index {
@@ -48,7 +48,7 @@ impl Project {
     }
 }
 
-/// Hook qui se lancerait au prochain commit
+/// Hook that would run on the next commit
 #[derive(Clone)]
 pub struct PreviewItem {
     pub hook: String,
@@ -70,7 +70,7 @@ impl Repo {
         self.root.join(HOOK_CONFIG_FILENAME)
     }
 
-    /// Ouvre le dépôt git qui contient `dir`
+    /// Opens the git repository containing `dir`
     pub fn open(dir: &Path) -> Result<Self, GoatHookerError> {
         let root = git::repo_root(dir)?;
         let mut repo = Self {
@@ -84,7 +84,7 @@ impl Repo {
         Ok(repo)
     }
 
-    /// Recharge les configs depuis le disque
+    /// Reloads the configs from the disk
     pub fn reload(&mut self) -> Result<(), GoatHookerError> {
         self.installed = install::is_installed(&self.root);
         self.branch = git::current_branch(&self.root);
@@ -109,7 +109,7 @@ impl Repo {
         Ok(())
     }
 
-    /// Crée `hooker.config.json` à la racine (comme `hooker init`)
+    /// Creates `hooker.config.json` at the root (like `hooker init`)
     pub fn init_config(&mut self) -> Result<(), GoatHookerError> {
         if !self.config_file().exists() {
             Config {
@@ -135,7 +135,7 @@ impl Repo {
         ConfigLoader::new().load_recursive(&self.config_file())
     }
 
-    /// Hooks du pre-commit qui se lanceraient sur les fichiers stagés
+    /// Pre-commit hooks that would run on the staged files
     pub fn preview_pre_commit(&self) -> Result<Vec<PreviewItem>, GoatHookerError> {
         let configs = self.load_configs()?;
         let matcher = Matcher::new(&configs)?;
@@ -151,7 +151,7 @@ impl Repo {
             .collect())
     }
 
-    /// Lance tous les hooks d'un trigger, comme Git le ferait
+    /// Runs all the hooks of a trigger, like Git would
     pub fn run_trigger(&self, trigger: Trigger) -> Result<Vec<HookResult>, GoatHookerError> {
         let configs = self.load_configs()?;
         runner::run_trigger(
@@ -164,8 +164,8 @@ impl Repo {
         )
     }
 
-    /// Lance un seul hook d'un projet.
-    /// Pour un pre-commit, sur les fichiers stagés qui le concernent.
+    /// Runs a single hook of a project.
+    /// For a pre-commit, on the staged files it targets.
     pub fn run_hook(
         &self,
         project: &Project,
@@ -329,6 +329,8 @@ mod tests {
 pub struct Untrusted {
     pub origin: goat_hooker::config::Origin,
     pub hooks: Vec<Hook>,
+    /// What changed since the trusted version (`None`: never trusted)
+    pub changes: Option<Vec<String>>,
 }
 
 impl Repo {
@@ -354,6 +356,7 @@ impl Repo {
         goat_hooker::trust::untrusted(&self.root, hooks.iter().copied())
             .into_iter()
             .map(|origin| Untrusted {
+                changes: goat_hooker::trust::changes(&self.root, &origin),
                 hooks: hooks
                     .iter()
                     .filter(|h| h.origin.as_ref() == Some(&origin))
@@ -394,5 +397,66 @@ impl Repo {
         goat_hooker::import::write(&self.root, &imported, true)?;
         self.reload()?;
         Ok(imported)
+    }
+}
+
+impl Repo {
+    /// Fetches the last version of a repository of hooks (to review before it runs)
+    pub fn update_remote(&mut self, url: &str, rev: Option<&str>) -> Result<(), GoatHookerError> {
+        let repo = goat_hooker::remote::fetch(url, rev)?;
+        goat_hooker::remote::update(&repo, rev)?;
+        self.reload()
+    }
+
+    /// Pins a hook loading another repository to the commit in use
+    pub fn pin_hook(&mut self, project: usize, index: usize) -> Result<(), GoatHookerError> {
+        let mut hook = self.projects[project].hooks()[index].clone();
+        let Some(url) = hook.from.clone() else {
+            return Ok(());
+        };
+        let repo = goat_hooker::remote::fetch(&url, hook.rev.as_deref())?;
+        if let Some(commit) = goat_hooker::remote::head(&repo) {
+            hook.rev = Some(commit);
+            self.projects[project].save_hook(Some(index), hook)?;
+        }
+        self.reload()
+    }
+}
+
+impl Repo {
+    /// Names the JSON editor of a project suggests: hooks, variables, outputs
+    pub fn known(&self, project: usize) -> crate::json_complete::Known {
+        let mut known = crate::json_complete::Known::default();
+        let current = self.projects.get(project).map(|p| p.name.clone());
+        for p in &self.projects {
+            let prefix = if Some(&p.name) == current.as_ref() {
+                String::new()
+            } else if p.name == "." {
+                "root:".to_string()
+            } else {
+                format!("{}:", p.name)
+            };
+            for hook in p.hooks() {
+                known.hooks.push(format!("{prefix}{}", hook.name));
+                for output in hook.outputs.iter().flatten() {
+                    known
+                        .outputs
+                        .push(format!("{prefix}{}.{output}", hook.name));
+                }
+                for step in hook.steps.iter().flatten() {
+                    known
+                        .hooks
+                        .push(format!("{prefix}{}/{}", hook.name, step.id));
+                }
+            }
+            known.variables.extend(
+                p.raw
+                    .variables
+                    .iter()
+                    .flatten()
+                    .map(|(name, _)| name.clone()),
+            );
+        }
+        known
     }
 }

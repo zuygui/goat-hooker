@@ -1,9 +1,11 @@
-//! Goat Hooker : gestionnaire de hooks Git (utilisé par la CLI `hooker` et l'app graphique)
+//! Goat Hooker: Git hooks manager (used by the `hooker` CLI and the desktop app)
 
+pub mod cache;
 pub mod config;
 pub mod errors;
 pub mod git;
 pub mod graph;
+pub mod history;
 pub mod hub;
 pub mod import;
 pub mod install;

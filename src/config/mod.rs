@@ -14,7 +14,7 @@ mod template;
 
 pub const HOOK_CONFIG_FILENAME: &str = "hooker.config.json";
 
-/// URL du schéma, ajoutée par `hooker init` (autocomplétion dans les éditeurs)
+/// URL of the schema, added by `hooker init` (autocompletion in editors)
 pub const SCHEMA_URL: &str =
     "https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json";
 
@@ -37,28 +37,28 @@ pub struct Config {
     )]
     pub share: Option<Share>,
 
-    /// Paramètres d'un fichier de hooks réutilisable (utilisés en `{{nom}}`)
+    /// Parameters of a reusable hooks file (used as `{{name}}`)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
         description = "Parameters of a reusable hooks file, used as `{{name}}` in its hooks and set with `with` by the hook loading it"
     )]
     pub params: Option<BTreeMap<String, Param>>,
 
-    /// Dossiers des sous-projets (globs acceptés, ex: `packages/*`)
+    /// Folders of the sub-projects (globs accepted, e.g. `packages/*`)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
         description = "Sub-projects folders, each one with its own hooker.config.json. Globs are supported (packages/*)"
     )]
     pub imports: Option<Vec<String>>,
 
-    /// Charge automatiquement tous les `hooker.config.json` du dépôt
+    /// Loads every `hooker.config.json` of the repository automatically
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
         description = "Load every hooker.config.json of the repository (files ignored by git are skipped)"
     )]
     pub discover: Option<bool>,
 
-    /// Lance les hooks en parallèle (lu sur la config racine)
+    /// Runs the hooks in parallel (read from the root config)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Run hooks in parallel (root config only)")]
     pub parallel: Option<bool>,
@@ -76,7 +76,7 @@ pub struct Config {
     #[serde(skip)]
     pub base_dir: Option<PathBuf>,
 
-    /// Fichier d'où vient la config
+    /// File the config comes from
     #[serde(skip)]
     pub file: Option<PathBuf>,
 }
@@ -86,7 +86,7 @@ pub struct Hook {
     #[schemars(description = "Hook name")]
     pub name: String,
 
-    /// Optionnel seulement pour les hooks qui chargent un fichier (`path`)
+    /// Optional only for the hooks loading a file (`path`)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Git hook that runs this hook (not used with `path`)")]
     pub trigger: Option<Trigger>,
@@ -166,6 +166,12 @@ pub struct Hook {
         description = "Variables this hook writes with `echo \"name=value\" >> $HOOKER_VARS`"
     )]
     pub writes: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Skip the hook when it already passed with the same files, commands, inputs and variables. Default: true for hooks with `include`"
+    )]
+    pub cache: Option<bool>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -253,19 +259,21 @@ pub struct Origin {
     pub rev: Option<String>,
     /// Hooks file in that repository
     pub path: String,
-    /// Hash of the hooks file and of the `with` values: changes when the hooks change
+    /// Hash of the hooks file (and of the files it loads) and of the `with` values:
+    /// changes when the hooks change
     pub hash: String,
+    /// The hooks file in the cache
+    pub file: PathBuf,
+    /// `with` values, as JSON
+    pub with: String,
+    /// Commit of the repository in the cache
+    pub commit: Option<String>,
 }
 
 impl Origin {
-    /// Key in the trust store
+    /// Key in the trust store (the same for every version of the file)
     pub fn key(&self) -> String {
-        format!(
-            "{}#{}:{}",
-            self.url,
-            self.rev.as_deref().unwrap_or_default(),
-            self.path
-        )
+        format!("{}:{}", self.url, self.path)
     }
 }
 
@@ -287,7 +295,7 @@ pub struct Share {
     pub hooks: Vec<String>,
 }
 
-// Paramètre d'un fichier de hooks réutilisable
+// Parameter of a reusable hooks file
 #[derive(Debug, Default, Serialize, Deserialize, Clone, JsonSchema)]
 #[schemars(description = "A parameter of a reusable hooks file")]
 pub struct Param {
@@ -300,7 +308,7 @@ pub struct Param {
     pub default: Option<serde_json::Value>,
 }
 
-// Une étape d'un hook (un nœud dans le graphe)
+// A step of a hook (a node in the graph)
 #[derive(Debug, Default, Serialize, Deserialize, Clone, JsonSchema)]
 #[schemars(description = "A step of a hook: a node of the graph")]
 pub struct Step {
@@ -323,10 +331,10 @@ pub struct Step {
     pub outputs: Option<Vec<String>>,
 }
 
-/// Sorties de chaque nœud, sans avoir à les déclarer
+/// Outputs of every node, without declaring them
 pub const BUILTIN_OUTPUTS: [&str; 3] = ["files", "stdout", "status"];
 
-/// Nom utilisable comme variable shell (`$name`)
+/// Name usable as a shell variable (`$name`)
 fn is_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     chars
@@ -335,7 +343,7 @@ fn is_identifier(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-// Hooks Git côté client (le nom = le nom du fichier dans `.git/hooks`)
+// Client-side Git hooks (the name = the name of the file in `.git/hooks`)
 #[derive(
     Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, ValueEnum, JsonSchema,
 )]
@@ -399,7 +407,12 @@ impl Trigger {
         Trigger::PostMerge,
     ];
 
-    /// Nom du hook côté Git
+    /// Name of the hook for Git
+    /// `pre-commit` → `Trigger::PreCommit`
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|t| t.as_str() == name)
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Trigger::PreCommit => "pre-commit",
@@ -420,8 +433,8 @@ impl Trigger {
 }
 
 impl Hook {
-    /// Commandes à exécuter, dans l'ordre
-    /// (les étapes, dans l'ordre du fichier, pour un hook avec `steps`)
+    /// Commands to run, in order
+    /// (the steps, in the order of the file, for a hook with `steps`)
     pub fn commands(&self) -> Vec<&str> {
         match (self.cmd.as_ref(), self.cmds.as_ref(), self.steps.as_ref()) {
             (Some(cmd), _, _) => vec![cmd.as_str()],
@@ -431,7 +444,7 @@ impl Hook {
         }
     }
 
-    /// Validation des champs du graphe (`needs`, `inputs`, `outputs`)
+    /// Validation of the fields of the graph (`needs`, `inputs`, `outputs`)
     fn validate_links(
         name: &str,
         inputs: Option<&BTreeMap<String, String>>,
@@ -464,7 +477,7 @@ impl Hook {
         Ok(())
     }
 
-    /// Hook qui charge les hooks d'un fichier (`path`, éventuellement depuis `from`)
+    /// Hook loading the hooks of a file (`path`, maybe from `from`)
     pub fn is_import(&self) -> bool {
         self.path.is_some()
     }
@@ -579,7 +592,7 @@ impl Config {
         Self::load_with(path, None, "")
     }
 
-    /// Charge un fichier en remplissant ses `params` avec `with` (`importer` : hook qui le charge)
+    /// Loads a file, filling its `params` with `with` (`importer`: the hook loading it)
     pub fn load_with(
         path: &Path,
         with: Option<&BTreeMap<String, serde_json::Value>>,
@@ -592,7 +605,7 @@ impl Config {
         };
         let mut value: serde_json::Value = serde_json::from_str(&content).map_err(parse_error)?;
 
-        // Paramètres : remplacés dans les hooks avant de les lire
+        // Parameters: replaced in the hooks before reading them
         if let Some(params) = value.get("params").cloned() {
             let params: BTreeMap<String, Param> =
                 serde_json::from_value(params).map_err(parse_error)?;
@@ -650,14 +663,14 @@ impl Config {
     }
 }
 
-/// Nombre max de fichiers de hooks imbriqués (`path` qui charge un `path`...)
+/// Max number of nested hooks files (`path` loading a `path`...)
 const MAX_HOOKS_FILES_DEPTH: usize = 10;
 
-/// Loader qui gère la récursivité + détection des cycles
+/// Loader handling the recursion + detection of the cycles
 #[derive(Default)]
 pub struct ConfigLoader {
     visited: HashSet<PathBuf>,
-    /// Met à jour les repos `from` déjà en cache (`hooker update`)
+    /// Updates the `from` repositories already in cache (`hooker update`)
     refresh_remotes: bool,
     refreshed: HashSet<PathBuf>,
 }
@@ -679,14 +692,14 @@ impl ConfigLoader {
         let abs_path = fs::canonicalize(path)?;
 
         if !self.visited.insert(abs_path.clone()) {
-            // déjà visité → on ignore pour éviter les cycles
+            // already visited → ignored to avoid cycles
             return Ok(vec![]);
         }
 
         let mut root = Config::load_from_file(&abs_path)?;
         let base_dir = root.base_dir.clone().unwrap();
 
-        // Remplace les hooks `path` par les hooks du fichier chargé
+        // Replaces the `path` hooks with the hooks of the loaded file
         if let Some(hooks) = root.hooks.take() {
             root.hooks = Some(self.expand_hooks(hooks, &base_dir, 0, None)?);
         }
@@ -700,7 +713,7 @@ impl ConfigLoader {
             }
         }
 
-        // Les configs déjà chargées (dont celle-ci) sont ignorées grâce à `visited`
+        // The configs already loaded (this one included) are ignored thanks to `visited`
         if root.discover.unwrap_or(false) {
             for sub_path in git::find_files(&base_dir, HOOK_CONFIG_FILENAME)? {
                 let sub_cfgs = self.load_recursive(&sub_path)?;
@@ -711,8 +724,8 @@ impl ConfigLoader {
         Ok(all_cfg)
     }
 
-    /// Charge les hooks des fichiers `path` (locaux ou depuis un repo `from`).
-    /// Les hooks chargés tournent depuis le projet qui les importe.
+    /// Loads the hooks of the `path` files (local or from a `from` repository).
+    /// The loaded hooks run from the project importing them.
     fn expand_hooks(
         &mut self,
         hooks: Vec<Hook>,
@@ -767,11 +780,14 @@ impl ConfigLoader {
                     rev: hook.rev.clone(),
                     path: path.clone(),
                     hash: content_hash(&file, hook.with.as_ref())?,
+                    file: file.clone(),
+                    with: serde_json::to_string(&hook.with).unwrap_or_default(),
+                    commit: remote::head(file.parent().unwrap_or(&file)),
                 }),
                 (None, None) => None,
             };
 
-            // Un fichier de hooks peut lui-même charger des fichiers (relatifs à lui)
+            // A hooks file can load files itself (relative to it)
             expanded.extend(self.expand_hooks(
                 shared_hooks,
                 &shared_dir,
@@ -791,7 +807,7 @@ fn content_hash(
 ) -> Result<String, GoatHookerError> {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
-    hasher.update(fs::read(file)?);
+    hash_file(&mut hasher, file, 0)?;
     hasher.update(b"\0");
     hasher.update(serde_json::to_string(&with).unwrap_or_default());
     Ok(hasher
@@ -801,8 +817,27 @@ fn content_hash(
         .collect())
 }
 
-/// Résout un import en chemins de configs.
-/// Un import peut être un dossier (`api`) ou un glob (`packages/*`).
+/// Adds a hooks file and the files it loads with `path` to a hash
+fn hash_file(hasher: &mut sha2::Sha256, file: &Path, depth: usize) -> Result<(), GoatHookerError> {
+    use sha2::Digest;
+    let content = fs::read(file)?;
+    hasher.update((content.len() as u64).to_le_bytes());
+    hasher.update(&content);
+    if depth >= MAX_HOOKS_FILES_DEPTH {
+        return Ok(());
+    }
+    let value: serde_json::Value = serde_json::from_slice(&content).unwrap_or_default();
+    let dir = file.parent().unwrap_or(Path::new("."));
+    for hook in value["hooks"].as_array().into_iter().flatten() {
+        if let (Some(path), None) = (hook["path"].as_str(), hook["from"].as_str()) {
+            hash_file(hasher, &dir.join(path), depth + 1)?;
+        }
+    }
+    Ok(())
+}
+
+/// Resolves an import into paths of configs.
+/// An import can be a folder (`api`) or a glob (`packages/*`).
 fn resolve_import(base_dir: &Path, inc: &str) -> Result<Vec<PathBuf>, GoatHookerError> {
     let is_glob = inc.contains(['*', '?', '[']);
 
@@ -818,10 +853,12 @@ fn resolve_import(base_dir: &Path, inc: &str) -> Result<Vec<PathBuf>, GoatHooker
         return Ok(vec![sub_path]);
     }
 
-    // Le dossier de base est échappé pour qu'un `[` dans son chemin ne casse pas le glob
+    // The base folder is escaped so that a `[` in its path doesn't break the glob
+    // Without the `\\?\` prefix of canonical paths on Windows, glob doesn't support it
+    let base = crate::git::plain(base_dir).to_string_lossy().to_string();
     let pattern = format!(
         "{}/{}/{}",
-        glob::Pattern::escape(&base_dir.to_string_lossy()),
+        glob::Pattern::escape(&base),
         inc.trim_start_matches("./").trim_end_matches('/'),
         HOOK_CONFIG_FILENAME
     );
@@ -830,7 +867,7 @@ fn resolve_import(base_dir: &Path, inc: &str) -> Result<Vec<PathBuf>, GoatHooker
         source,
     })?;
 
-    // Les dossiers sans config sont ignorés silencieusement (ex: `packages/*` avec un dossier vide)
+    // Folders without config are ignored silently (e.g. `packages/*` with an empty folder)
     let mut sub_paths: Vec<PathBuf> = paths.filter_map(Result::ok).collect();
     sub_paths.sort();
 
@@ -968,7 +1005,7 @@ mod tests {
         let err = Config::load_from_file(&config_path).unwrap_err();
         assert!(matches!(err, GoatHookerError::InvalidHook { .. }));
 
-        // cmd et cmds en même temps
+        // cmd and cmds at the same time
         write_json(
             &config_path,
             r#"{ "hooks": [ { "name": "both", "trigger": "pre-commit", "cmd": "a", "cmds": ["b"] } ] }"#,
@@ -1014,7 +1051,7 @@ mod tests {
 
         write_sub_config(&dir.path().join("packages/a"), "a");
         write_sub_config(&dir.path().join("packages/b"), "b");
-        // dossier sans config → ignoré
+        // folder without config → ignored
         fs::create_dir_all(dir.path().join("packages/empty")).unwrap();
 
         let cfgs = ConfigLoader::new().load_recursive(&root_path).unwrap();
@@ -1045,7 +1082,7 @@ mod tests {
             .load_recursive(&root.join(HOOK_CONFIG_FILENAME))
             .unwrap();
 
-        // `api` importé ET découvert → chargé une seule fois ; `ignored/` est ignoré par git
+        // `api` imported AND discovered → loaded once; `ignored/` is ignored by git
         assert_eq!(hook_names(&cfgs), vec!["api", "nested", "root", "web"]);
     }
 
@@ -1068,7 +1105,7 @@ mod tests {
                 { "name": "nested", "path": "nested.json" }
             ] }"#,
         );
-        // relatif au fichier qui l'importe
+        // relative to the file importing it
         write_json(
             &dir.path().join("hooks/nested.json"),
             r#"{ "hooks": [ { "name": "fmt", "trigger": "pre-commit", "cmd": "true" } ] }"#,
@@ -1076,7 +1113,7 @@ mod tests {
 
         let cfgs = ConfigLoader::new().load_recursive(&root_path).unwrap();
         assert_eq!(hook_names(&cfgs), vec!["fmt", "lint", "own"]);
-        // les hooks importés tournent depuis le projet
+        // the imported hooks run from the project
         assert_eq!(cfgs.len(), 1);
     }
 
@@ -1148,7 +1185,8 @@ mod tests {
         git(&["add", "."]);
         git(&["commit", "-q", "-m", "init"]);
 
-        let url = format!("file://{}", shared.display());
+        // A local path works as a URL (with `/`, it is valid in JSON on Windows too)
+        let url = shared.display().to_string().replace('\\', "/");
         let project = dir.path().join("project");
         fs::create_dir_all(&project).unwrap();
         let root_path = project.join(HOOK_CONFIG_FILENAME);
@@ -1159,13 +1197,13 @@ mod tests {
             ),
         );
 
-        // SAFETY: seul ce test modifie HOOKER_CACHE_DIR
+        // SAFETY: only this test changes HOOKER_CACHE_DIR
         unsafe { std::env::set_var("HOOKER_CACHE_DIR", &cache) };
 
         let cfgs = ConfigLoader::new().load_recursive(&root_path).unwrap();
         assert_eq!(hook_names(&cfgs), vec!["remote fmt"]);
 
-        // mise à jour du repo distant → visible seulement avec refresh
+        // update of the remote repository → visible only with refresh
         write_json(
             &shared.join("rust.json"),
             r#"{ "hooks": [ { "name": "remote fmt v2", "trigger": "pre-commit", "cmd": "true" } ] }"#,
@@ -1184,7 +1222,7 @@ mod tests {
 
     #[test]
     fn schema_file_is_up_to_date() {
-        // Comparé comme JSON : l'ordre des clés dépend des features de schemars
+        // Compared as JSON: the order of the keys depends on the features of schemars
         let expected: serde_json::Value = serde_json::from_str(&json_schema()).unwrap();
         let current: serde_json::Value =
             serde_json::from_str(include_str!("../../schema.json")).unwrap();
@@ -1224,7 +1262,7 @@ mod tests {
         );
         assert_eq!(hooks[1].name, "eslint lint");
 
-        // paramètre requis manquant
+        // missing required parameter
         write_json(
             &root_path,
             r#"{ "hooks": [ { "name": "lint", "path": "eslint.json" } ] }"#,

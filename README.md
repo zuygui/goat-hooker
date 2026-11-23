@@ -34,10 +34,15 @@
 **CLI** (`hooker`):
 
 ```sh
-cargo install goat-hooker
+brew install zuygui/tap/goat-hooker        # macOS, Linux
+curl -fsSL https://raw.githubusercontent.com/zuygui/goat-hooker/main/install.sh | sh
+cargo binstall goat-hooker                  # prebuilt, with cargo-binstall
+cargo install goat-hooker                   # from the sources
 ```
 
 or download the archive of your platform from the [latest release](https://github.com/zuygui/goat-hooker/releases/latest).
+
+**Desktop app** with Homebrew: `brew install --cask zuygui/tap/goat-hooker`. The app tells when a new version is out.
 
 **Desktop app**: download the installer of your platform from the [latest release](https://github.com/zuygui/goat-hooker/releases/latest):
 
@@ -69,6 +74,8 @@ Releases are automatic, from the [conventional commits](https://www.conventional
 
 The repository needs a `CARGO_REGISTRY_TOKEN` secret (crates.io token with the `publish-new` and `publish-update` scopes), and GitHub Actions allowed to create pull requests (Settings → Actions → General).
 
+The Homebrew tap (`zuygui/homebrew-tap`, with `Formula/` and `Casks/`) is updated by the release workflow when the `HOMEBREW_TAP_TOKEN` secret holds a token allowed to push to it.
+
 ## Usage 🐐
 
 ```sh
@@ -82,7 +89,12 @@ hooker run pre-commit --dry-run   # show the hooks that would run, and on which 
 hooker list        # list the configurations and their hooks
 hooker update      # update the hooks loaded from git repositories
 hooker search rust # find hooks shared on GitHub and add them
+hooker ci          # run the hooks on the files changed by a pull request (CI)
+hooker cache-clear # forget the results of the hooks that passed
+hooker history     # last runs and slowest hooks
 hooker trust       # review and trust the hooks loaded from other repositories
+hooker outdated    # hooks of other repositories with a newer version
+hooker pin         # pin them to the commit in use
 hooker vars        # variables shared between hooks: value, writers, readers
 hooker import      # convert a husky / lint-staged, lefthook or pre-commit config
 hooker schema      # print the JSON schema of the configuration
@@ -118,6 +130,9 @@ Hooks show a spinner while running, then a summary. Only the output of the faile
   - edits are written to the `hooker.config.json` files, so the JSON stays the source of truth
   - double-click the background (or drop a wire on it) to create a hook, hover a node to delete it
   - variables are drawn from the hooks writing them to the hooks reading them
+- **History**: the last runs and the slowest hooks
+- the **Source** of a hook: its JSON in the config file, the scripts it runs, the hooks file it loads; **Edit the JSON** opens an editor with colors and autocompletion (keys, triggers, hooks, variables, outputs) that checks the file while you type
+- the graph edits a node in a panel next to it, and its changes can be undone (⌘/Ctrl+Z)
 - **Variables**: value, writers and readers of each variable
 - **Browse hooks**: search the hooks shared on GitHub, set their parameters and add them
 - **To review**: the commands and permissions of the hooks of other repositories, to trust them
@@ -250,7 +265,7 @@ Hooks can be shared between projects in a hooks file (`{ "hooks": [...] }`), loa
 }
 ```
 
-Loaded hooks run from the project that loads them. Repositories are cloned once, run `hooker update` to fetch their new version.
+Loaded hooks run from the project that loads them. Repositories are cloned once: `hooker outdated` shows the ones with a newer version, `hooker update` fetches it (you review what changed with `hooker trust` before it runs), and `hooker pin` sets `rev` to the commit in use so it never changes. `rev` can be a branch, a tag or a commit.
 
 A hooks file can declare `params`, used as `{{name}}` in its hooks, and set with `with` by the hook loading it. This makes reusable nodes:
 
@@ -292,6 +307,30 @@ Add `share` to the root `hooker.config.json` of a repository: `hooker search` (a
 ```
 
 A hooks file can have a `description`. GitHub's code search needs a token: `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth login`. `HOOKER_HUB_REPOS=owner/name,owner/other@branch` adds repositories the search can't find (private ones, branches).
+
+## CI 🤖
+
+`hooker ci` runs the hooks of a trigger (`--trigger`, `pre-commit` by default) on the files changed since a base commit (`--base`, by default the base of the pull request or `origin/HEAD`). Nothing is staged: a formatter that changes a file fails, the file should have been fixed before the commit. Hooks of other repositories are trusted, since the CI runs the code of the repository anyway.
+
+On GitHub, use the action (it installs `hooker` from the releases and annotates the failed hooks):
+
+```yaml
+on: [pull_request, push]
+jobs:
+  hooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: zuygui/goat-hooker@main
+        with:
+          trigger: pre-commit # default
+```
+
+## Cache ⚡
+
+A hook that already passed with the same files (their content), commands, inputs and variables isn't run again: its output, outputs and variables are replayed. Hooks with `include` are cached by default, `"cache": true` / `false` chooses for a hook. Formatters are cached on the fixed files, so unformatted files always go through them. `hooker run --no-cache` runs everything, `hooker cache-clear` forgets the results.
 
 ## Variables 🔤
 

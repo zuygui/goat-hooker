@@ -19,7 +19,7 @@ use goat_hooker::{
 
 use crate::cli::ui::{self, KO, OK, PENDING};
 
-/// Config explicite, sinon celle à la racine du dépôt (`None` si elle n'existe pas)
+/// Explicit config, else the one at the root of the repository (`None` if it doesn't exist)
 pub fn resolve_config(root: &Path, config_path: Option<PathBuf>) -> Option<PathBuf> {
     match config_path {
         Some(path) => Some(path),
@@ -31,8 +31,9 @@ pub fn resolve_config(root: &Path, config_path: Option<PathBuf>) -> Option<PathB
 pub struct RunFlags {
     pub dry_run: bool,
     pub verbose: bool,
-    /// Lancé par Git : rien à afficher s'il n'y a pas de hooks
+    /// Run by Git: nothing to show when there are no hooks
     pub from_git: bool,
+    pub no_cache: bool,
 }
 
 pub fn run_hooks(
@@ -45,15 +46,16 @@ pub fn run_hooks(
         dry_run,
         verbose,
         from_git,
+        no_cache,
     } = flags;
-    // `HOOKER_SKIP=1 git commit` pour passer les hooks
+    // `HOOKER_SKIP=1 git commit` to skip the hooks
     if std::env::var(git::SKIP_ENV).is_ok_and(|v| !v.is_empty() && v != "0") {
         return Ok(());
     }
 
     let root = ui::current_repo()?;
 
-    // Si la config n'existe pas, on ne bloque pas Git
+    // Without config, Git isn't blocked
     let Some(config_path) = resolve_config(&root, config_path) else {
         eprintln!(
             "{}",
@@ -69,12 +71,14 @@ pub fn run_hooks(
 
     let configs = ConfigLoader::new().load_recursive(&config_path)?;
 
-    // Git donne au pre-push les refs poussées sur stdin.
-    // On le lit pour filtrer les hooks, puis on le redonne à chaque commande.
+    // Git gives the pushed refs to the pre-push on stdin.
+    // It is read to filter the hooks, then given again to each command.
     let input = HookInput {
         args: args.to_vec(),
         stdin: read_stdin(trigger)?,
         force_color: std::io::stderr().is_terminal(),
+        no_cache,
+        ci_files: None,
     };
 
     if dry_run {
@@ -125,7 +129,7 @@ pub fn run_hooks(
     Ok(())
 }
 
-/// Lit stdin pour le pre-push (sauf si lancé à la main depuis un terminal)
+/// Reads stdin for the pre-push (unless run by hand from a terminal)
 fn read_stdin(trigger: Trigger) -> Result<Option<String>, GoatHookerError> {
     if trigger != Trigger::PrePush || std::io::stdin().is_terminal() {
         return Ok(None);
@@ -136,7 +140,7 @@ fn read_stdin(trigger: Trigger) -> Result<Option<String>, GoatHookerError> {
     Ok(Some(content))
 }
 
-/// Une ligne de la liste des hooks : `✔ name   project   120ms`
+/// A row of the list of the hooks: `✔ name   project   120ms`
 fn hook_line(glyph: &str, name: &str, width: usize, project: &str, extra: &str) -> String {
     format!(
         "{glyph} {name:<width$}  {}  {}",
@@ -145,8 +149,8 @@ fn hook_line(glyph: &str, name: &str, width: usize, project: &str, extra: &str) 
     )
 }
 
-/// Affiche l'avancement : un spinner par hook dans un terminal, une ligne par hook sinon
-struct Reporter {
+/// Shows the progress: a spinner per hook in a terminal, a line per hook otherwise
+pub(crate) struct Reporter {
     trigger: Trigger,
     root: PathBuf,
     multi: MultiProgress,
@@ -155,17 +159,17 @@ struct Reporter {
 }
 
 #[derive(Default)]
-struct ReporterState {
+pub(crate) struct ReporterState {
     bars: Vec<ProgressBar>,
     labels: Vec<(String, String)>,
-    /// Nœuds attendus par chaque nœud (`← codegen`)
+    /// Nodes each node waits for (`← codegen`)
     needs: Vec<String>,
     width: usize,
     project_width: usize,
 }
 
 impl Reporter {
-    fn new(trigger: Trigger, root: &Path) -> Self {
+    pub(crate) fn new(trigger: Trigger, root: &Path) -> Self {
         let interactive = std::io::stderr().is_terminal();
         let multi = MultiProgress::with_draw_target(if interactive {
             ProgressDrawTarget::stderr()
@@ -181,7 +185,7 @@ impl Reporter {
         }
     }
 
-    fn on_progress(&self, progress: Progress) {
+    pub(crate) fn on_progress(&self, progress: Progress) {
         let mut state = self.state.lock().unwrap();
         match progress {
             Progress::Planned(graph) => self.plan(&mut state, graph),
@@ -197,7 +201,12 @@ impl Reporter {
             }
             Progress::Finished(index, result) => {
                 let (name, project) = state.labels[index].clone();
-                let (glyph, extra) = if result.skipped {
+                let (glyph, extra) = if result.cached {
+                    (
+                        OK.green().dimmed().to_string(),
+                        "cached".dimmed().to_string(),
+                    )
+                } else if result.skipped {
                     ("–".dimmed().to_string(), "skipped".to_string())
                 } else if result.denied {
                     ("⛔".to_string(), "denied".red().to_string())
@@ -285,21 +294,21 @@ impl Reporter {
         }
     }
 
-    /// Consomme le reporter : les spinners ne doivent plus redessiner par-dessus la suite.
-    fn finish(self) {
+    /// Consumes the reporter: the spinners must not draw over what follows anymore.
+    pub(crate) fn finish(self) {
         let state = self.state.into_inner().unwrap();
         let had_bars = !state.bars.is_empty();
         drop(state.bars);
         drop(self.multi);
-        // indicatif laisse le curseur au bout de la dernière ligne
+        // indicatif leaves the cursor at the end of the last line
         if had_bars && self.interactive {
             eprintln!();
         }
     }
 }
 
-/// Sortie des hooks en échec (de tous avec `--verbose`)
-fn print_outputs(results: &[HookResult], root: &Path, verbose: bool) {
+/// Output of the failed hooks (of all of them with `--verbose`)
+pub(crate) fn print_outputs(results: &[HookResult], root: &Path, verbose: bool) {
     for result in results
         .iter()
         .filter(|r| !r.skipped && (verbose || !r.success))
@@ -321,7 +330,7 @@ fn print_outputs(results: &[HookResult], root: &Path, verbose: bool) {
     }
 }
 
-fn print_summary(results: &[HookResult], elapsed: Duration) {
+pub(crate) fn print_summary(results: &[HookResult], elapsed: Duration) {
     let denied = results.iter().filter(|r| r.denied).count();
     let failed = results.iter().filter(|r| r.failed()).count() - denied;
     let skipped = results.iter().filter(|r| r.skipped).count();
@@ -379,7 +388,7 @@ fn print_summary(results: &[HookResult], elapsed: Duration) {
     }
 }
 
-/// Nom d'un nœud vu depuis un autre : avec son projet s'il est ailleurs (`api:codegen`)
+/// Name of a node seen from another one: with its project when it is elsewhere (`api:codegen`)
 fn label_from(graph: &Graph, from: usize, node: usize) -> String {
     let target = &graph.nodes[node];
     if target.project == graph.nodes[from].project {

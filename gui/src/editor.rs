@@ -1,7 +1,7 @@
 //! Formulaire d'ajout / modification d'un hook
 
 use gpui_kit::component::{
-    ActiveTheme, IndexPath,
+    ActiveTheme, IndexPath, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputState, Textarea, TextareaState},
@@ -12,7 +12,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
-use goat_hooker::config::{Hook, Trigger};
+use goat_hooker::config::{FileAccess, Hook, Permissions, Trigger};
 
 type TriggerSelect = SelectState<Vec<&'static str>>;
 
@@ -25,7 +25,7 @@ pub enum EditorEvent {
 }
 
 pub struct HookEditor {
-    /// Hook modifié (`None` = nouveau hook)
+    /// Edited hook (`None` = new hook)
     pub index: Option<usize>,
     name: Entity<InputState>,
     include: Entity<InputState>,
@@ -34,6 +34,15 @@ pub struct HookEditor {
     trigger: Entity<TriggerSelect>,
     selected_trigger: Trigger,
     stage_fixed: bool,
+    reads: Entity<InputState>,
+    writes: Entity<InputState>,
+    /// `None`: default of the hook (everything for a hook of the repository)
+    files: Option<FileAccess>,
+    network: Option<bool>,
+    env: Entity<InputState>,
+    /// The hook as it was: the fields the form doesn't show are kept
+    original: Hook,
+    compact: bool,
     error: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
@@ -72,6 +81,24 @@ impl HookEditor {
                 .default_value(hook.commands().join("\n"))
         });
 
+        let list = |items: &Option<Vec<String>>| items.clone().unwrap_or_default().join(", ");
+        let reads = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("version, token")
+                .default_value(list(&hook.reads))
+        });
+        let writes = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("version")
+                .default_value(list(&hook.writes))
+        });
+        let permissions = hook.permissions.clone().unwrap_or_default();
+        let env = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("NPM_TOKEN, CARGO_HOME  (empty = all of them)")
+                .default_value(list(&permissions.env))
+        });
+
         let triggers: Vec<&'static str> = Trigger::ALL.iter().map(|t| t.as_str()).collect();
         let index_of = Trigger::ALL
             .iter()
@@ -103,12 +130,19 @@ impl HookEditor {
             trigger,
             selected_trigger,
             stage_fixed: hook.stage_fixed.unwrap_or(false),
+            reads,
+            writes,
+            files: permissions.files,
+            network: permissions.network,
+            env,
+            original: hook.clone(),
+            compact: false,
             error: None,
             _subscriptions: vec![subscription],
         }
     }
 
-    /// Construit le hook à partir du formulaire
+    /// Builds the hook from the form
     fn build_hook(&self, cx: &App) -> Result<Hook, String> {
         let name = self.name.read(cx).value().trim().to_string();
         if name.is_empty() {
@@ -123,7 +157,7 @@ impl HookEditor {
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .collect();
-        if commands.is_empty() {
+        if commands.is_empty() && self.original.steps.is_none() {
             return Err("Add at least one command".to_string());
         }
 
@@ -143,6 +177,17 @@ impl HookEditor {
             _ => (None, Some(commands)),
         };
 
+        let permissions = Permissions {
+            files: self.files,
+            network: self.network,
+            env: patterns(&self.env),
+        };
+        // A hook with steps keeps them: its commands aren't edited here
+        let (cmd, cmds) = if self.original.steps.is_some() {
+            (None, None)
+        } else {
+            (cmd, cmds)
+        };
         Ok(Hook {
             name,
             trigger: Some(self.selected_trigger),
@@ -151,8 +196,18 @@ impl HookEditor {
             cmd,
             cmds,
             stage_fixed: self.stage_fixed.then_some(true),
-            ..Default::default()
+            reads: patterns(&self.reads),
+            writes: patterns(&self.writes),
+            permissions: (permissions != Permissions::default()).then_some(permissions),
+            // needs, inputs, outputs, steps, cache... stay as they were
+            ..self.original.clone()
         })
+    }
+
+    /// Narrow layout, next to the graph
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
+        self
     }
 
     fn save(&mut self, cx: &mut Context<Self>) {
@@ -189,6 +244,73 @@ fn field(
         })
 }
 
+impl HookEditor {
+    /// Choice between a few values, as buttons
+    fn choice<T: Copy + PartialEq + 'static>(
+        &self,
+        id: &'static str,
+        options: &[(&'static str, T)],
+        current: T,
+        set: fn(&mut Self, T),
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut row = h_flex().gap_1();
+        for (i, (label, value)) in options.iter().enumerate() {
+            let value = *value;
+            let button = Button::new((id, i))
+                .xsmall()
+                .label(*label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    set(this, value);
+                    cx.notify();
+                }));
+            row = row.child(if value == current {
+                button.primary()
+            } else {
+                button.ghost()
+            });
+        }
+        row
+    }
+
+    fn render_permissions(&self, cx: &mut Context<Self>) -> Div {
+        let files = self.choice(
+            "perm-files",
+            &[
+                ("default", None),
+                ("read only", Some(FileAccess::Read)),
+                ("modify", Some(FileAccess::Write)),
+            ],
+            self.files,
+            |this, v| this.files = v,
+            cx,
+        );
+        let network = self.choice(
+            "perm-network",
+            &[
+                ("default", None),
+                ("allowed", Some(true)),
+                ("blocked", Some(false)),
+            ],
+            self.network,
+            |this, v| this.network = v,
+            cx,
+        );
+        v_flex()
+            .gap_2()
+            .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Permissions"))
+            .child(h_flex().gap_3().child(div().w(px(70.)).text_sm().child("Files")).child(files))
+            .child(h_flex().gap_3().child(div().w(px(70.)).text_sm().child("Network")).child(network))
+            .child(field("Environment", Some("Variables it gets besides PATH, HOME, GIT_*…"), Input::new(&self.env), cx))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Default: everything for a hook of this repository, read-only files without network for a hook of another one."),
+            )
+    }
+}
+
 impl Render for HookEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let title = if self.index.is_some() {
@@ -198,6 +320,7 @@ impl Render for HookEditor {
         };
         let stage_fixed = self.stage_fixed;
 
+        let compact = self.compact;
         v_flex()
             .gap_4()
             .max_w(px(760.))
@@ -207,12 +330,17 @@ impl Render for HookEditor {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(title),
             )
-            .child(
+            .child(if compact {
+                v_flex()
+                    .gap_4()
+                    .child(field("Name", None, Input::new(&self.name), cx))
+                    .child(field("Trigger", None, Select::new(&self.trigger), cx))
+            } else {
                 h_flex()
                     .gap_4()
                     .child(field("Name", None, Input::new(&self.name), cx).flex_1())
-                    .child(field("Trigger", None, Select::new(&self.trigger), cx).w(px(220.))),
-            )
+                    .child(field("Trigger", None, Select::new(&self.trigger), cx).w(px(220.)))
+            })
             .child(field(
                 "Files",
                 Some("Glob patterns relative to the project, separated by commas. `*` stays in its folder, `**` goes through folders."),
@@ -239,6 +367,13 @@ impl Render for HookEditor {
                     )
                     .child(div().text_sm().child("Re-stage the files after the hook (formatters)")),
             )
+            .child(
+                h_flex()
+                    .gap_4()
+                    .child(field("Reads", Some("Variables, as $name"), Input::new(&self.reads), cx).flex_1())
+                    .child(field("Writes", Some("echo \"name=value\" >> $HOOKER_VARS"), Input::new(&self.writes), cx).flex_1()),
+            )
+            .child(self.render_permissions(cx))
             .when_some(self.error.clone(), |this, error| {
                 this.child(div().text_sm().text_color(cx.theme().danger).child(error))
             })

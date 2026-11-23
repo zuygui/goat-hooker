@@ -1,4 +1,4 @@
-//! Mise en forme partagée par les commandes
+//! Formatting shared by the commands
 
 use std::{
     io::IsTerminal,
@@ -14,12 +14,12 @@ pub const OK: &str = "✔";
 pub const KO: &str = "✘";
 pub const PENDING: &str = "·";
 
-/// Le terminal est interactif (prompts, spinners)
+/// The terminal is interactive (prompts, spinners)
 pub fn is_interactive() -> bool {
     std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
 }
 
-/// Nom d'un projet du monorepo : `root` ou son dossier relatif à la racine
+/// Name of a project of the monorepo: `root` or its folder relative to the root
 pub fn project_label(root: &Path, dir: &Path) -> String {
     let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     match dir.strip_prefix(&root) {
@@ -42,7 +42,7 @@ pub fn plural(n: usize, word: &str) -> String {
     format!("{n} {word}{}", if n > 1 { "s" } else { "" })
 }
 
-/// Couleur d'un trigger (la même que dans l'app)
+/// Color of a trigger (the same as in the app)
 pub fn trigger(trigger: Trigger) -> ColoredString {
     match trigger {
         Trigger::PreCommit => trigger.as_str().blue(),
@@ -52,12 +52,12 @@ pub fn trigger(trigger: Trigger) -> ColoredString {
     }
 }
 
-/// Une commande à lancer, pour les pistes de solution
+/// A command to run, for the hints
 pub fn command(cmd: &str) -> ColoredString {
     format!("`{cmd}`").bold()
 }
 
-/// Racine du dépôt qui contient le dossier courant
+/// Root of the repository containing the current folder
 pub fn current_repo() -> Result<PathBuf, goat_hooker::errors::GoatHookerError> {
     let cwd = std::env::current_dir()?;
     git::repo_root(&cwd)

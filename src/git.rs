@@ -6,16 +6,16 @@ use std::{
 
 use crate::errors::GoatHookerError;
 
-/// Variable d'env qui désactive goat-hooker (`HOOKER_SKIP=1 git commit`).
-/// Aussi utilisée pour nos propres commandes git (le `checkout` du stash ne doit pas lancer le post-checkout).
+/// Environment variable disabling goat-hooker (`HOOKER_SKIP=1 git commit`).
+/// Also used for our own git commands (the `checkout` of the stash must not run the post-checkout).
 pub const SKIP_ENV: &str = "HOOKER_SKIP";
 
-/// Lance une commande git dans `dir` et retourne sa sortie standard
+/// Runs a git command in `dir` and returns its standard output
 fn git(dir: &Path, args: &[&str]) -> Result<String, GoatHookerError> {
     git_bytes(dir, args).map(|out| String::from_utf8_lossy(&out).to_string())
 }
 
-/// Comme `git`, mais garde la sortie brute (les patchs ne sont pas forcément en UTF-8)
+/// Like `git`, but keeps the raw output (patches aren't always UTF-8)
 fn git_bytes(dir: &Path, args: &[&str]) -> Result<Vec<u8>, GoatHookerError> {
     let output = Command::new("git")
         .args(args)
@@ -33,7 +33,7 @@ fn git_bytes(dir: &Path, args: &[&str]) -> Result<Vec<u8>, GoatHookerError> {
     Ok(output.stdout)
 }
 
-/// Chemin d'un fichier dans le dossier `.git` (gère les worktrees)
+/// Path of a file in the `.git` folder (handles worktrees)
 fn git_path(root: &Path, name: &str) -> Result<PathBuf, GoatHookerError> {
     let path = PathBuf::from(git(root, &["rev-parse", "--git-path", name])?.trim());
     Ok(if path.is_absolute() {
@@ -43,14 +43,26 @@ fn git_path(root: &Path, name: &str) -> Result<PathBuf, GoatHookerError> {
     })
 }
 
-/// Ajoute des fichiers à l'index (pour `stage_fixed`)
+/// A path Git understands: without the `\\?\` prefix of canonical paths on Windows
+pub fn plain(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) => match rest.strip_prefix(r"UNC\") {
+            Some(unc) => PathBuf::from(format!(r"\\{unc}")),
+            None => PathBuf::from(rest),
+        },
+        None => path.to_path_buf(),
+    }
+}
+
+/// Adds files to the index (for `stage_fixed`)
 pub fn add(root: &Path, files: &[PathBuf]) -> Result<(), GoatHookerError> {
     if files.is_empty() {
         return Ok(());
     }
     let files: Vec<String> = files
         .iter()
-        .map(|f| f.to_string_lossy().to_string())
+        .map(|f| plain(f).to_string_lossy().to_string())
         .collect();
     let mut args = vec!["add", "--"];
     args.extend(files.iter().map(String::as_str));
@@ -58,20 +70,20 @@ pub fn add(root: &Path, files: &[PathBuf]) -> Result<(), GoatHookerError> {
     Ok(())
 }
 
-/// Un fichier avec des modifs non stagées
+/// A file with unstaged changes
 struct StashedFile {
     path: PathBuf,
-    /// Blob de la version stagée (avant les hooks)
+    /// Blob of the staged version (before the hooks)
     base: String,
-    /// Blob de la version du working tree (`None` si le fichier a été supprimé)
+    /// Blob of the working tree version (`None` if the file was deleted)
     saved: Option<String>,
 }
 
-/// Modifs non stagées mises de côté pendant le pre-commit,
-/// pour que les hooks voient exactement ce qui va être commité.
+/// Unstaged changes put aside during the pre-commit,
+/// so that the hooks see exactly what will be committed.
 ///
-/// Les versions du working tree sont gardées dans la base d'objets de git,
-/// et la liste dans `.git/goat-hooker-<pid>.stash` (pour les retrouver en cas de crash).
+/// The working tree versions are kept in the object database of git,
+/// and the list in `.git/goat-hooker-<pid>.stash` (to find them again after a crash).
 pub struct UnstagedStash {
     root: PathBuf,
     manifest: PathBuf,
@@ -80,9 +92,9 @@ pub struct UnstagedStash {
 }
 
 impl UnstagedStash {
-    /// Met de côté les modifs non stagées des fichiers suivis (rien à faire s'il n'y en a pas)
+    /// Puts aside the unstaged changes of the tracked files (nothing to do if there are none)
     pub fn save(root: &Path) -> Result<Option<Self>, GoatHookerError> {
-        // Pendant un merge, l'index contient des conflits : on ne touche à rien
+        // During a merge, the index has conflicts: nothing is touched
         if git(root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).is_ok() {
             return Ok(None);
         }
@@ -144,7 +156,7 @@ impl UnstagedStash {
             restored: false,
         };
 
-        // Remet ces fichiers au niveau de l'index, sans lancer les hooks de Git (post-checkout)
+        // Puts these files back to their staged version, without running Git's hooks (post-checkout)
         let no_hooks = format!(
             "core.hooksPath={}",
             git_path(root, "goat-hooker/no-hooks")?.display()
@@ -156,9 +168,9 @@ impl UnstagedStash {
         Ok(Some(stash))
     }
 
-    /// Remet les modifs non stagées.
-    /// Si les hooks ont modifié un fichier (formateur), leurs modifs sont fusionnées avec les tiennes ;
-    /// en cas de conflit, le working tree garde ta version (les modifs des hooks restent dans l'index).
+    /// Puts the unstaged changes back.
+    /// If the hooks changed a file (formatter), their changes are merged with yours;
+    /// on a conflict, the working tree keeps your version (the changes of the hooks stay in the index).
     pub fn restore(&mut self) -> Result<(), GoatHookerError> {
         if self.restored {
             return Ok(());
@@ -171,7 +183,7 @@ impl UnstagedStash {
             let current = fs::read(&path).ok();
 
             let Some(saved) = file.saved.as_ref() else {
-                // supprimé dans le working tree
+                // deleted in the working tree
                 if current.as_deref() == Some(base.as_slice()) {
                     fs::remove_file(&path)?;
                 }
@@ -180,7 +192,7 @@ impl UnstagedStash {
             let saved = git_bytes(&self.root, &["cat-file", "blob", saved])?;
 
             let restored = match current {
-                // les hooks n'ont pas touché au fichier
+                // the hooks didn't touch the file
                 Some(current) if current == base => saved,
                 Some(current) => match merge_file(&self.root, &current, &base, &saved)? {
                     Some(merged) => merged,
@@ -203,7 +215,7 @@ impl UnstagedStash {
 }
 
 impl Drop for UnstagedStash {
-    // Filet de sécurité si `restore` n'a pas été appelé (erreur, panic...)
+    // Safety net if `restore` wasn't called (error, panic...)
     fn drop(&mut self) {
         if let Err(err) = self.restore() {
             eprintln!(
@@ -214,7 +226,7 @@ impl Drop for UnstagedStash {
     }
 }
 
-/// Fusion 3-way avec `git merge-file` (`None` en cas de conflit)
+/// 3-way merge with `git merge-file` (`None` on a conflict)
 fn merge_file(
     root: &Path,
     current: &[u8],
@@ -232,30 +244,30 @@ fn merge_file(
     let output = Command::new("git")
         .arg("merge-file")
         .arg("-p")
-        .args([&current_file, &base_file, &other_file])
+        .args([plain(&current_file), plain(&base_file), plain(&other_file)])
         .current_dir(root)
         .output();
     let _ = fs::remove_dir_all(&dir);
 
     let output =
         output.map_err(|e| GoatHookerError::GitError(format!("failed to run git: {e}")))?;
-    // 0 = fusion propre, > 0 = nombre de conflits, < 0 = erreur (ex: fichier binaire)
+    // 0 = clean merge, > 0 = number of conflicts, < 0 = error (e.g. binary file)
     Ok(output.status.success().then_some(output.stdout))
 }
 
-/// Racine du dépôt
+/// Root of the repository
 pub fn repo_root(dir: &Path) -> Result<PathBuf, GoatHookerError> {
     let root = git(dir, &["rev-parse", "--show-toplevel"])?;
     Ok(PathBuf::from(root.trim()))
 }
 
-/// Branche courante (`None` en HEAD détaché)
+/// Current branch (`None` on a detached HEAD)
 pub fn current_branch(dir: &Path) -> Option<String> {
     let branch = git(dir, &["symbolic-ref", "--quiet", "--short", "HEAD"]).ok()?;
     Some(branch.trim().to_string()).filter(|b| !b.is_empty())
 }
 
-/// Dossier des hooks (gère `core.hooksPath` et les worktrees)
+/// Folder of the hooks (handles `core.hooksPath` and worktrees)
 pub fn hooks_dir(dir: &Path) -> Result<PathBuf, GoatHookerError> {
     let hooks = git(dir, &["rev-parse", "--git-path", "hooks"])?;
     let hooks = PathBuf::from(hooks.trim());
@@ -267,8 +279,8 @@ pub fn hooks_dir(dir: &Path) -> Result<PathBuf, GoatHookerError> {
     }
 }
 
-/// Fichiers stagés (ajoutés, copiés, modifiés, renommés), en chemins absolus.
-/// Les fichiers supprimés sont ignorés : il n'y a rien à vérifier dessus.
+/// Staged files (added, copied, modified, renamed), as absolute paths.
+/// Deleted files are ignored: there is nothing to check on them.
 pub fn staged_files(root: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
     let output = git(
         root,
@@ -284,15 +296,15 @@ pub fn staged_files(root: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
     Ok(split_paths(root, &output))
 }
 
-/// Fichiers modifiés par les commits poussés (ajoutés, copiés, modifiés, renommés).
-/// `refs` est ce que Git donne au pre-push sur stdin :
-/// `<local ref> <local sha> <remote ref> <remote sha>` (une ligne par ref).
+/// Files changed by the pushed commits (added, copied, modified, renamed).
+/// `refs` is what Git gives to the pre-push on stdin:
+/// `<local ref> <local sha> <remote ref> <remote sha>` (one line per ref).
 pub fn pushed_files(
     root: &Path,
     remote: &str,
     refs: &str,
 ) -> Result<Vec<PathBuf>, GoatHookerError> {
-    // Sans remote nommé (push vers une URL), on compare à toutes les branches distantes
+    // Without a named remote (push to a URL), compared with every remote branch
     let not_remotes = if remote.is_empty() || remote.contains(['/', ':']) {
         "--remotes".to_string()
     } else {
@@ -306,12 +318,12 @@ pub fn pushed_files(
             continue;
         };
 
-        // Suppression d'une branche distante → rien à vérifier
+        // Deletion of a remote branch → nothing to check
         if local_sha.chars().all(|c| c == '0') {
             continue;
         }
 
-        // Commits qui ne sont pas encore sur le remote
+        // Commits that aren't on the remote yet
         let output = git(
             root,
             &[
@@ -333,7 +345,7 @@ pub fn pushed_files(
     Ok(files)
 }
 
-/// Fichiers nommés `name` suivis ou non ignorés par git, sous `dir`
+/// Files named `name`, tracked or not ignored by git, under `dir`
 pub fn find_files(dir: &Path, name: &str) -> Result<Vec<PathBuf>, GoatHookerError> {
     let pathspec = format!(":(glob)**/{name}");
     let output = git(
@@ -358,7 +370,7 @@ pub fn find_files(dir: &Path, name: &str) -> Result<Vec<PathBuf>, GoatHookerErro
     Ok(files)
 }
 
-/// Découpe une sortie `-z` de git en chemins absolus
+/// Splits a `-z` output of git into absolute paths
 fn split_paths(root: &Path, output: &str) -> Vec<PathBuf> {
     output
         .split(['\0', '\n'])
@@ -390,6 +402,18 @@ mod tests {
         git(dir, &["init", "-q"]).unwrap();
         git(dir, &["config", "user.name", "test"]).unwrap();
         git(dir, &["config", "user.email", "test@test"]).unwrap();
+        // The files are compared byte by byte (Windows converts the line endings by default)
+        git(dir, &["config", "core.autocrlf", "false"]).unwrap();
+    }
+
+    #[test]
+    fn plain_paths() {
+        assert_eq!(plain(Path::new(r"\\?\C:\repo")), PathBuf::from(r"C:\repo"));
+        assert_eq!(
+            plain(Path::new(r"\\?\UNC\server\share")),
+            PathBuf::from(r"\\server\share")
+        );
+        assert_eq!(plain(Path::new("/home/repo")), PathBuf::from("/home/repo"));
     }
 
     #[test]
@@ -540,13 +564,13 @@ mod tests {
         git(&root, &["add", "."]).unwrap();
         git(&root, &["commit", "-q", "-m", "init"]).unwrap();
 
-        // v2 stagé, v3 non stagé
+        // v2 staged, v3 not staged
         fs::write(root.join("a.rs"), "v2\n").unwrap();
         git(&root, &["add", "a.rs"]).unwrap();
         fs::write(root.join("a.rs"), "v3\n").unwrap();
 
         let mut stash = UnstagedStash::save(&root).unwrap().unwrap();
-        // les hooks voient la version stagée
+        // the hooks see the staged version
         assert_eq!(fs::read_to_string(root.join("a.rs")).unwrap(), "v2\n");
 
         stash.restore().unwrap();
@@ -563,16 +587,16 @@ mod tests {
         fs::write(root.join("a.rs"), "a\nb\nc\nd\ne\n").unwrap();
         git(&root, &["add", "."]).unwrap();
         git(&root, &["commit", "-q", "-m", "init"]).unwrap();
-        // modif non stagée en fin de fichier
+        // unstaged change at the end of the file
         fs::write(root.join("a.rs"), "a\nb\nc\nd\ne\nunstaged\n").unwrap();
 
         let mut stash = UnstagedStash::save(&root).unwrap().unwrap();
-        // un formateur modifie le début du fichier et re-stage
+        // a formatter changes the start of the file and stages it again
         fs::write(root.join("a.rs"), "A\nb\nc\nd\ne\n").unwrap();
         add(&root, &[root.join("a.rs")]).unwrap();
         stash.restore().unwrap();
 
-        // les deux sont gardées dans le working tree, seule la correction est stagée
+        // both are kept in the working tree, only the fix is staged
         assert_eq!(
             fs::read_to_string(root.join("a.rs")).unwrap(),
             "A\nb\nc\nd\ne\nunstaged\n"
@@ -594,10 +618,10 @@ mod tests {
 
         {
             let _stash = UnstagedStash::save(&root).unwrap().unwrap();
-            // un formateur modifie la même zone → conflit
+            // a formatter changes the same area → conflict
             fs::write(root.join("a.rs"), "HELLO\n").unwrap();
             add(&root, &[root.join("a.rs")]).unwrap();
-            // restauré par le Drop
+            // restored by the Drop
         }
         assert_eq!(
             fs::read_to_string(root.join("a.rs")).unwrap(),

@@ -1,4 +1,4 @@
-//! Icônes Lucide en plus de celles de gpui-kit (licence dans `assets/LICENSE-LUCIDE`)
+//! Lucide icons besides the ones of gpui-kit (license in `assets/LICENSE-LUCIDE`)
 //! et images de l'app
 
 use std::borrow::Cow;
@@ -36,6 +36,8 @@ const ICONS: &[(&str, &[u8])] = icons![
     "sun",
     "terminal",
     "trash",
+    "undo",
+    "redo",
     "upload",
     "variable",
     "workflow",
@@ -48,7 +50,7 @@ const IMAGES: &[(&str, &[u8])] = &[(
     include_bytes!("../assets/images/goat.png"),
 )];
 
-/// Nos icônes, puis celles de gpui-kit
+/// Our icons, then the ones of gpui-kit
 pub struct Assets;
 
 impl AssetSource for Assets {

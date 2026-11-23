@@ -36,6 +36,17 @@ pub fn trust_hooks(all: bool) -> Result<(), GoatHookerError> {
     let mut approved: Vec<Origin> = Vec::new();
     for origin in &untrusted {
         print_origin(origin, &hooks);
+        if let Some(changes) = trust::changes(&root, origin) {
+            println!("   {}", "Changed since you trusted it:".yellow().bold());
+            for change in changes {
+                let line = if change.starts_with('!') {
+                    change.red().to_string()
+                } else {
+                    change
+                };
+                println!("   {line}");
+            }
+        }
         let yes = if all {
             true
         } else if ui::is_interactive() {

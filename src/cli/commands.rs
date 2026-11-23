@@ -62,6 +62,10 @@ pub enum AppCommands {
         #[arg(short, long)]
         verbose: bool,
 
+        /// Run every hook, even the ones that already passed with the same files
+        #[arg(long)]
+        no_cache: bool,
+
         /// Run by Git (stays quiet when there is nothing to run)
         #[arg(long, hide = true)]
         from_git: bool,
@@ -146,6 +150,17 @@ pub enum AppCommands {
         project: Option<PathBuf>,
     },
 
+    /// Show the hooks loaded from other repositories that have a newer version
+    #[command()]
+    Outdated,
+
+    /// Pin the hooks loaded from other repositories to the commit in use
+    #[command()]
+    Pin {
+        /// Only this hook (the one loading the hooks file)
+        name: Option<String>,
+    },
+
     /// Review the hooks loaded from other repositories (`from`) and trust them
     #[command()]
     Trust {
@@ -161,6 +176,34 @@ pub enum AppCommands {
         #[arg(long, value_name = "NAME")]
         reset: Option<String>,
     },
+
+    /// Run the hooks on the files changed by a pull request or a push (CI)
+    #[command()]
+    Ci {
+        /// Git hook whose hooks run
+        #[arg(short, long, value_enum, default_value = "pre-commit")]
+        trigger: Trigger,
+
+        /// Commit or branch to compare with (default: the base of the pull request, or origin/HEAD)
+        #[arg(long)]
+        base: Option<String>,
+
+        /// Show the output of every hook
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Show the last runs of the hooks and the slowest hooks
+    #[command()]
+    History {
+        /// Number of runs
+        #[arg(short = 'n', long, default_value_t = 20)]
+        limit: usize,
+    },
+
+    /// Forget the results of the hooks that passed (they all run again)
+    #[command(name = "cache-clear")]
+    CacheClear,
 
     /// Print the JSON schema of the configuration file
     #[command()]

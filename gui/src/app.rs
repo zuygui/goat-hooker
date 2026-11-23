@@ -1,5 +1,5 @@
-//! Fenêtre principale, en trois panneaux :
-//! filtres (sidebar) → liste des hooks → détail du hook sélectionné, avec une barre d'état en bas.
+//! Main window, in three panes:
+//! filters (sidebar) → list of the hooks → detail of the selected hook, with a status bar at the bottom.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -34,7 +34,7 @@ use crate::{
 
 const REPOSITORY_URL: &str = "https://github.com/zuygui/goat-hooker";
 
-/// Ce qui est affiché dans la liste du milieu
+/// What the middle list shows
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Filter {
     All,
@@ -45,27 +45,32 @@ enum Filter {
     Variables,
     Browse,
     Review,
+    History,
 }
 
 impl Filter {
     fn is_page(self) -> bool {
-        matches!(self, Filter::Variables | Filter::Browse | Filter::Review)
+        matches!(
+            self,
+            Filter::Variables | Filter::Browse | Filter::Review | Filter::History
+        )
     }
 }
 
 mod pages;
+mod source;
 
-/// Un hook dans un projet
+/// A hook in a project
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct HookRef {
     project: usize,
     hook: usize,
 }
 
-/// Clé d'un résultat : dossier du projet + nom du hook
+/// Key of a result: folder of the project + name of the hook
 type RunKey = (PathBuf, String);
 
-/// Résultat du dernier lancement, dans la liste
+/// Result of the last run, in the list
 enum RunStatus {
     Passed,
     Failed,
@@ -73,7 +78,7 @@ enum RunStatus {
     Denied,
 }
 
-/// Formulaire ouvert dans le panneau de détail
+/// Form open in the detail pane
 struct OpenEditor {
     project: usize,
     view: Entity<HookEditor>,
@@ -81,7 +86,7 @@ struct OpenEditor {
 
 pub struct HookerApp {
     repo: Option<Repo>,
-    /// Erreur à l'ouverture du dépôt / au chargement des configs
+    /// Error when opening the repository / loading the configs
     error: Option<String>,
     /// Message temporaire (installation, enregistrement...)
     notice: Option<(String, bool)>,
@@ -93,21 +98,28 @@ pub struct HookerApp {
     results: HashMap<RunKey, HookResult>,
     running: HashSet<RunKey>,
     running_all: bool,
-    /// Dépôts ouverts récemment (page d'accueil)
+    /// Recently opened repositories (welcome page)
     recents: Vec<PathBuf>,
-    /// Dépôts trouvés sur l'ordinateur (`None` pendant la recherche)
+    /// Repositories found on the computer (`None` while searching)
     found: Option<Vec<FoundRepo>>,
     show_all_found: bool,
-    /// Éditeur de nœuds à la place de la liste
+    /// Node editor in place of the list
     graph_mode: bool,
     graph: Entity<GraphCanvas>,
-    /// Le graphe doit être recalculé (config ou résultats changés)
+    /// The graph must be computed again (config or results changed)
     graph_dirty: bool,
     pages: pages::PagesState,
+    /// Config files before the last changes, and the undone ones
+    undo_stack: Vec<Vec<(PathBuf, Option<String>)>>,
+    /// A newer version was released
+    update: Option<String>,
+    redo_stack: Vec<Vec<(PathBuf, Option<String>)>>,
+    /// JSON editor of a config, in place of the detail
+    json_editor: Option<Entity<crate::json_editor::JsonEditor>>,
     _subscriptions: Vec<Subscription>,
 }
 
-/// Icône Lucide ajoutée par l'app (voir `assets.rs`)
+/// Lucide icon added by the app (see `assets.rs`)
 fn lucide(name: &str) -> Icon {
     Icon::empty().path(format!("icons/{name}.svg"))
 }
@@ -150,7 +162,7 @@ fn plural(n: usize, word: &str) -> String {
     format!("{n} {word}{}", if n > 1 { "s" } else { "" })
 }
 
-/// Petite étiquette colorée
+/// Small colored label
 fn chip(text: impl Into<SharedString>, color: Hsla) -> Div {
     div()
         .px_1p5()
@@ -171,7 +183,7 @@ fn section(title: &'static str, cx: &App) -> Div {
 }
 
 impl HookerApp {
-    /// Sans dossier, l'app s'ouvre sur la page d'accueil
+    /// Without a folder, the app opens on the welcome page
     pub fn new(dir: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search hooks"));
         let subscription = cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
@@ -181,11 +193,15 @@ impl HookerApp {
             }
         });
 
-        let graph = cx.new(|_| GraphCanvas::new());
-        let graph_subscription = cx.subscribe(&graph, |this, _, event: &CanvasEvent, cx| {
-            this.on_canvas_event(event, cx);
-            cx.notify();
-        });
+        let graph = cx.new(GraphCanvas::new);
+        let graph_subscription = cx.subscribe_in(
+            &graph,
+            window,
+            |this, _, event: &CanvasEvent, window, cx| {
+                this.on_canvas_event(event, window, cx);
+                cx.notify();
+            },
+        );
 
         let mut app = Self {
             repo: None,
@@ -206,6 +222,10 @@ impl HookerApp {
             graph,
             graph_dirty: true,
             pages: pages::PagesState::new(window, cx),
+            undo_stack: vec![],
+            update: None,
+            redo_stack: vec![],
+            json_editor: None,
             _subscriptions: vec![subscription, graph_subscription],
         };
         if let Some(dir) = dir {
@@ -213,10 +233,21 @@ impl HookerApp {
             app.select_first(cx);
         }
         app.scan_repositories(cx);
+        cx.spawn(async move |this, cx| {
+            let update = cx
+                .background_spawn(async move { crate::update::newer_version() })
+                .await;
+            this.update(cx, |this, cx| {
+                this.update = update;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
         app
     }
 
-    // MARK: données
+    // MARK: data
 
     fn open(&mut self, dir: PathBuf) {
         self.filter = Filter::All;
@@ -265,7 +296,7 @@ impl HookerApp {
         (dir.canonicalize().unwrap_or(dir), hook.name.clone())
     }
 
-    /// Résultat d'un hook, ou de ses étapes réunies (`lint › eslint`, `lint › types`...)
+    /// Result of a hook, or of its steps together (`lint › eslint`, `lint › types`...)
     fn last_status(&self, key: &RunKey) -> Option<RunStatus> {
         let results: Vec<&HookResult> = match self.results.get(key) {
             Some(result) => vec![result],
@@ -298,7 +329,7 @@ impl HookerApp {
             .find(|p| p.hook == name && p.project_dir == dir)
     }
 
-    /// Hooks chargés depuis un fichier partagé (`path`) qui vont tourner au prochain commit
+    /// Hooks loaded from a shared file (`path`) that will run on the next commit
     fn shared_preview(&self, project: &Project) -> Vec<&PreviewItem> {
         let dir = project.dir();
         let dir = dir.canonicalize().unwrap_or(dir);
@@ -322,7 +353,7 @@ impl HookerApp {
         }
     }
 
-    /// Hooks de la liste du milieu, selon le filtre et la recherche
+    /// Hooks of the middle list, by filter and search
     fn visible_hooks(&self, cx: &App) -> Vec<HookRef> {
         self.hooks_for(self.filter, cx)
     }
@@ -341,7 +372,7 @@ impl HookerApp {
                     Filter::Project(i) => i == p,
                     Filter::Trigger(trigger) => hook.trigger == Some(trigger),
                     Filter::NextCommit => self.runs_next_commit(project, hook),
-                    Filter::Variables | Filter::Browse | Filter::Review => false,
+                    Filter::Variables | Filter::Browse | Filter::Review | Filter::History => false,
                 };
                 let matches_search = query.is_empty()
                     || hook.name.to_lowercase().contains(&query)
@@ -370,6 +401,7 @@ impl HookerApp {
     fn set_filter(&mut self, filter: Filter, cx: &mut Context<Self>) {
         self.filter = filter;
         self.editor = None;
+        self.json_editor = None;
         if filter == Filter::Browse {
             self.open_browse(cx);
         }
@@ -412,7 +444,7 @@ impl HookerApp {
         .detach();
     }
 
-    /// Retour à la page d'accueil
+    /// Back to the welcome page
     fn go_home(&mut self, cx: &mut Context<Self>) {
         self.repo = None;
         self.error = None;
@@ -423,7 +455,7 @@ impl HookerApp {
         cx.notify();
     }
 
-    /// Cherche les dépôts git de l'ordinateur en tâche de fond
+    /// Searches the git repositories of the computer in the background
     fn scan_repositories(&mut self, cx: &mut Context<Self>) {
         self.found = None;
         let mut roots = discover::default_roots();
@@ -442,7 +474,7 @@ impl HookerApp {
         cx.notify();
     }
 
-    /// Ajoute un dossier aux dossiers scannés (ex : Documents, que l'app évite par défaut)
+    /// Adds a folder to the scanned folders (e.g. Documents, which the app avoids by default)
     fn pick_scan_folder(&mut self, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: false,
@@ -507,7 +539,7 @@ impl HookerApp {
         cx.notify();
     }
 
-    /// Projet où ajouter un hook : celui du filtre, sinon celui du hook sélectionné, sinon la racine
+    /// Project to add a hook to: the one of the filter, else the one of the selected hook, else the root
     fn target_project(&self) -> usize {
         match (self.filter, self.selected) {
             (Filter::Project(p), _) => p,
@@ -527,7 +559,11 @@ impl HookerApp {
             .and_then(|i| self.hook(HookRef { project, hook: i }))
             .map(|(_, hook)| hook.clone());
 
-        let view = cx.new(|cx| HookEditor::new(index, hook.as_ref(), window, cx));
+        let compact = self.graph_mode;
+        let view = cx.new(|cx| {
+            let editor = HookEditor::new(index, hook.as_ref(), window, cx);
+            if compact { editor.compact() } else { editor }
+        });
         let subscription = cx.subscribe(&view, |this, _, event: &EditorEvent, cx| {
             match event {
                 EditorEvent::Save { index, hook } => this.save_hook(*index, (**hook).clone(), cx),
@@ -544,6 +580,7 @@ impl HookerApp {
         let Some(project_index) = self.editor.as_ref().map(|e| e.project) else {
             return;
         };
+        self.checkpoint();
         let Some(project) = self
             .repo
             .as_mut()
@@ -570,6 +607,7 @@ impl HookerApp {
     }
 
     fn delete_hook(&mut self, hook_ref: HookRef, cx: &mut Context<Self>) {
+        self.checkpoint();
         let Some(project) = self
             .repo
             .as_mut()
@@ -588,7 +626,7 @@ impl HookerApp {
         cx.notify();
     }
 
-    /// Lance un hook en tâche de fond
+    /// Runs a hook in the background
     fn run_hook(&mut self, hook_ref: HookRef, cx: &mut Context<Self>) {
         let (Some(repo), Some((project, hook))) = (self.repo.clone(), self.hook(hook_ref)) else {
             return;
@@ -619,12 +657,12 @@ impl HookerApp {
         .detach();
     }
 
-    /// Lance tout le pre-commit, comme `git commit`
+    /// Runs the whole pre-commit, like `git commit`
     fn run_pre_commit(&mut self, cx: &mut Context<Self>) {
         self.run_trigger(Trigger::PreCommit, cx);
     }
 
-    /// Lance tous les hooks d'un trigger, dans l'ordre du graphe
+    /// Runs all the hooks of a trigger, in the order of the graph
     fn run_trigger(&mut self, trigger: Trigger, cx: &mut Context<Self>) {
         let Some(repo) = self.repo.clone() else {
             return;
@@ -682,7 +720,7 @@ impl HookerApp {
 
     // MARK: graphe
 
-    /// Triggers qui ont au moins un hook (dans l'ordre de `Trigger::ALL`)
+    /// Triggers with at least one hook (in the order of `Trigger::ALL`)
     fn graph_triggers(&self) -> Vec<Trigger> {
         let Some(repo) = self.repo.as_ref() else {
             return vec![];
@@ -723,6 +761,7 @@ impl HookerApp {
                         success: result.success,
                         skipped: result.skipped,
                         denied: result.denied,
+                        cached: result.cached,
                         duration: result.duration,
                     },
                 )
@@ -730,17 +769,42 @@ impl HookerApp {
             .collect();
         let running = self.running_all;
         let projects: Vec<String> = repo.projects.iter().map(|p| p.name.clone()).collect();
+        let (can_undo, can_redo) = (!self.undo_stack.is_empty(), !self.redo_stack.is_empty());
         self.graph.update(cx, |graph, cx| {
+            graph.set_history(can_undo, can_redo);
             graph.set_projects(projects);
             graph.trigger = trigger;
             graph.set_data(triggers, nodes, statuses, running, cx);
         });
     }
 
-    fn on_canvas_event(&mut self, event: &CanvasEvent, cx: &mut Context<Self>) {
+    fn on_canvas_event(
+        &mut self,
+        event: &CanvasEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let nodes: Vec<ViewNode> = self.graph.read(cx).nodes().to_vec();
         let trigger = self.graph.read(cx).trigger;
+        if matches!(
+            event,
+            CanvasEvent::Link { .. }
+                | CanvasEvent::RemoveNeed { .. }
+                | CanvasEvent::RemoveInput { .. }
+                | CanvasEvent::Create { .. }
+                | CanvasEvent::Delete(_)
+        ) {
+            self.checkpoint();
+        }
         let result = match event {
+            CanvasEvent::Undo => {
+                self.undo(false);
+                Ok(())
+            }
+            CanvasEvent::Redo => {
+                self.undo(true);
+                Ok(())
+            }
             CanvasEvent::SetTrigger(trigger) => {
                 let trigger = *trigger;
                 self.graph.update(cx, |graph, _| graph.trigger = trigger);
@@ -751,7 +815,12 @@ impl HookerApp {
                 Ok(())
             }
             CanvasEvent::Select(index) => {
-                self.select_node(&nodes[*index], cx);
+                // Edited next to the graph
+                if let Some(hook_ref) = self.node_hook(&nodes[*index]) {
+                    self.selected = Some(hook_ref);
+                    self.json_editor = None;
+                    self.open_editor(hook_ref.project, Some(hook_ref.hook), window, cx);
+                }
                 Ok(())
             }
             CanvasEvent::Link {
@@ -795,6 +864,116 @@ impl HookerApp {
         self.reload();
     }
 
+    /// Opens a config file in the JSON editor
+    fn open_json(&mut self, project: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(repo) = self.repo.as_ref() else {
+            return;
+        };
+        let Some(p) = repo.projects.get(project) else {
+            return;
+        };
+        let file = p.file.clone();
+        let label = file
+            .strip_prefix(&repo.root)
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+        let known = repo.known(project);
+        let view = cx.new(|cx| crate::json_editor::JsonEditor::new(file, label, known, window, cx));
+        let subscription = cx.subscribe(
+            &view,
+            |this, _, event: &crate::json_editor::JsonEditorEvent, cx| {
+                match event {
+                    crate::json_editor::JsonEditorEvent::Saved => {
+                        this.notice = Some(("Saved".into(), true));
+                        this.reload();
+                    }
+                    crate::json_editor::JsonEditorEvent::Close => this.json_editor = None,
+                }
+                cx.notify();
+            },
+        );
+        self._subscriptions.push(subscription);
+        self.editor = None;
+        self.json_editor = Some(view);
+        cx.notify();
+    }
+
+    /// Panel next to the graph: the node being edited
+    fn render_graph_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let selected = self.selected;
+        let body: AnyElement = match (self.json_editor.as_ref(), self.editor.as_ref()) {
+            (Some(json), _) => div().size_full().child(json.clone()).into_any_element(),
+            (None, Some(editor)) => div()
+                .size_full()
+                .overflow_y_scrollbar()
+                .child(div().p_4().child(editor.view.clone()))
+                .into_any_element(),
+            _ => div().into_any_element(),
+        };
+        v_flex()
+            .w(px(if self.json_editor.is_some() {
+                560.
+            } else {
+                420.
+            }))
+            .h_full()
+            .flex_shrink_0()
+            .border_l_1()
+            .border_color(theme.border)
+            .bg(theme.background)
+            .child(
+                h_flex()
+                    .px_3()
+                    .py_2()
+                    .gap_1()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(div().flex_1())
+                    .when_some(
+                        selected.filter(|_| self.json_editor.is_none()),
+                        |this, s| {
+                            this.child(
+                                Button::new("panel-json")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(lucide("pencil"))
+                                    .label("JSON")
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.open_json(s.project, window, cx)
+                                    })),
+                            )
+                        },
+                    )
+                    .child(
+                        Button::new("panel-list")
+                            .ghost()
+                            .xsmall()
+                            .icon(lucide("list"))
+                            .label("Open in the list")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.graph_mode = false;
+                                this.filter = Filter::All;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("panel-close")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Close)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.editor = None;
+                                this.json_editor = None;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(div().flex_1().min_h_0().child(body))
+            .into_any_element()
+    }
+
     /// Hook created on the canvas, linked to the node its wire comes from
     fn create_from_canvas(
         &mut self,
@@ -829,16 +1008,14 @@ impl HookerApp {
         Ok(())
     }
 
-    /// Ouvre le hook d'un nœud dans la vue liste
-    fn select_node(&mut self, node: &ViewNode, cx: &mut Context<Self>) {
-        let Some(repo) = self.repo.as_ref() else {
-            return;
-        };
+    /// Hook of the list a node belongs to
+    fn node_hook(&self, node: &ViewNode) -> Option<HookRef> {
+        let repo = self.repo.as_ref()?;
         let dir = node
             .project_dir
             .canonicalize()
             .unwrap_or(node.project_dir.clone());
-        let found = repo.projects.iter().enumerate().find_map(|(p, project)| {
+        repo.projects.iter().enumerate().find_map(|(p, project)| {
             let project_dir = project.dir();
             if project_dir.canonicalize().unwrap_or(project_dir) != dir {
                 return None;
@@ -852,14 +1029,56 @@ impl HookerApp {
                     project: p,
                     hook: h,
                 })
-        });
-        if let Some(hook_ref) = found {
-            self.graph_mode = false;
-            self.filter = Filter::All;
-            self.editor = None;
-            self.selected = Some(hook_ref);
-            cx.notify();
+        })
+    }
+
+    // MARK: undo
+
+    /// Content of the config files
+    fn snapshot(&self) -> Vec<(PathBuf, Option<String>)> {
+        self.repo
+            .iter()
+            .flat_map(|r| r.projects.iter())
+            .map(|p| (p.file.clone(), std::fs::read_to_string(&p.file).ok()))
+            .collect()
+    }
+
+    /// Before a change: it can be undone
+    fn checkpoint(&mut self) {
+        let snapshot = self.snapshot();
+        self.undo_stack.push(snapshot);
+        if self.undo_stack.len() > 50 {
+            self.undo_stack.remove(0);
         }
+        self.redo_stack.clear();
+    }
+
+    /// Undo (or redo) the last change of the config files
+    fn undo(&mut self, redo: bool) {
+        let (from, to) = if redo {
+            (&mut self.redo_stack, &mut self.undo_stack)
+        } else {
+            (&mut self.undo_stack, &mut self.redo_stack)
+        };
+        let Some(snapshot) = from.pop() else {
+            return;
+        };
+        let current: Vec<(PathBuf, Option<String>)> = snapshot
+            .iter()
+            .map(|(file, _)| (file.clone(), std::fs::read_to_string(file).ok()))
+            .collect();
+        to.push(current);
+        for (file, content) in snapshot {
+            let result = match content {
+                Some(content) => std::fs::write(&file, content),
+                None => std::fs::remove_file(&file),
+            };
+            if let Err(err) = result {
+                self.notice = Some((err.to_string(), false));
+            }
+        }
+        self.editor = None;
+        self.reload();
     }
 
     // MARK: rendu
@@ -883,6 +1102,16 @@ impl HookerApp {
                         .gap_1p5()
                         .text_sm()
                         .child(div().font_weight(FontWeight::SEMIBOLD).child("Goat Hooker"))
+                        .when_some(self.update.clone(), |this, version| {
+                            this.child(
+                                Button::new("update-available")
+                                    .xsmall()
+                                    .primary()
+                                    .label(format!("v{version} available"))
+                                    .tooltip("Open the release to download it")
+                                    .on_click(|_, _, cx| cx.open_url(crate::update::RELEASES)),
+                            )
+                        })
                         .when_some(repo_name, |this, repo_name| {
                             this.child(div().text_color(theme.muted_foreground).child("—"))
                                 .child(
@@ -1123,6 +1352,7 @@ impl HookerApp {
             Filter::Variables => "Variables".to_string(),
             Filter::Browse => "Browse hooks".to_string(),
             Filter::Review => "Review".to_string(),
+            Filter::History => "History".to_string(),
             Filter::Project(i) => self
                 .repo
                 .as_ref()
@@ -1222,6 +1452,7 @@ impl HookerApp {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.selected = Some(hook_ref);
+                        this.json_editor = None;
                         this.editor = None;
                         cx.notify();
                     })),
@@ -1295,6 +1526,10 @@ impl HookerApp {
     fn render_detail(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
 
+        if let Some(json) = self.json_editor.as_ref() {
+            return div().size_full().child(json.clone()).into_any_element();
+        }
+
         if let Some(editor) = self.editor.as_ref() {
             return div()
                 .size_full()
@@ -1314,7 +1549,7 @@ impl HookerApp {
         let running = self.running.contains(&key);
         let uses_files = matches!(hook.trigger, Some(Trigger::PreCommit | Trigger::PrePush));
 
-        // En-tête : projet / trigger, nom, actions
+        // Header: project / trigger, name, actions
         let header = v_flex()
             .gap_2()
             .child(
@@ -1470,9 +1705,15 @@ impl HookerApp {
                     .child(section("SHARED HOOKS", cx))
                     .child(div().text_sm().child(format!("Loads the hooks of {source}.")))
                     .child(div().text_xs().text_color(theme.muted_foreground).child(
-                        "They run from this project. Use `hooker update` to refresh hooks loaded from a repository.",
+                        "They run from this project, with the permissions of hooks from other repositories.",
                     )),
             );
+            if let Some(selected) = self.selected
+                && let Some(remote) = self.remote_card(selected, hook, cx)
+            {
+                body = body.child(remote);
+            }
+            body = body.child(self.source_card(project, hook, cx));
             return self.wrap_detail(header, body);
         }
 
@@ -1533,6 +1774,7 @@ impl HookerApp {
         {
             body = body.child(card().child(section("ACCESS", cx)).child(access));
         }
+        body = body.child(self.source_card(project, hook, cx));
 
         // Dernier lancement
         let mut last_run = card().child(section("LAST RUN", cx));
@@ -1579,6 +1821,8 @@ impl HookerApp {
                                 "Skipped (a hook before it failed or was denied)"
                             } else if result.denied {
                                 "Denied: it did or needed what it isn't allowed to"
+                            } else if result.cached {
+                                "Passed (cached: same files as a run that passed)"
                             } else if result.success {
                                 "Passed"
                             } else {
@@ -1637,7 +1881,7 @@ impl HookerApp {
             .into_any_element()
     }
 
-    /// Une ligne de dépôt sur la page d'accueil (clic : l'ouvre)
+    /// A repository row on the welcome page (click: opens it)
     fn repo_row(
         &self,
         id: impl Into<ElementId>,
@@ -1705,7 +1949,7 @@ impl HookerApp {
             .on_click(cx.listener(move |this, _, _, cx| this.open_recent(open_path.clone(), cx)))
     }
 
-    /// Page d'accueil : ouvrir un dépôt, dépôts récents, premiers pas
+    /// Welcome page: open a repository, recent repositories, getting started
     fn render_welcome(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
 
@@ -1727,7 +1971,7 @@ impl HookerApp {
             );
         }
 
-        // Dépôts trouvés sur l'ordinateur (sans ceux déjà dans les récents)
+        // Repositories found on the computer (without the recent ones)
         let mut on_computer = v_flex().gap_0p5();
         match self.found.as_ref() {
             None => {
@@ -1820,7 +2064,7 @@ impl HookerApp {
                     v_flex()
                         .w(px(560.))
                         .gap_8()
-                        // En-tête
+                        // Header
                         .child(
                             h_flex()
                                 .gap_4()
@@ -1861,14 +2105,14 @@ impl HookerApp {
                                 .label("Open a repository…")
                                 .on_click(cx.listener(|this, _, _, cx| this.pick_folder(cx))),
                         )
-                        // Dépôts récents
+                        // Recent repositories
                         .child(
                             v_flex()
                                 .gap_2()
                                 .child(section("RECENT", cx))
                                 .child(recent),
                         )
-                        // Dépôts de l'ordinateur
+                        // Repositories of the computer
                         .child(
                             v_flex()
                                 .gap_2()
@@ -1901,7 +2145,7 @@ impl HookerApp {
                                 )
                                 .child(on_computer),
                         )
-                        // Premiers pas
+                        // Getting started
                         .child(
                             v_flex()
                                 .gap_3()
@@ -2074,9 +2318,13 @@ impl Render for HookerApp {
                         .child(self.render_page(window, cx)),
                 )
                 .into_any_element(),
-            Some(_) if self.graph_mode => div()
+            Some(_) if self.graph_mode => h_flex()
                 .size_full()
-                .child(self.graph.clone())
+                .child(div().flex_1().h_full().min_w_0().child(self.graph.clone()))
+                .when(
+                    self.editor.is_some() || self.json_editor.is_some(),
+                    |this| this.child(self.render_graph_panel(cx)),
+                )
                 .into_any_element(),
             Some(_) => h_flex()
                 .size_full()

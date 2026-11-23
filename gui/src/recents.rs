@@ -1,12 +1,12 @@
-//! Dépôts ouverts récemment (affichés sur la page d'accueil)
+//! Recently opened repositories (shown on the welcome page)
 
 use std::{fs, path::PathBuf};
 
-/// Nombre de dépôts gardés
+/// Number of repositories kept
 const MAX_RECENTS: usize = 8;
 
-/// Dossier de config de l'app
-/// (`$GOAT_HOOKER_CONFIG_DIR`, sinon celui de l'OS : Application Support, AppData, ~/.config)
+/// Config folder of the app
+/// (`$GOAT_HOOKER_CONFIG_DIR`, else the one of the OS: Application Support, AppData, ~/.config)
 fn config_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("GOAT_HOOKER_CONFIG_DIR") {
         return Some(PathBuf::from(dir));
@@ -28,7 +28,7 @@ fn file() -> Option<PathBuf> {
     config_dir().map(|dir| dir.join("recent.json"))
 }
 
-/// Les dépôts récents qui existent encore, du plus récent au plus ancien
+/// The recent repositories that still exist, from the newest to the oldest
 pub fn load() -> Vec<PathBuf> {
     let Some(content) = file().and_then(|f| fs::read_to_string(f).ok()) else {
         return vec![];
@@ -44,7 +44,7 @@ fn save(recents: &[PathBuf]) {
     let Some(file) = file() else {
         return;
     };
-    // Pas grave si ça échoue : la liste sera juste vide au prochain lancement
+    // Not a problem if it fails: the list will just be empty next time
     if let Some(dir) = file.parent() {
         let _ = fs::create_dir_all(dir);
     }
@@ -53,7 +53,7 @@ fn save(recents: &[PathBuf]) {
     }
 }
 
-/// Met le dépôt en tête de liste
+/// Puts the repository first in the list
 pub fn add(repo: PathBuf) -> Vec<PathBuf> {
     let mut recents = load();
     recents.retain(|p| *p != repo);
@@ -70,7 +70,7 @@ pub fn remove(repo: &PathBuf) -> Vec<PathBuf> {
     recents
 }
 
-/// Dossiers ajoutés avec « Scan a folder… »
+/// Folders added with “Scan a folder…”
 pub fn load_scan_roots() -> Vec<PathBuf> {
     let Some(content) = config_dir().and_then(|d| fs::read_to_string(d.join("scan.json")).ok())
     else {
@@ -111,7 +111,7 @@ mod tests {
                 repo
             })
             .collect();
-        // SAFETY: seul ce test modifie GOAT_HOOKER_CONFIG_DIR
+        // SAFETY: only this test changes GOAT_HOOKER_CONFIG_DIR
         unsafe { std::env::set_var("GOAT_HOOKER_CONFIG_DIR", dir.path().join("config")) };
 
         for repo in &repos {
@@ -124,7 +124,7 @@ mod tests {
         assert_eq!(recents[0], repos[3]);
         assert_eq!(recents[1], repos[9]);
 
-        // un dépôt supprimé du disque disparaît de la liste
+        // a repository deleted from the disk disappears from the list
         fs::remove_dir(&repos[9]).unwrap();
         assert!(!load().contains(&repos[9]));
 

@@ -11,7 +11,7 @@ use goat_hooker::{
 
 use crate::cli::ui::{self, OK};
 
-/// Ce qui a été donné en arguments (le reste est demandé dans le terminal)
+/// What was given as arguments (the rest is asked in the terminal)
 #[derive(Debug, Clone, Default)]
 pub struct AddArgs {
     pub name: Option<String>,
@@ -23,7 +23,7 @@ pub struct AddArgs {
     pub project: Option<PathBuf>,
 }
 
-/// Description affichée dans le choix du trigger
+/// Description shown in the choice of the trigger
 fn describe(trigger: Trigger) -> &'static str {
     match trigger {
         Trigger::PreCommit => "before a commit is created, on the staged files",
@@ -51,7 +51,7 @@ pub(crate) fn prompt_error(err: inquire::InquireError) -> GoatHookerError {
     }
 }
 
-/// Découpe `a, b,c` en patterns
+/// Splits `a, b,c` into patterns
 fn split_patterns(values: &[String]) -> Vec<String> {
     values
         .iter()
@@ -72,7 +72,7 @@ pub fn add_hook(args: AddArgs) -> Result<(), GoatHookerError> {
     let files: Vec<PathBuf> = configs.iter().filter_map(|c| c.file.clone()).collect();
     let interactive = ui::is_interactive();
 
-    // Projet : argument, sinon choix, sinon celui du dossier courant
+    // Project: argument, else choice, else the one of the current folder
     let file = match args.project.as_ref() {
         Some(dir) => {
             let dir = dir.canonicalize()?;
@@ -264,7 +264,7 @@ pub fn add_hook(args: AddArgs) -> Result<(), GoatHookerError> {
     Ok(())
 }
 
-/// Config du projet le plus proche du dossier courant
+/// Config of the project closest to the current folder
 fn project_of_cwd(files: &[PathBuf]) -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?.canonicalize().ok()?;
     files

@@ -12,7 +12,7 @@ fn main() {
 
     match cli::parse_commands(opt) {
         Ok(()) => {}
-        // Le récap a déjà été affiché
+        // The summary was already shown
         Err(GoatHookerError::HookFailed(_)) => process::exit(1),
         Err(GoatHookerError::Cancelled) => process::exit(130),
         Err(err) => {
@@ -25,7 +25,7 @@ fn main() {
     }
 }
 
-/// Piste de solution pour une erreur
+/// Hint for an error
 fn hint(err: &GoatHookerError) -> Option<String> {
     let cmd = |c: &str| format!("`{c}`").bold().to_string();
     match err {

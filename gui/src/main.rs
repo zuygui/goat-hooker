@@ -1,4 +1,4 @@
-//! Goat Hooker : app graphique pour voir et gérer les hooks d'un dépôt
+//! Goat Hooker: desktop app to see and manage the hooks of a repository
 
 mod app;
 mod assets;
@@ -6,8 +6,11 @@ mod canvas;
 mod discover;
 mod editor;
 mod graph_view;
+mod json_complete;
+mod json_editor;
 mod recents;
 mod repo;
+mod update;
 
 use std::path::PathBuf;
 
@@ -15,8 +18,8 @@ use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
 fn main() {
-    // Dépôt à ouvrir : le premier argument, sinon le dossier courant s'il est dans un dépôt git.
-    // Lancée depuis le Dock ou le menu Démarrer, l'app s'ouvre sur la page d'accueil.
+    // Repository to open: the first argument, else the current folder if it is in a git repository.
+    // Launched from the Dock or the Start menu, the app opens on the welcome page.
     let dir = std::env::args().nth(1).map(PathBuf::from).or_else(|| {
         std::env::current_dir()
             .ok()
@@ -27,6 +30,7 @@ fn main() {
         .with_assets(assets::Assets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            canvas::bind_keys(cx);
             cx.on_window_closed(|cx, _| cx.quit()).detach();
 
             let bounds = Bounds::centered(None, size(px(1180.), px(760.)), cx);
