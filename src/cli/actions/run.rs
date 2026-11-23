@@ -72,6 +72,10 @@ pub fn run_hooks(
     };
 
     let configs = ConfigLoader::new().load_recursive(&config_path)?;
+    // The Git hooks follow the configs: a trigger they start to use gets its hook
+    if from_git {
+        let _ = goat_hooker::install::sync(&root, &configs);
+    }
 
     // Git gives the pushed refs to the pre-push on stdin.
     // It is read to filter the hooks, then given again to each command.

@@ -61,12 +61,21 @@ fn git_bytes(dir: &Path, args: &[&str]) -> Result<Vec<u8>, GoatHookerError> {
 
 /// Path of a file in the `.git` folder (handles worktrees)
 fn git_path(root: &Path, name: &str) -> Result<PathBuf, GoatHookerError> {
+    // Asked several times by a run (variables, cache, history...): one git command each
+    static KNOWN: std::sync::Mutex<Vec<((PathBuf, String), PathBuf)>> =
+        std::sync::Mutex::new(Vec::new());
+    let key = (root.to_path_buf(), name.to_string());
+    if let Some((_, path)) = KNOWN.lock().unwrap().iter().find(|(k, _)| *k == key) {
+        return Ok(path.clone());
+    }
     let path = PathBuf::from(git(root, &["rev-parse", "--git-path", name])?.trim());
-    Ok(if path.is_absolute() {
+    let path = if path.is_absolute() {
         path
     } else {
         root.join(path)
-    })
+    };
+    KNOWN.lock().unwrap().push((key, path.clone()));
+    Ok(path)
 }
 
 /// A path Git understands: without the `\\?\` prefix of canonical paths on Windows
@@ -121,7 +130,7 @@ impl UnstagedStash {
     /// Puts aside the unstaged changes of the tracked files (nothing to do if there are none)
     pub fn save(root: &Path) -> Result<Option<Self>, GoatHookerError> {
         // During a merge, the index has conflicts: nothing is touched
-        if git(root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).is_ok() {
+        if git_path(root, "MERGE_HEAD").is_ok_and(|p| p.exists()) {
             return Ok(None);
         }
 
@@ -289,6 +298,14 @@ pub fn repo_root(dir: &Path) -> Result<PathBuf, GoatHookerError> {
 
 /// Current branch (`None` on a detached HEAD)
 pub fn current_branch(dir: &Path) -> Option<String> {
+    // Read from `HEAD` (`ref: refs/heads/main`), without starting git
+    if let Ok(head) = git_path(dir, "HEAD").and_then(|p| Ok(std::fs::read_to_string(p)?)) {
+        return head
+            .trim()
+            .strip_prefix("ref: refs/heads/")
+            .map(String::from)
+            .filter(|b| !b.is_empty());
+    }
     let branch = git(dir, &["symbolic-ref", "--quiet", "--short", "HEAD"]).ok()?;
     Some(branch.trim().to_string()).filter(|b| !b.is_empty())
 }
