@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/zuygui/goat-hooker/compare/v0.3.0...v0.4.0) - 2026-11-23
+
+### Added
+
+- *(gui)* command palette, live output, impact, project graph and fixes
+- hooker fix, init templates, history export and notifications
+- branches, targeted skip, timeout and hooker.local.json
+- add hooker watch to run the pre-commit hooks ahead of the commit
+- add hooker doctor and a Doctor page in the app
+- *(gui)* add a menu bar with shortcuts
+- run the hooks of the projects affected by a change
+
+### Other
+
+- Merge pull request #17 from zuygui/feat/smart
+- rewrite the README and move the reference to docs/
+- install only the Git hooks the configs use, and fewer git commands per run
+- branches, skip, timeout, local changes, fix, templates and the new pages
+- translate the last French comments to English
+
 ## [0.3.0](https://github.com/zuygui/goat-hooker/compare/v0.2.0...v0.3.0) - 2026-11-23
 
 ### Added
