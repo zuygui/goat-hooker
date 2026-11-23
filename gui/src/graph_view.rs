@@ -13,7 +13,7 @@ use goat_hooker::{
 use crate::repo::Repo;
 
 /// Un nœud de l'éditeur
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ViewNode {
     /// `lint` ou `lint › types` (comme dans les résultats)
     pub label: String,
@@ -28,11 +28,24 @@ pub struct ViewNode {
     pub inputs: Vec<(String, usize, String)>,
     /// Nœuds attendus sans passer de valeur
     pub needs: Vec<usize>,
+    /// Variables read and written, and the nodes writing what this one reads
+    pub reads: Vec<String>,
+    pub writes: Vec<String>,
+    pub after: Vec<usize>,
+    /// Why it isn't allowed to run (its lineage is cut)
+    pub denied: Option<String>,
     /// Hook écrit dans un `hooker.config.json` du dépôt (pas chargé depuis un fichier partagé)
     pub editable: bool,
     /// Colonne (niveau de dépendance) et ligne dans la colonne
     pub column: usize,
     pub row: usize,
+}
+
+impl ViewNode {
+    /// A node without links (for names computed before it exists)
+    pub fn empty() -> Self {
+        Self::default()
+    }
 }
 
 /// Lien à ajouter
@@ -90,6 +103,10 @@ impl Repo {
                         .filter(|need| !inputs.iter().any(|(_, from, _)| from == need))
                         .collect(),
                     inputs,
+                    reads: node.reads.clone(),
+                    writes: node.writes.clone(),
+                    after: node.after.clone(),
+                    denied: node.denied.clone(),
                     editable: self.raw_hook(&node.base_dir, &node.hook.name).is_some(),
                     column: 0,
                     row: 0,
@@ -103,6 +120,7 @@ impl Repo {
             let column = graph.nodes[index]
                 .needs
                 .iter()
+                .chain(&graph.nodes[index].after)
                 .map(|&need| nodes[need].column + 1)
                 .max()
                 .unwrap_or(0);
@@ -131,7 +149,11 @@ impl Repo {
                                 .filter(|&d| needs[d].contains(&i))
                                 .collect()
                         } else {
-                            needs[i].clone()
+                            needs[i]
+                                .iter()
+                                .chain(&graph.nodes[i].after)
+                                .copied()
+                                .collect()
                         };
                         let key = if linked.is_empty() {
                             f32::MAX
@@ -276,6 +298,72 @@ impl Repo {
                 }
             }
         })
+    }
+
+    /// Creates a hook of the trigger in a project (from the canvas)
+    pub fn create_hook(
+        &mut self,
+        trigger: Trigger,
+        project: usize,
+        name: &str,
+        cmd: &str,
+    ) -> Result<(), GoatHookerError> {
+        let hook = Hook {
+            name: name.trim().to_string(),
+            trigger: Some(trigger),
+            cmd: Some(cmd.trim().to_string()),
+            ..Default::default()
+        };
+        hook.validate()?;
+        let project = &mut self.projects[project];
+        if project.hooks().iter().any(|h| h.name == hook.name) {
+            return Err(GoatHookerError::InvalidHook {
+                name: hook.name,
+                reason: "this project already has a hook with this name".to_string(),
+            });
+        }
+        project.save_hook(None, hook)
+    }
+
+    /// Deletes a node: its hook, or its step. Refused (and reverted) when other hooks use it.
+    pub fn delete_node(
+        &mut self,
+        trigger: Trigger,
+        node: &ViewNode,
+    ) -> Result<(), GoatHookerError> {
+        let Some((project, index)) = self.raw_hook(&node.project_dir, &node.hook) else {
+            return Err(GoatHookerError::InvalidHook {
+                name: node.hook.clone(),
+                reason: "this hook comes from a shared hooks file, remove the hook loading it"
+                    .to_string(),
+            });
+        };
+        let backup = self.projects[project].raw.clone();
+        let mut hook = self.projects[project].hooks()[index].clone();
+        let delete_hook = match node.step.as_ref() {
+            Some(step) => {
+                let steps = hook.steps.get_or_insert_with(Vec::new);
+                steps.retain(|s| s.id != *step);
+                steps.is_empty()
+            }
+            None => true,
+        };
+        if delete_hook {
+            self.projects[project].delete_hook(index)?;
+        } else {
+            self.projects[project].save_hook(Some(index), hook)?;
+        }
+
+        if let Err(err) = self.graph_view(trigger) {
+            let file = self.projects[project].file.clone();
+            self.projects[project].raw = backup;
+            self.projects[project].raw.write_to_file(&file)?;
+            return Err(GoatHookerError::InvalidHook {
+                name: node.label.clone(),
+                reason: format!("other hooks use it, remove their links first ({err})"),
+            });
+        }
+        Ok(())
     }
 
     /// Modifie un hook écrit dans le dépôt, enregistre, et vérifie que le graphe est toujours valide

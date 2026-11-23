@@ -42,7 +42,7 @@ fn describe(trigger: Trigger) -> &'static str {
     }
 }
 
-fn prompt_error(err: inquire::InquireError) -> GoatHookerError {
+pub(crate) fn prompt_error(err: inquire::InquireError) -> GoatHookerError {
     match err {
         inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted => {
             GoatHookerError::Cancelled

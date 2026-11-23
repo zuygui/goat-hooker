@@ -199,6 +199,8 @@ impl Reporter {
                 let (name, project) = state.labels[index].clone();
                 let (glyph, extra) = if result.skipped {
                     ("–".dimmed().to_string(), "skipped".to_string())
+                } else if result.denied {
+                    ("⛔".to_string(), "denied".red().to_string())
                 } else if result.success {
                     (OK.green().to_string(), ui::duration(result.duration))
                 } else {
@@ -320,13 +322,14 @@ fn print_outputs(results: &[HookResult], root: &Path, verbose: bool) {
 }
 
 fn print_summary(results: &[HookResult], elapsed: Duration) {
-    let failed = results.iter().filter(|r| r.failed()).count();
+    let denied = results.iter().filter(|r| r.denied).count();
+    let failed = results.iter().filter(|r| r.failed()).count() - denied;
     let skipped = results.iter().filter(|r| r.skipped).count();
-    let passed = results.len() - failed - skipped;
+    let passed = results.len() - failed - skipped - denied;
     let time = format!("in {}", ui::duration(elapsed)).dimmed();
 
     eprintln!();
-    if failed == 0 {
+    if failed == 0 && denied == 0 {
         eprintln!(
             "{} {} {time}",
             OK.green(),
@@ -335,10 +338,17 @@ fn print_summary(results: &[HookResult], elapsed: Duration) {
                 .bold()
         );
     } else {
+        let mut counts = Vec::new();
+        if failed > 0 {
+            counts.push(format!("{failed} failed").red().bold().to_string());
+        }
+        if denied > 0 {
+            counts.push(format!("{denied} denied").red().bold().to_string());
+        }
         eprintln!(
             "{} {}{}{} {time}",
             KO.red(),
-            format!("{failed} failed").red().bold(),
+            counts.join(", "),
             if skipped > 0 {
                 format!(", {skipped} skipped")
             } else {
@@ -350,11 +360,22 @@ fn print_summary(results: &[HookResult], elapsed: Duration) {
                 String::new()
             },
         );
-        eprintln!(
-            "  {} fix the errors above, or skip the hooks once with {}",
-            "hint:".dimmed(),
-            ui::command("HOOKER_SKIP=1 git ...")
-        );
+        if results
+            .iter()
+            .any(|r| r.denied && r.stdout().contains("hooker trust"))
+        {
+            eprintln!(
+                "  {} review the hooks of other repositories with {}",
+                "hint:".dimmed(),
+                ui::command("hooker trust")
+            );
+        } else {
+            eprintln!(
+                "  {} fix the errors above, or skip the hooks once with {}",
+                "hint:".dimmed(),
+                ui::command("HOOKER_SKIP=1 git ...")
+            );
+        }
     }
 }
 

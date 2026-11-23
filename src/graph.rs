@@ -43,6 +43,14 @@ pub struct Node<'a> {
     pub inputs: Vec<Input>,
     /// Sorties déclarées
     pub outputs: Vec<String>,
+    /// Variables read and written (`reads`, `writes` of the hook)
+    pub reads: Vec<String>,
+    pub writes: Vec<String>,
+    /// Nodes writing a variable this one reads: it runs after them, even if they fail
+    pub after: Vec<usize>,
+    /// Why it isn't allowed to run (not trusted, forbidden variable): it and everything
+    /// after it are cut
+    pub denied: Option<String>,
 }
 
 impl Node<'_> {
@@ -138,6 +146,8 @@ pub fn build<'a>(
         }
     }
 
+    crate::variables::check(configs)?;
+    let denials = crate::variables::denials(configs)?;
     let resolver = Resolver {
         entries: &entries,
         trigger,
@@ -200,6 +210,13 @@ pub fn build<'a>(
                     .map(|(_, s)| s.outputs.clone())
                     .unwrap_or_else(|| entry.hook.outputs.clone())
                     .unwrap_or_default(),
+                reads: entry.hook.reads.clone().unwrap_or_default(),
+                writes: entry.hook.writes.clone().unwrap_or_default(),
+                after: vec![],
+                denied: denials
+                    .get(&format!("{}:{}", entry.project, entry.hook.name))
+                    .cloned()
+                    .or_else(|| untrusted(&root, entry.hook)),
             });
         }
     }
@@ -272,7 +289,40 @@ pub fn build<'a>(
         }
     }
 
+    // Readers of a variable run after its writers (a hook reading and writing it, like a
+    // counter, doesn't wait for the other ones doing the same)
+    for reader in 0..nodes.len() {
+        let mut after: Vec<usize> = (0..nodes.len())
+            .filter(|&writer| {
+                writer != reader
+                    && !nodes[reader].needs.contains(&writer)
+                    && nodes[reader].reads.iter().any(|v| {
+                        nodes[writer].writes.contains(v)
+                            && !(nodes[reader].writes.contains(v)
+                                && nodes[writer].reads.contains(v))
+                    })
+            })
+            .collect();
+        // Steps of a same hook share its variables: no order between them for that
+        after.retain(|&w| !std::ptr::eq(nodes[w].hook, nodes[reader].hook));
+        nodes[reader].after = after;
+    }
+
     sort(nodes)
+}
+
+/// Reason why a hook of another repository can't run yet
+fn untrusted(root: &Path, hook: &Hook) -> Option<String> {
+    let origin = hook.origin.as_ref()?;
+    if std::env::var_os(crate::trust::TRUST_ALL_ENV).is_some_and(|v| v == "1")
+        || crate::trust::is_trusted(root, origin)
+    {
+        return None;
+    }
+    Some(format!(
+        "{} ({}) isn't trusted yet: review it with `hooker trust`",
+        origin.path, origin.url
+    ))
 }
 
 /// Résout `hook.output` en (nœud, sortie)
@@ -434,10 +484,13 @@ impl Resolver<'_, '_> {
 /// Tri topologique (stable : ordre du fichier à égalité), avec détection des cycles
 fn sort(mut nodes: Vec<Node>) -> Result<Graph, GoatHookerError> {
     let count = nodes.len();
-    let mut remaining: Vec<usize> = nodes.iter().map(|n| n.needs.len()).collect();
+    let mut remaining: Vec<usize> = nodes
+        .iter()
+        .map(|n| n.needs.len() + n.after.len())
+        .collect();
     let mut dependents = vec![Vec::new(); count];
     for (node, n) in nodes.iter().enumerate() {
-        for &need in &n.needs {
+        for &need in n.needs.iter().chain(&n.after) {
             dependents[need].push(node);
         }
     }
@@ -476,7 +529,7 @@ fn sort(mut nodes: Vec<Node>) -> Result<Graph, GoatHookerError> {
         new_index[old] = new;
     }
     for node in &mut nodes {
-        for need in &mut node.needs {
+        for need in node.needs.iter_mut().chain(node.after.iter_mut()) {
             *need = new_index[*need];
         }
         for input in &mut node.inputs {

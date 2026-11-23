@@ -21,6 +21,11 @@
 - [x] Run hooks in parallel
 - [x] Shared hooks files, local or from a git repository (`path` / `from`)
 - [x] Hooks graph: hooks and steps that wait for each other and pass values to each other
+- [x] Variables shared between hooks, with who may write and read them
+- [x] Permissions: read-only files, no network, filtered environment
+- [x] Hooks from other repositories run only once trusted, again when they change
+- [x] Ready-to-use hooks (Rust, JavaScript, Python, conventional commits, common checks) and a search of the hooks shared on GitHub
+- [x] Import from husky / lint-staged, lefthook and pre-commit
 - [x] JSON schema for autocompletion in editors
 - [x] A desktop app for those who prefer not to use the CLI
 
@@ -76,6 +81,10 @@ hooker run pre-commit -v   # also show the output of the hooks that passed
 hooker run pre-commit --dry-run   # show the hooks that would run, and on which files
 hooker list        # list the configurations and their hooks
 hooker update      # update the hooks loaded from git repositories
+hooker search rust # find hooks shared on GitHub and add them
+hooker trust       # review and trust the hooks loaded from other repositories
+hooker vars        # variables shared between hooks: value, writers, readers
+hooker import      # convert a husky / lint-staged, lefthook or pre-commit config
 hooker schema      # print the JSON schema of the configuration
 hooker completion zsh > ~/.zfunc/_hooker   # shell completion
 ```
@@ -107,6 +116,12 @@ Hooks show a spinner while running, then a summary. Only the output of the faile
   - `×` on a link removes it; cycles are refused
   - run the trigger and see each node's result and duration
   - edits are written to the `hooker.config.json` files, so the JSON stays the source of truth
+  - double-click the background (or drop a wire on it) to create a hook, hover a node to delete it
+  - variables are drawn from the hooks writing them to the hooks reading them
+- **Variables**: value, writers and readers of each variable
+- **Browse hooks**: search the hooks shared on GitHub, set their parameters and add them
+- **To review**: the commands and permissions of the hooks of other repositories, to trust them
+- a repository without config offers to import husky, lint-staged, lefthook or pre-commit
 
 ## Contributing 🤝
 
@@ -258,6 +273,76 @@ A hooks file can declare `params`, used as `{{name}}` in its hooks, and set with
 ```
 
 `{{name}}` (two braces) is replaced when the config is loaded; `{files}` and the inputs (one brace) when the hook runs. A string that is exactly `{{name}}` takes the value as is, so a list fills an array.
+
+### Ready-to-use hooks
+
+goat-hooker shares the hooks of [`hooks/`](hooks): `rust.json`, `javascript.json`, `python.json`, `commits.json` and `checks.json`.
+
+```json
+{ "name": "rust", "from": "https://github.com/zuygui/goat-hooker", "path": "hooks/rust.json",
+  "with": { "clippy_args": "--all-targets" } }
+```
+
+### Share your hooks
+
+Add `share` to the root `hooker.config.json` of a repository: `hooker search` (and the app) find it on GitHub.
+
+```json
+"share": { "description": "Hooks of the Acme team", "tags": ["go", "lint"], "hooks": ["hooks/*.json"] }
+```
+
+A hooks file can have a `description`. GitHub's code search needs a token: `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth login`. `HOOKER_HUB_REPOS=owner/name,owner/other@branch` adds repositories the search can't find (private ones, branches).
+
+## Variables 🔤
+
+Variables are values shared between hooks, kept between commits (in `.git/goat-hooker`):
+
+```json
+{
+  "variables": {
+    "version": { "description": "Next version", "default": "0.1.0", "writers": ["bump"], "readers": ["*"] }
+  },
+  "hooks": [
+    { "name": "bump", "trigger": "pre-commit", "writes": ["version"], "cmd": "echo version=0.2.0 >> $HOOKER_VARS" },
+    { "name": "changelog", "trigger": "pre-commit", "reads": ["version"], "cmd": "echo \"## $version\" >> CHANGELOG.md" }
+  ]
+}
+```
+
+- a hook declares what it `writes` (`echo "name=value" >> $HOOKER_VARS`) and `reads` (`$name`)
+- readers run after the writers of the same trigger
+- `writers` and `readers` (`name`, `project:name`, `project:*` or `*`) say who may use it, any other hook is refused
+- a hook writing a variable it didn't declare fails
+- the values are saved when the whole run passes; `hooker vars --reset name` goes back to the default
+
+## Permissions and trust 🔐
+
+`permissions` says what a hook may do:
+
+```json
+{ "name": "license check", "trigger": "pre-commit", "cmd": "...",
+  "permissions": { "files": "read", "network": false, "env": ["LICENSE_KEY"] } }
+```
+
+- `files`: `read` (the targeted files modified by the hook are reverted and the hook fails) or `write`
+- `network`: blocked when false, with Linux user namespaces (`unshare`) or the macOS sandbox
+- `env`: the environment variables it gets besides the basic ones (`PATH`, `HOME`, `GIT_*`...)
+
+Without `permissions`, a hook of the repository can do everything. A hook loaded with `from` only reads files, without network and with the basic environment, unless its hooks file asks for more.
+
+A hook without permission is **denied**: it doesn't run (not trusted, forbidden variable) or fails (it modified a read-only file, wrote an undeclared variable), and every hook after it, through `needs` or variables, is skipped. The other hooks still run, and the commit is stopped.
+
+Hooks loaded with `from` don't run until they are trusted: `hooker trust` (or the app) shows their commands and permissions. They must be trusted again when their file or their `with` values change. `HOOKER_TRUST_ALL=1` skips the check (CI).
+
+## Import 📥
+
+`hooker import` converts the config of another hooks manager (`--dry-run` to only show it):
+
+- husky (`.husky/*`, or `husky.hooks` in package.json) and its lint-staged config (one hook per command, in order)
+- lefthook (`lefthook.yml`): commands, jobs, scripts, `root` becomes a sub-project, `piped` becomes `needs`
+- pre-commit (`.pre-commit-config.yaml`): local hooks, the well-known hooks (pre-commit-hooks, ruff, black, prettier, eslint, Rust, conventional commits), the other ones through `pre-commit run`
+
+What can't be converted exactly (regexes, `skip` conditions...) is listed.
 
 ## Thanks to all contributors 🧡
 <p align="center">

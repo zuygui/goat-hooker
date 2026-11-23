@@ -123,6 +123,45 @@ pub enum AppCommands {
         config_path: Option<PathBuf>,
     },
 
+    /// Convert the configs of husky / lint-staged, lefthook and pre-commit to hooker.config.json
+    #[command()]
+    Import {
+        /// Replace the existing hooker.config.json files
+        #[arg(short, long)]
+        force: bool,
+
+        /// Show the converted hooks without writing them
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Search hooks shared on GitHub and add them
+    #[command()]
+    Search {
+        /// Words to look for (rust, eslint, commits...); empty lists everything
+        query: Vec<String>,
+
+        /// Project folder to add the hooks to (default: the root)
+        #[arg(short, long, value_hint = clap::ValueHint::DirPath)]
+        project: Option<PathBuf>,
+    },
+
+    /// Review the hooks loaded from other repositories (`from`) and trust them
+    #[command()]
+    Trust {
+        /// Trust all of them without asking
+        #[arg(long)]
+        all: bool,
+    },
+
+    /// List the variables shared between hooks: value, writers, readers
+    #[command()]
+    Vars {
+        /// Forget the value of a variable (back to its default)
+        #[arg(long, value_name = "NAME")]
+        reset: Option<String>,
+    },
+
     /// Print the JSON schema of the configuration file
     #[command()]
     Schema,

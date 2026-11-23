@@ -25,6 +25,18 @@ pub struct Config {
     #[schemars(description = "JSON schema of the file")]
     pub schema: Option<String>,
 
+    /// What a reusable hooks file does (shown by `hooker search`)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "What this hooks file does, shown when searching hooks")]
+    pub description: Option<String>,
+
+    /// Root config only: this repository shares hooks files, found by `hooker search`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Share hooks files of this repository: `hooker search` finds the root configs with this field on GitHub (root config only)"
+    )]
+    pub share: Option<Share>,
+
     /// Paramètres d'un fichier de hooks réutilisable (utilisés en `{{nom}}`)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -50,6 +62,13 @@ pub struct Config {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Run hooks in parallel (root config only)")]
     pub parallel: Option<bool>,
+
+    /// Values shared between hooks, kept between runs
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Variables shared between hooks: a hook declares the ones it `writes` (`echo \"name=value\" >> $HOOKER_VARS`) and `reads` (`$name`). Their values are kept between runs"
+    )]
+    pub variables: Option<BTreeMap<String, Variable>>,
 
     #[schemars(description = "Hooks of this project")]
     pub hooks: Option<Vec<Hook>>,
@@ -135,6 +154,137 @@ pub struct Hook {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Steps of this hook, each one can wait for the others")]
     pub steps: Option<Vec<Step>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Variables this hook reads, available as `$name` (it runs after the hooks writing them)"
+    )]
+    pub reads: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Variables this hook writes with `echo \"name=value\" >> $HOOKER_VARS`"
+    )]
+    pub writes: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "What this hook is allowed to do. Without it, a hook of the repository can do everything and a hook loaded with `from` can only read files"
+    )]
+    pub permissions: Option<Permissions>,
+
+    /// Set when the hook comes from another repository (`from`): it must be trusted to run
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub origin: Option<Origin>,
+}
+
+/// A variable shared between hooks
+#[derive(Debug, Default, Serialize, Deserialize, Clone, JsonSchema)]
+#[schemars(description = "A variable shared between hooks")]
+pub struct Variable {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "What the variable holds")]
+    pub description: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Value before any hook writes it")]
+    pub default: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Hooks allowed to write it: `name`, `project:name` or `*` (default: every hook)"
+    )]
+    pub writers: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Hooks allowed to read it: `name`, `project:name` or `*` (default: every hook)"
+    )]
+    pub readers: Option<Vec<String>>,
+}
+
+/// Access of a hook to the files of the repository
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FileAccess {
+    /// The files may not be modified (checked after the hook, changes are reverted)
+    Read,
+    /// The hook may modify files (formatters)
+    Write,
+}
+
+/// What a hook is allowed to do
+#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq, JsonSchema)]
+#[schemars(description = "What a hook is allowed to do")]
+pub struct Permissions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "`read`: the targeted files can't be modified (changes are reverted and the hook fails), `write`: they can"
+    )]
+    pub files: Option<FileAccess>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Network access. When false, it is blocked where the system allows it (Linux user namespaces, macOS sandbox)"
+    )]
+    pub network: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Environment variables the hook gets, besides the basic ones (PATH, HOME, GIT_*...). Without it, a hook of the repository gets all of them"
+    )]
+    pub env: Option<Vec<String>>,
+}
+
+/// Permissions of a hook once the defaults are applied
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Granted {
+    pub files: FileAccess,
+    pub network: bool,
+    /// `None`: the whole environment
+    pub env: Option<Vec<String>>,
+}
+
+/// Where a hook loaded from another repository comes from
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Origin {
+    pub url: String,
+    pub rev: Option<String>,
+    /// Hooks file in that repository
+    pub path: String,
+    /// Hash of the hooks file and of the `with` values: changes when the hooks change
+    pub hash: String,
+}
+
+impl Origin {
+    /// Key in the trust store
+    pub fn key(&self) -> String {
+        format!(
+            "{}#{}:{}",
+            self.url,
+            self.rev.as_deref().unwrap_or_default(),
+            self.path
+        )
+    }
+}
+
+/// Hooks files shared by a repository
+#[derive(Debug, Default, Serialize, Deserialize, Clone, JsonSchema)]
+#[schemars(description = "Hooks files shared by this repository")]
+pub struct Share {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "What these hooks are for")]
+    pub description: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Keywords to find them (rust, lint, commits...)")]
+    pub tags: Option<Vec<String>>,
+
+    #[schemars(
+        description = "Shared hooks files, relative to the repository root. Globs are supported (hooks/*.json)"
+    )]
+    pub hooks: Vec<String>,
 }
 
 // Paramètre d'un fichier de hooks réutilisable
@@ -319,6 +469,26 @@ impl Hook {
         self.path.is_some()
     }
 
+    /// Permissions with the defaults: everything for the hooks of the repository,
+    /// read-only files, no network and the basic environment for the hooks of other repositories
+    pub fn granted(&self) -> Granted {
+        let remote = self.origin.is_some();
+        let permissions = self.permissions.clone().unwrap_or_default();
+        Granted {
+            files: permissions.files.unwrap_or(if remote {
+                FileAccess::Read
+            } else {
+                FileAccess::Write
+            }),
+            network: permissions.network.unwrap_or(!remote),
+            env: match permissions.env {
+                Some(env) => Some(env),
+                None if remote => Some(vec![]),
+                None => None,
+            },
+        }
+    }
+
     pub fn validate(&self) -> Result<(), GoatHookerError> {
         let invalid = |reason: &str| GoatHookerError::InvalidHook {
             name: self.name.clone(),
@@ -343,6 +513,18 @@ impl Hook {
 
         if self.trigger.is_none() {
             return Err(invalid("`trigger` is required"));
+        }
+        for name in self.reads.iter().chain(self.writes.iter()).flatten() {
+            if !is_identifier(name) {
+                return Err(invalid(&format!(
+                    "variable `{name}` must be a valid shell variable name"
+                )));
+            }
+        }
+        if self.stage_fixed == Some(true) && self.granted().files == FileAccess::Read {
+            return Err(invalid(
+                "`stage_fixed` needs the permission to modify files (`\"permissions\": { \"files\": \"write\" }`)",
+            ));
         }
         Self::validate_links(&self.name, self.inputs.as_ref(), self.outputs.as_ref())
             .map_err(|reason| invalid(&reason))?;
@@ -506,7 +688,7 @@ impl ConfigLoader {
 
         // Remplace les hooks `path` par les hooks du fichier chargé
         if let Some(hooks) = root.hooks.take() {
-            root.hooks = Some(self.expand_hooks(hooks, &base_dir, 0)?);
+            root.hooks = Some(self.expand_hooks(hooks, &base_dir, 0, None)?);
         }
 
         let mut all_cfg = vec![root.clone()];
@@ -536,11 +718,18 @@ impl ConfigLoader {
         hooks: Vec<Hook>,
         base_dir: &Path,
         depth: usize,
+        origin: Option<&Origin>,
     ) -> Result<Vec<Hook>, GoatHookerError> {
         let mut expanded = Vec::new();
 
         for hook in hooks {
             let Some(path) = hook.path.as_ref() else {
+                let mut hook = hook;
+                if let Some(origin) = origin {
+                    hook.origin = Some(origin.clone());
+                    // The defaults of the permissions changed
+                    hook.validate()?;
+                }
                 expanded.push(hook);
                 continue;
             };
@@ -570,12 +759,46 @@ impl ConfigLoader {
             let shared_dir = shared.base_dir.clone().unwrap();
             let shared_hooks = shared.hooks.unwrap_or_default();
 
+            // Hooks of another repository: they must be trusted, and run with restricted permissions
+            let remote_origin = match (origin, hook.from.as_ref()) {
+                (Some(origin), _) => Some(origin.clone()),
+                (None, Some(url)) => Some(Origin {
+                    url: url.clone(),
+                    rev: hook.rev.clone(),
+                    path: path.clone(),
+                    hash: content_hash(&file, hook.with.as_ref())?,
+                }),
+                (None, None) => None,
+            };
+
             // Un fichier de hooks peut lui-même charger des fichiers (relatifs à lui)
-            expanded.extend(self.expand_hooks(shared_hooks, &shared_dir, depth + 1)?);
+            expanded.extend(self.expand_hooks(
+                shared_hooks,
+                &shared_dir,
+                depth + 1,
+                remote_origin.as_ref(),
+            )?);
         }
 
         Ok(expanded)
     }
+}
+
+/// Hash of a hooks file and of the values given to its parameters
+fn content_hash(
+    file: &Path,
+    with: Option<&BTreeMap<String, serde_json::Value>>,
+) -> Result<String, GoatHookerError> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(fs::read(file)?);
+    hasher.update(b"\0");
+    hasher.update(serde_json::to_string(&with).unwrap_or_default());
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// Résout un import en chemins de configs.

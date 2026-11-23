@@ -11,6 +11,8 @@ use gpui_kit::component::{
     ActiveTheme, Icon, IconName, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
+    input::{Input, InputEvent, InputState},
+    v_flex,
 };
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -47,8 +49,27 @@ pub enum CanvasEvent {
     },
     /// Ouvrir le hook dans la vue liste
     Select(usize),
+    /// New hook of the current trigger, linked to `link` (source node, output or order)
+    Create {
+        project: usize,
+        name: String,
+        cmd: String,
+        link: Option<(usize, Link)>,
+    },
+    Delete(usize),
     SetTrigger(Trigger),
     Run(Trigger),
+}
+
+/// A wire to paint (local points)
+struct Wire {
+    from: Point<Pixels>,
+    to: Point<Pixels>,
+    color: Hsla,
+    /// Dash and gap lengths (`None`: solid)
+    dash: Option<[f32; 2]>,
+    /// Width and opacity factor (hovered node)
+    emphasis: f32,
 }
 
 /// Résultat du dernier lancement d'un nœud
@@ -56,6 +77,7 @@ pub enum CanvasEvent {
 pub struct NodeStatus {
     pub success: bool,
     pub skipped: bool,
+    pub denied: bool,
     pub duration: Duration,
 }
 
@@ -72,8 +94,25 @@ enum Drag {
     },
 }
 
+/// Form creating a hook, opened by a double-click or a wire dropped on the background
+struct NewHook {
+    /// Where it is shown (local point)
+    at: Point<Pixels>,
+    /// Wire it comes from: (node, output index or `DONE`)
+    from: Option<(usize, usize)>,
+    project: usize,
+    name: Entity<InputState>,
+    cmd: Entity<InputState>,
+}
+
 pub struct GraphCanvas {
     pub trigger: Trigger,
+    /// Projects of the repository (label, folder), to create hooks in
+    projects: Vec<String>,
+    new_hook: Option<NewHook>,
+    hovered: Option<usize>,
+    show_help: bool,
+    _subscriptions: Vec<Subscription>,
     triggers: Vec<Trigger>,
     nodes: Vec<ViewNode>,
     error: Option<String>,
@@ -93,8 +132,32 @@ fn left_rows(node: &ViewNode) -> usize {
     1 + node.needs.len() + node.inputs.len() + usize::from(node.editable)
 }
 
+/// Footer listing the variables of a node
+fn has_variables(node: &ViewNode) -> bool {
+    !node.reads.is_empty() || !node.writes.is_empty()
+}
+
 fn node_height(node: &ViewNode) -> f32 {
-    HEADER + left_rows(node).max(node.outputs.len()) as f32 * ROW + PADDING
+    HEADER
+        + left_rows(node).max(node.outputs.len()) as f32 * ROW
+        + if has_variables(node) { ROW } else { 0. }
+        + PADDING
+}
+
+/// Link created by a wire from the output `output` (or `DONE`) of `source`
+fn link_for(source: &ViewNode, output: usize, target: Option<&ViewNode>) -> Link {
+    if output == DONE {
+        return Link::Needs;
+    }
+    let output_name = source.outputs[output].clone();
+    let name = match target {
+        Some(target) => input_name(target, source, &output_name),
+        None => input_name(&ViewNode::empty(), source, &output_name),
+    };
+    Link::Input {
+        name,
+        output: output_name,
+    }
 }
 
 fn trigger_color(trigger: Trigger, cx: &App) -> Hsla {
@@ -151,6 +214,11 @@ impl GraphCanvas {
     pub fn new() -> Self {
         Self {
             trigger: Trigger::PreCommit,
+            projects: vec![],
+            new_hook: None,
+            hovered: None,
+            show_help: false,
+            _subscriptions: vec![],
             triggers: vec![],
             nodes: vec![],
             error: None,
@@ -165,6 +233,72 @@ impl GraphCanvas {
 
     pub fn nodes(&self) -> &[ViewNode] {
         &self.nodes
+    }
+
+    pub fn set_projects(&mut self, projects: Vec<String>) {
+        self.projects = projects;
+    }
+
+    /// Opens the form creating a hook at `at` (local point)
+    fn open_new_hook(
+        &mut self,
+        at: Point<Pixels>,
+        from: Option<(usize, usize)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.projects.is_empty() {
+            return;
+        }
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder("Hook name"));
+        let cmd = cx.new(|cx| InputState::new(window, cx).placeholder("Command, e.g. npm test"));
+        name.update(cx, |input, cx| input.focus(window, cx));
+        // Enter in the command creates it
+        let subscription = cx.subscribe(&cmd, |this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::PressEnter { .. }) {
+                this.submit_new_hook(cx);
+            }
+        });
+        self._subscriptions = vec![subscription];
+        // A wire from a node of another project creates the hook in that project
+        let project = from
+            .and_then(|(node, _)| {
+                let project = &self.nodes[node].project;
+                self.projects
+                    .iter()
+                    .position(|p| p == project || (project == "root" && p == "."))
+            })
+            .unwrap_or(0);
+        self.new_hook = Some(NewHook {
+            at,
+            from,
+            project,
+            name,
+            cmd,
+        });
+        cx.notify();
+    }
+
+    fn submit_new_hook(&mut self, cx: &mut Context<Self>) {
+        let Some(form) = self.new_hook.take() else {
+            return;
+        };
+        let name = form.name.read(cx).value().trim().to_string();
+        let cmd = form.cmd.read(cx).value().trim().to_string();
+        if name.is_empty() || cmd.is_empty() {
+            self.new_hook = Some(form);
+            return;
+        }
+        let link = form
+            .from
+            .map(|(node, output)| (node, link_for(&self.nodes[node], output, None)));
+        cx.emit(CanvasEvent::Create {
+            project: form.project,
+            name,
+            cmd,
+            link,
+        });
+        cx.notify();
     }
 
     pub fn set_data(
@@ -238,7 +372,18 @@ impl GraphCanvas {
 
     // MARK: souris
 
-    fn on_mouse_down(&mut self, event: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.click_count >= 2 {
+            let at = self.local(event.position);
+            self.open_new_hook(at, None, window, cx);
+            return;
+        }
+        self.new_hook = None;
         self.drag = Some(Drag::Pan {
             mouse: event.position,
             offset: self.offset,
@@ -261,7 +406,7 @@ impl GraphCanvas {
         }
     }
 
-    fn on_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(Drag::Wire { from, output, .. }) = self.drag.take() {
             let (x, y) = self.to_canvas(self.local(event.position));
             let layout = self.layout();
@@ -269,24 +414,28 @@ impl GraphCanvas {
                 let (nx, ny) = layout[i];
                 x >= nx && x <= nx + NODE_WIDTH && y >= ny && y <= ny + node_height(node)
             });
-            if let Some(target) = target.filter(|t| *t != from) {
-                let (_, ny) = layout[target];
-                let on_waits_for = y >= ny + HEADER && y < ny + HEADER + ROW;
-                let source = &self.nodes[from];
-                let link = if output == DONE || on_waits_for {
-                    Link::Needs
-                } else {
-                    let output_name = source.outputs[output].clone();
-                    Link::Input {
-                        name: input_name(&self.nodes[target], source, &output_name),
-                        output: output_name,
-                    }
-                };
-                cx.emit(CanvasEvent::Link {
-                    target,
-                    source: from,
-                    link,
-                });
+            match target {
+                Some(target) if target != from => {
+                    let (_, ny) = layout[target];
+                    let on_waits_for = y >= ny + HEADER && y < ny + HEADER + ROW;
+                    let source = &self.nodes[from];
+                    let link = if on_waits_for {
+                        Link::Needs
+                    } else {
+                        link_for(source, output, Some(&self.nodes[target]))
+                    };
+                    cx.emit(CanvasEvent::Link {
+                        target,
+                        source: from,
+                        link,
+                    });
+                }
+                Some(_) => {}
+                // Dropped on the background: a new hook receiving it
+                None => {
+                    let at = self.local(event.position);
+                    self.open_new_hook(at, Some((from, output)), window, cx);
+                }
             }
         } else {
             self.drag = None;
@@ -317,25 +466,29 @@ impl GraphCanvas {
     // MARK: rendu
 
     /// Fils à dessiner (points locaux) : (départ, arrivée, couleur, pointillé)
-    fn wires(
-        &self,
-        layout: &[(f32, f32)],
-        cx: &App,
-    ) -> Vec<(Point<Pixels>, Point<Pixels>, Hsla, bool)> {
+    fn wires(&self, layout: &[(f32, f32)], cx: &App) -> Vec<Wire> {
         let theme = cx.theme();
         let data_color = trigger_color(self.trigger, cx);
+        let variable_color = theme.magenta;
         let mut wires = Vec::new();
+        // With a hovered node, its wires stand out and the others fade
+        let emphasis = |a: usize, b: usize| match self.hovered {
+            Some(h) if h == a || h == b => 1.6,
+            Some(_) => 0.35,
+            None => 1.,
+        };
 
         for (index, node) in self.nodes.iter().enumerate() {
             let (x, y) = layout[index];
             for &need in &node.needs {
                 let (sx, sy) = layout[need];
-                wires.push((
-                    self.to_screen((sx + NODE_WIDTH, sy + HEADER / 2.)),
-                    self.to_screen((x, y + HEADER + ROW / 2.)),
-                    theme.muted_foreground,
-                    true,
-                ));
+                wires.push(Wire {
+                    from: self.to_screen((sx + NODE_WIDTH, sy + HEADER / 2.)),
+                    to: self.to_screen((x, y + HEADER + ROW / 2.)),
+                    color: theme.muted_foreground,
+                    dash: Some([6., 4.]),
+                    emphasis: emphasis(index, need),
+                });
             }
             for (k, (_, source, output)) in node.inputs.iter().enumerate() {
                 let (sx, sy) = layout[*source];
@@ -345,15 +498,31 @@ impl GraphCanvas {
                     .position(|o| o == output)
                     .unwrap_or(0);
                 let row = 1 + node.needs.len() + k;
-                wires.push((
-                    self.to_screen((
+                wires.push(Wire {
+                    from: self.to_screen((
                         sx + NODE_WIDTH,
                         sy + HEADER + (output_row as f32 + 0.5) * ROW,
                     )),
-                    self.to_screen((x, y + HEADER + (row as f32 + 0.5) * ROW)),
-                    data_color,
-                    false,
-                ));
+                    to: self.to_screen((x, y + HEADER + (row as f32 + 0.5) * ROW)),
+                    color: data_color,
+                    dash: None,
+                    emphasis: emphasis(index, *source),
+                });
+            }
+            // Variables: from the writer to the footer of the reader
+            for &writer in &node.after {
+                let (sx, sy) = layout[writer];
+                let writer_node = &self.nodes[writer];
+                wires.push(Wire {
+                    from: self.to_screen((
+                        sx + NODE_WIDTH,
+                        sy + node_height(writer_node) - PADDING - ROW / 2.,
+                    )),
+                    to: self.to_screen((x, y + node_height(node) - PADDING - ROW / 2.)),
+                    color: variable_color,
+                    dash: Some([2., 4.]),
+                    emphasis: emphasis(index, writer),
+                });
             }
         }
 
@@ -364,16 +533,18 @@ impl GraphCanvas {
         }) = self.drag.as_ref()
         {
             let (sx, sy) = layout[*from];
-            let (y, color, dashed) = if *output == DONE {
-                (sy + HEADER / 2., theme.muted_foreground, true)
+            let (y, color, dash) = if *output == DONE {
+                (sy + HEADER / 2., theme.muted_foreground, Some([6., 4.]))
             } else {
-                (
-                    sy + HEADER + (*output as f32 + 0.5) * ROW,
-                    data_color,
-                    false,
-                )
+                (sy + HEADER + (*output as f32 + 0.5) * ROW, data_color, None)
             };
-            wires.push((self.to_screen((sx + NODE_WIDTH, y)), *mouse, color, dashed));
+            wires.push(Wire {
+                from: self.to_screen((sx + NODE_WIDTH, y)),
+                to: *mouse,
+                color,
+                dash,
+                emphasis: 1.4,
+            });
         }
         wires
     }
@@ -427,9 +598,21 @@ impl GraphCanvas {
             .h(s(node_height(node)))
             .rounded(s(8.))
             .border(s(1.))
-            .border_color(theme.border)
+            .border_color(if self.hovered == Some(index) {
+                color
+            } else {
+                theme.border
+            })
             .bg(theme.background)
             .shadow_md()
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                if *hovered {
+                    this.hovered = Some(index);
+                } else if this.hovered == Some(index) {
+                    this.hovered = None;
+                }
+                cx.notify();
+            }))
             // Le fond ne doit pas bouger quand on clique sur un nœud
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
 
@@ -465,6 +648,25 @@ impl GraphCanvas {
                         .text_color(theme.muted_foreground)
                         .child(node.project.clone()),
                 )
+                .when(node.denied.is_some(), |this| {
+                    this.child(
+                        div()
+                            .id(("denied", index))
+                            .px(s(4.))
+                            .rounded(s(3.))
+                            .text_size(s(10.))
+                            .bg(theme.danger.opacity(0.12))
+                            .text_color(theme.danger)
+                            .child("denied")
+                            .tooltip({
+                                let reason = node.denied.clone().unwrap_or_default();
+                                move |window, cx| {
+                                    gpui_kit::component::tooltip::Tooltip::new(reason.clone())
+                                        .build(window, cx)
+                                }
+                            }),
+                    )
+                })
                 .when(!node.editable, |this| {
                     this.child(
                         div()
@@ -476,6 +678,8 @@ impl GraphCanvas {
                 .children(status.map(|status| {
                     let (icon, color) = if status.skipped {
                         (IconName::Minus, theme.muted_foreground)
+                    } else if status.denied {
+                        (IconName::CircleX, theme.danger)
                     } else if status.success {
                         (IconName::CircleCheck, theme.success)
                     } else {
@@ -485,11 +689,28 @@ impl GraphCanvas {
                         .gap(s(3.))
                         .text_size(s(10.))
                         .text_color(theme.muted_foreground)
-                        .when(!status.skipped, |this| {
+                        .when(!status.skipped && !status.denied, |this| {
                             this.child(format!("{:.1}s", status.duration.as_secs_f32()))
                         })
                         .child(Icon::new(icon).size(s(14.)).text_color(color))
                 }))
+                .when(node.editable && self.hovered == Some(index), |this| {
+                    this.child(
+                        div()
+                            .id(("delete-node", index))
+                            .p(s(2.))
+                            .rounded(s(4.))
+                            .text_color(theme.muted_foreground)
+                            .hover(|this| {
+                                this.bg(theme.danger.opacity(0.15)).text_color(theme.danger)
+                            })
+                            .child(Icon::empty().path("icons/trash.svg").size(s(13.)))
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                cx.stop_propagation();
+                                cx.emit(CanvasEvent::Delete(index));
+                            })),
+                    )
+                })
                 .on_click(cx.listener(move |_, _, _, cx| cx.emit(CanvasEvent::Select(index)))),
         );
 
@@ -637,7 +858,201 @@ impl GraphCanvas {
             );
         }
 
+        // Footer: variables read and written
+        if has_variables(node) {
+            let variable_color = theme.magenta;
+            let footer_top = node_height(node) - PADDING - ROW;
+            card = card.child(
+                h_flex()
+                    .absolute()
+                    .left_0()
+                    .top(s(footer_top))
+                    .w_full()
+                    .h(s(ROW))
+                    .px(s(14.))
+                    .gap(s(4.))
+                    .border_t(s(1.))
+                    .border_color(theme.border)
+                    .text_size(s(10.))
+                    .overflow_hidden()
+                    .children(node.reads.iter().map(|v| {
+                        div()
+                            .px(s(4.))
+                            .rounded(s(3.))
+                            .bg(variable_color.opacity(0.1))
+                            .text_color(variable_color)
+                            .child(format!("reads ${v}"))
+                    }))
+                    .children(node.writes.iter().map(|v| {
+                        div()
+                            .px(s(4.))
+                            .rounded(s(3.))
+                            .bg(variable_color.opacity(0.2))
+                            .text_color(variable_color)
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(format!("writes ${v}"))
+                    })),
+            );
+        }
+
         card
+    }
+
+    fn render_new_hook(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let form = self.new_hook.as_ref()?;
+        let theme = cx.theme().clone();
+        let color = trigger_color(self.trigger, cx);
+        let bounds = self.bounds.get();
+        // Keeps the form inside the canvas
+        let x = form.at.x.min(bounds.size.width - px(320.)).max(px(8.));
+        let y = form.at.y.min(bounds.size.height - px(260.)).max(px(56.));
+
+        let subtitle = match form.from {
+            Some((node, DONE)) => format!("runs after {}", self.nodes[node].label),
+            Some((node, output)) => format!(
+                "receives {}.{}",
+                self.nodes[node].label, self.nodes[node].outputs[output]
+            ),
+            None => format!("runs on {}", self.trigger.as_str()),
+        };
+
+        let mut projects = h_flex().gap_1().flex_wrap();
+        if self.projects.len() > 1 {
+            for (i, project) in self.projects.iter().enumerate() {
+                let button = Button::new(("new-hook-project", i))
+                    .xsmall()
+                    .label(if project == "." {
+                        "root".to_string()
+                    } else {
+                        project.clone()
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(form) = this.new_hook.as_mut() {
+                            form.project = i;
+                        }
+                        cx.notify();
+                    }));
+                projects = projects.child(if i == form.project {
+                    button.primary()
+                } else {
+                    button.ghost()
+                });
+            }
+        }
+
+        Some(
+            v_flex()
+                .id("new-hook")
+                .absolute()
+                .left(x)
+                .top(y)
+                .w(px(310.))
+                .p_3()
+                .gap_2()
+                .rounded_lg()
+                .border_1()
+                .border_color(color.opacity(0.6))
+                .bg(theme.background)
+                .shadow_lg()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_scroll(|_, _, cx| cx.stop_propagation())
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(div().w(px(3.)).h(px(16.)).rounded(px(2.)).bg(color))
+                        .child(div().font_weight(FontWeight::SEMIBOLD).child("New hook"))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .truncate()
+                                .child(subtitle),
+                        ),
+                )
+                .when(self.projects.len() > 1, |this| this.child(projects))
+                .child(Input::new(&form.name).small())
+                .child(Input::new(&form.cmd).small())
+                .child(
+                    div().text_xs().text_color(theme.muted_foreground).child(
+                        "{files}: targeted files · $name: inputs · edit the rest in the list",
+                    ),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .child(
+                            Button::new("new-hook-cancel")
+                                .ghost()
+                                .small()
+                                .label("Cancel")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.new_hook = None;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("new-hook-create")
+                                .primary()
+                                .small()
+                                .label("Create")
+                                .on_click(cx.listener(|this, _, _, cx| this.submit_new_hook(cx))),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// Legend of the wires and of the gestures
+    fn render_help(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let line = |color: Hsla, style: &'static str, text: &'static str| {
+            h_flex()
+                .gap_2()
+                .child(
+                    div()
+                        .w(px(28.))
+                        .text_color(color)
+                        .font_weight(FontWeight::BOLD)
+                        .child(style),
+                )
+                .child(text)
+        };
+        v_flex()
+            .id("canvas-help")
+            .absolute()
+            .bottom_3()
+            .left_3()
+            .p_3()
+            .gap_1()
+            .rounded_lg()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.background.opacity(0.95))
+            .shadow_md()
+            .text_xs()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(line(trigger_color(self.trigger, cx), "───", "a value: output → input ({name}, $name)"))
+            .child(line(theme.muted_foreground, "- - -", "an order: runs after (needs)"))
+            .child(line(theme.magenta, "·····", "a variable: written → read"))
+            .child(div().h(px(4.)))
+            .child("Double-click the background: new hook")
+            .child("Drag from an output: to a node (input), its “waits for” row (order) or the background (new hook)")
+            .child("Hover a node: its links, its delete button · Click its title: open it")
+            .child("Drag the background to move · ⌘/Ctrl + scroll to zoom")
+            .into_any_element()
+    }
+}
+
+impl GraphCanvas {
+    fn placeholder_text(&self) -> String {
+        match self.error.clone() {
+            Some(error) => error,
+            None => format!(
+                "No {} hooks yet · double-click to add one",
+                self.trigger.as_str()
+            ),
+        }
     }
 
     fn remove_button(
@@ -706,10 +1121,31 @@ impl GraphCanvas {
             .child(tabs)
             .child(div().flex_1())
             .child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child("Drag from an output to a node · ⌘/Ctrl + scroll to zoom"),
+                Button::new("add-hook")
+                    .ghost()
+                    .small()
+                    .icon(IconName::Plus)
+                    .label("Hook")
+                    .tooltip("New hook (or double-click the background)")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let bounds = this.bounds.get();
+                        let at = point(bounds.size.width / 2. - px(155.), px(90.));
+                        this.open_new_hook(at, None, window, cx);
+                    })),
+            )
+            .child(
+                Button::new("help")
+                    .ghost()
+                    .small()
+                    .icon(IconName::Info)
+                    .tooltip("Legend and gestures")
+                    .when(self.show_help, |b| {
+                        gpui_kit::component::Selectable::selected(b, true)
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_help = !this.show_help;
+                        cx.notify();
+                    })),
             )
             .child(
                 Button::new("fit")
@@ -784,12 +1220,13 @@ impl Render for GraphCanvas {
                             y += step;
                         }
 
-                        for (from, to, color, dashed) in wires {
-                            let (from, to) = (b.origin + from, b.origin + to);
+                        for wire in wires {
+                            let (from, to) = (b.origin + wire.from, b.origin + wire.to);
                             let dx = px((f32::from(to.x - from.x).abs() / 2.).max(40.));
-                            let mut path = PathBuilder::stroke(wire_width);
-                            if dashed {
-                                path = path.dash_array(&[px(6.), px(4.)]);
+                            let width = px(f32::from(wire_width) * wire.emphasis.max(1.));
+                            let mut path = PathBuilder::stroke(width);
+                            if let Some([dash, gap]) = wire.dash {
+                                path = path.dash_array(&[px(dash), px(gap)]);
                             }
                             path.move_to(from);
                             path.cubic_bezier_to(
@@ -798,7 +1235,7 @@ impl Render for GraphCanvas {
                                 to - point(dx, px(0.)),
                             );
                             if let Ok(path) = path.build() {
-                                window.paint_path(path, color);
+                                window.paint_path(path, wire.color.opacity(wire.emphasis.min(1.)));
                             }
                         }
                     },
@@ -816,10 +1253,7 @@ impl Render for GraphCanvas {
                         .items_center()
                         .justify_center()
                         .text_color(theme.muted_foreground)
-                        .child(match self.error.clone() {
-                            Some(error) => error,
-                            None => format!("No {} hooks", self.trigger.as_str()),
-                        }),
+                        .child(self.placeholder_text()),
                 )
             })
             .when_some(
@@ -840,5 +1274,7 @@ impl Render for GraphCanvas {
                 },
             )
             .child(self.render_toolbar(cx))
+            .when(self.show_help, |this| this.child(self.render_help(cx)))
+            .children(self.render_new_hook(cx))
     }
 }

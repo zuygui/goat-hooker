@@ -41,7 +41,19 @@ enum Filter {
     NextCommit,
     Trigger(Trigger),
     Project(usize),
+    /// Pages that replace the list and the detail
+    Variables,
+    Browse,
+    Review,
 }
+
+impl Filter {
+    fn is_page(self) -> bool {
+        matches!(self, Filter::Variables | Filter::Browse | Filter::Review)
+    }
+}
+
+mod pages;
 
 /// Un hook dans un projet
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -58,6 +70,7 @@ enum RunStatus {
     Passed,
     Failed,
     Skipped,
+    Denied,
 }
 
 /// Formulaire ouvert dans le panneau de détail
@@ -90,6 +103,7 @@ pub struct HookerApp {
     graph: Entity<GraphCanvas>,
     /// Le graphe doit être recalculé (config ou résultats changés)
     graph_dirty: bool,
+    pages: pages::PagesState,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -191,6 +205,7 @@ impl HookerApp {
             graph_mode: false,
             graph,
             graph_dirty: true,
+            pages: pages::PagesState::new(window, cx),
             _subscriptions: vec![subscription, graph_subscription],
         };
         if let Some(dir) = dir {
@@ -221,6 +236,7 @@ impl HookerApp {
         }
         self.refresh_preview();
         self.graph_dirty = true;
+        self.refresh_pages();
     }
 
     fn reload(&mut self) {
@@ -230,6 +246,7 @@ impl HookerApp {
         self.error = repo.reload().err().map(|e| e.to_string());
         self.refresh_preview();
         self.graph_dirty = true;
+        self.refresh_pages();
     }
 
     fn refresh_preview(&mut self) {
@@ -263,6 +280,8 @@ impl HookerApp {
         };
         if results.is_empty() {
             None
+        } else if results.iter().any(|r| r.denied) {
+            Some(RunStatus::Denied)
         } else if results.iter().any(|r| r.failed()) {
             Some(RunStatus::Failed)
         } else if results.iter().all(|r| r.skipped) {
@@ -322,6 +341,7 @@ impl HookerApp {
                     Filter::Project(i) => i == p,
                     Filter::Trigger(trigger) => hook.trigger == Some(trigger),
                     Filter::NextCommit => self.runs_next_commit(project, hook),
+                    Filter::Variables | Filter::Browse | Filter::Review => false,
                 };
                 let matches_search = query.is_empty()
                     || hook.name.to_lowercase().contains(&query)
@@ -350,6 +370,9 @@ impl HookerApp {
     fn set_filter(&mut self, filter: Filter, cx: &mut Context<Self>) {
         self.filter = filter;
         self.editor = None;
+        if filter == Filter::Browse {
+            self.open_browse(cx);
+        }
         if filter == Filter::NextCommit {
             self.reload();
         }
@@ -619,13 +642,21 @@ impl HookerApp {
                 this.graph_dirty = true;
                 match results {
                     Ok(results) => {
-                        let failed = results.iter().filter(|r| r.failed()).count();
+                        let denied = results.iter().filter(|r| r.denied).count();
+                        let failed = results.iter().filter(|r| r.failed()).count() - denied;
                         let skipped = results.iter().filter(|r| r.skipped).count();
                         let name = trigger.as_str();
-                        this.notice = Some(if failed == 0 {
+                        this.notice = Some(if failed == 0 && denied == 0 {
                             (format!("{name} passed ({} hooks)", results.len()), true)
                         } else {
-                            let mut message = format!("{name} failed: {failed} failed");
+                            let mut parts = Vec::new();
+                            if failed > 0 {
+                                parts.push(format!("{failed} failed"));
+                            }
+                            if denied > 0 {
+                                parts.push(format!("{denied} denied"));
+                            }
+                            let mut message = format!("{name} failed: {}", parts.join(", "));
                             if skipped > 0 {
                                 message.push_str(&format!(", {skipped} skipped"));
                             }
@@ -691,13 +722,16 @@ impl HookerApp {
                     NodeStatus {
                         success: result.success,
                         skipped: result.skipped,
+                        denied: result.denied,
                         duration: result.duration,
                     },
                 )
             })
             .collect();
         let running = self.running_all;
+        let projects: Vec<String> = repo.projects.iter().map(|p| p.name.clone()).collect();
         self.graph.update(cx, |graph, cx| {
+            graph.set_projects(projects);
             graph.trigger = trigger;
             graph.set_data(triggers, nodes, statuses, running, cx);
         });
@@ -732,6 +766,16 @@ impl HookerApp {
                     repo.remove_need(trigger, &nodes[*target], &nodes[*source])
                 })
             }
+            CanvasEvent::Create {
+                project,
+                name,
+                cmd,
+                link,
+            } => self.create_from_canvas(trigger, *project, name, cmd, link.clone(), cx),
+            CanvasEvent::Delete(index) => self
+                .repo
+                .as_mut()
+                .map_or(Ok(()), |repo| repo.delete_node(trigger, &nodes[*index])),
             CanvasEvent::RemoveInput { target, name } => {
                 self.repo.as_mut().map_or(Ok(()), |repo| {
                     repo.remove_input(trigger, &nodes[*target], name)
@@ -749,6 +793,40 @@ impl HookerApp {
             self.notice = None;
         }
         self.reload();
+    }
+
+    /// Hook created on the canvas, linked to the node its wire comes from
+    fn create_from_canvas(
+        &mut self,
+        trigger: Trigger,
+        project: usize,
+        name: &str,
+        cmd: &str,
+        link: Option<(usize, crate::graph_view::Link)>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), goat_hooker::errors::GoatHookerError> {
+        let source = link
+            .as_ref()
+            .map(|(node, _)| self.graph.read(cx).nodes()[*node].clone());
+        let Some(repo) = self.repo.as_mut() else {
+            return Ok(());
+        };
+        repo.create_hook(trigger, project, name, cmd)?;
+        if let (Some(source), Some((_, link))) = (source, link) {
+            let project_dir = repo.projects[project].dir();
+            let project_dir = project_dir.canonicalize().unwrap_or(project_dir);
+            let created = repo.graph_view(trigger)?.into_iter().find(|n| {
+                n.hook == name.trim()
+                    && n.project_dir
+                        .canonicalize()
+                        .unwrap_or(n.project_dir.clone())
+                        == project_dir
+            });
+            if let Some(created) = created {
+                repo.add_link(trigger, &created, &source, link)?;
+            }
+        }
+        Ok(())
     }
 
     /// Ouvre le hook d'un nœud dans la vue liste
@@ -891,7 +969,7 @@ impl HookerApp {
         icon: impl Into<Icon>,
         icon_color: Option<Hsla>,
         label: impl Into<SharedString>,
-        count: usize,
+        count: Option<usize>,
         filter: Filter,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -922,7 +1000,7 @@ impl HookerApp {
                 div()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child(count.to_string()),
+                    .children(count.map(|c| c.to_string())),
             )
             .on_click(cx.listener(move |this, _, _, cx| this.set_filter(filter, cx)))
     }
@@ -941,7 +1019,7 @@ impl HookerApp {
                     lucide("layers"),
                     None,
                     "All hooks",
-                    total,
+                    Some(total),
                     Filter::All,
                     cx,
                 ))
@@ -950,7 +1028,7 @@ impl HookerApp {
                     lucide("list-checks"),
                     None,
                     "Next commit",
-                    self.hooks_for(Filter::NextCommit, cx).len(),
+                    Some(self.hooks_for(Filter::NextCommit, cx).len()),
                     Filter::NextCommit,
                     cx,
                 ));
@@ -968,7 +1046,7 @@ impl HookerApp {
                         trigger_icon(Some(trigger)),
                         Some(trigger_color(Some(trigger), cx)),
                         trigger.as_str(),
-                        count,
+                        Some(count),
                         Filter::Trigger(trigger),
                         cx,
                     ));
@@ -981,7 +1059,7 @@ impl HookerApp {
                     IconName::Folder,
                     None,
                     project_label(project),
-                    project.hooks().len(),
+                    Some(project.hooks().len()),
                     Filter::Project(i),
                     cx,
                 ));
@@ -1026,6 +1104,12 @@ impl HookerApp {
                                 .gap_1()
                                 .child(div().px_2().child(section("PROJECTS", cx)))
                                 .child(projects),
+                        )
+                        .child(
+                            v_flex()
+                                .gap_1()
+                                .child(div().px_2().child(section("TOOLS", cx)))
+                                .child(self.tools_rows(cx)),
                         ),
                 ),
             )
@@ -1036,6 +1120,9 @@ impl HookerApp {
             Filter::All => "All hooks".to_string(),
             Filter::NextCommit => "Next commit".to_string(),
             Filter::Trigger(trigger) => trigger.as_str().to_string(),
+            Filter::Variables => "Variables".to_string(),
+            Filter::Browse => "Browse hooks".to_string(),
+            Filter::Review => "Review".to_string(),
             Filter::Project(i) => self
                 .repo
                 .as_ref()
@@ -1071,6 +1158,7 @@ impl HookerApp {
                     RunStatus::Failed => Icon::new(IconName::CircleX)
                         .xsmall()
                         .text_color(theme.danger),
+                    RunStatus::Denied => lucide("shield-alert").xsmall().text_color(theme.danger),
                     RunStatus::Skipped => Icon::new(IconName::Minus)
                         .xsmall()
                         .text_color(theme.muted_foreground),
@@ -1440,6 +1528,11 @@ impl HookerApp {
             );
         }
         body = body.child(card().child(section("COMMANDS", cx)).child(commands));
+        if !hook.is_import()
+            && let Some(access) = self.hook_access(hook, cx)
+        {
+            body = body.child(card().child(section("ACCESS", cx)).child(access));
+        }
 
         // Dernier lancement
         let mut last_run = card().child(section("LAST RUN", cx));
@@ -1483,7 +1576,9 @@ impl HookerApp {
                                     .text_color(theme.danger)
                             })
                             .child(if result.skipped {
-                                "Skipped (a hook it needs failed)"
+                                "Skipped (a hook before it failed or was denied)"
+                            } else if result.denied {
+                                "Denied: it did or needed what it isn't allowed to"
                             } else if result.success {
                                 "Passed"
                             } else {
@@ -1941,7 +2036,7 @@ impl HookerApp {
 }
 
 impl Render for HookerApp {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         if self.graph_mode && self.graph_dirty {
             self.refresh_graph(cx);
@@ -1950,17 +2045,35 @@ impl Render for HookerApp {
         let body = match self.repo.as_ref() {
             None => self.render_welcome(cx),
             Some(repo) if repo.projects.is_empty() => {
-                let action = Button::new("init")
-                    .primary()
+                let create = Button::new("init")
                     .label("Create hooker.config.json")
-                    .on_click(cx.listener(|this, _, _, cx| this.init_config(cx)))
-                    .into_any_element();
+                    .on_click(cx.listener(|this, _, _, cx| this.init_config(cx)));
+                let action = match self.import_action(cx) {
+                    Some(import) => v_flex()
+                        .items_center()
+                        .gap_3()
+                        .child(import)
+                        .child(create.ghost())
+                        .into_any_element(),
+                    None => create.primary().into_any_element(),
+                };
                 self.render_placeholder(
                     "This repository has no goat-hooker configuration yet",
                     Some(action),
                     cx,
                 )
             }
+            Some(_) if self.filter.is_page() => h_flex()
+                .size_full()
+                .child(self.render_sidebar(cx))
+                .child(
+                    div()
+                        .flex_1()
+                        .h_full()
+                        .overflow_hidden()
+                        .child(self.render_page(window, cx)),
+                )
+                .into_any_element(),
             Some(_) if self.graph_mode => div()
                 .size_full()
                 .child(self.graph.clone())

@@ -41,12 +41,14 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 colored = "3"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.143"
+serde_json = { version = "1.0.143", features = ["preserve_order"] }
 thiserror = "2.0.16"
 glob = "0.3"
 indicatif = "0.18"
 inquire = "0.9"
 schemars = "1"
+serde_yaml_ng = "0.10"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3.6"
