@@ -156,7 +156,7 @@ impl UnstagedStash {
             restored: false,
         };
 
-        // Remet ces fichiers au niveau de l'index, sans lancer les hooks de Git (post-checkout)
+        // Puts these files back to their staged version, without running Git's hooks (post-checkout)
         let no_hooks = format!(
             "core.hooksPath={}",
             git_path(root, "goat-hooker/no-hooks")?.display()
