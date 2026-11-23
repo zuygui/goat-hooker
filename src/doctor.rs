@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    config::{Config, Hook, Trigger},
+    config::{Config, Hook, LOCAL_CONFIG_FILENAME, Trigger},
     git,
     graph::project_name,
     history::{self, Status},
@@ -80,6 +80,7 @@ pub fn diagnose(root: &Path, configs: &[Config]) -> Vec<Finding> {
     findings.extend(unused_variables(root, configs));
     findings.extend(untrusted(root, configs));
     findings.extend(from_history(root, configs));
+    findings.extend(committed_local(root));
     findings.sort_by_key(|f| f.level);
     findings
 }
@@ -307,6 +308,26 @@ fn untrusted(root: &Path, configs: &[Config]) -> Vec<Finding> {
                 origin.path
             ))
             .fix("hooker trust")
+        })
+        .collect()
+}
+
+/// `hooker.local.json` holds the changes of one computer: it must not be committed
+fn committed_local(root: &Path) -> Vec<Finding> {
+    tracked(root)
+        .into_iter()
+        .filter(|f| f.file_name().is_some_and(|n| n == LOCAL_CONFIG_FILENAME))
+        .map(|file| {
+            let file = file
+                .strip_prefix(root)
+                .unwrap_or(&file)
+                .display()
+                .to_string();
+            Finding::new(Level::Warning, format!("{file} is committed"))
+                .detail("it holds the changes of one computer: everyone gets them")
+                .fix(format!(
+                    "git rm --cached {file} && echo {LOCAL_CONFIG_FILENAME} >> .gitignore"
+                ))
         })
         .collect()
 }

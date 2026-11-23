@@ -348,6 +348,33 @@
             "null"
           ]
         },
+        "branches": {
+          "description": "Run the hook only on these branches (globs: `main`, `release/*`)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "skip_branches": {
+          "description": "Don't run the hook on these branches (globs: `wip/*`)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "timeout": {
+          "description": "Stop the hook after this time and fail it: `30s`, `2m`, `500ms`",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "permissions": {
           "description": "What this hook is allowed to do. Without it, a hook of the repository can do everything and a hook loaded with `from` can only read files",
           "anyOf": [

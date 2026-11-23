@@ -10,6 +10,32 @@ use crate::errors::GoatHookerError;
 /// Also used for our own git commands (the `checkout` of the stash must not run the post-checkout).
 pub const SKIP_ENV: &str = "HOOKER_SKIP";
 
+/// What `HOOKER_SKIP` asks to skip
+#[derive(Debug, PartialEq, Eq)]
+pub enum Skip {
+    /// `1`, `true`, `all`: goat-hooker doesn't run
+    All,
+    /// `lint,test`: these hooks (names, `project:name` or `hook/step`); empty: none
+    Hooks(Vec<String>),
+}
+
+pub fn skip_setting() -> Skip {
+    parse_skip(&std::env::var(SKIP_ENV).unwrap_or_default())
+}
+
+fn parse_skip(value: &str) -> Skip {
+    match value.trim() {
+        "" | "0" | "false" | "no" => Skip::Hooks(vec![]),
+        "1" | "true" | "yes" | "all" => Skip::All,
+        list => Skip::Hooks(
+            list.split(',')
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty())
+                .collect(),
+        ),
+    }
+}
+
 /// Runs a git command in `dir` and returns its standard output
 fn git(dir: &Path, args: &[&str]) -> Result<String, GoatHookerError> {
     git_bytes(dir, args).map(|out| String::from_utf8_lossy(&out).to_string())
@@ -406,6 +432,16 @@ pub fn hooks_path_setting(root: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skip_setting_is_all_or_a_list() {
+        assert_eq!(parse_skip(""), Skip::Hooks(vec![]));
+        assert_eq!(parse_skip("1"), Skip::All);
+        assert_eq!(
+            parse_skip("lint, api:test"),
+            Skip::Hooks(vec!["lint".into(), "api:test".into()])
+        );
+    }
     use std::fs;
     use tempfile::tempdir;
 

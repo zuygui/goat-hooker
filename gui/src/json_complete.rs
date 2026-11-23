@@ -254,6 +254,17 @@ fn keys(path: &[Segment]) -> Vec<(&'static str, &'static str, &'static str)> {
                 "Skip it when it passed with the same files",
                 "true",
             ),
+            ("branches", "Run it only on these branches (globs)", "[]"),
+            (
+                "skip_branches",
+                "Don't run it on these branches (globs)",
+                "[]",
+            ),
+            (
+                "timeout",
+                "Stop it and fail after this time (30s, 2m)",
+                "\"\"",
+            ),
             (
                 "affected",
                 "Also run it when a project this one depends on changes",

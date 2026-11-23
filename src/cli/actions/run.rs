@@ -48,10 +48,11 @@ pub fn run_hooks(
         from_git,
         no_cache,
     } = flags;
-    // `HOOKER_SKIP=1 git commit` to skip the hooks
-    if std::env::var(git::SKIP_ENV).is_ok_and(|v| !v.is_empty() && v != "0") {
-        return Ok(());
-    }
+    // `HOOKER_SKIP=1 git commit` skips every hook, `HOOKER_SKIP=lint,test` only these ones
+    let skip = match git::skip_setting() {
+        git::Skip::All => return Ok(()),
+        git::Skip::Hooks(hooks) => hooks,
+    };
 
     let root = ui::current_repo()?;
 
@@ -79,6 +80,7 @@ pub fn run_hooks(
         force_color: std::io::stderr().is_terminal(),
         no_cache,
         ci_files: None,
+        skip,
     };
 
     if dry_run {
@@ -207,7 +209,11 @@ impl Reporter {
                         "cached".dimmed().to_string(),
                     )
                 } else if result.skipped {
-                    ("–".dimmed().to_string(), "skipped".to_string())
+                    let extra = match result.note.as_deref() {
+                        Some(note) => format!("skipped ({note})"),
+                        None => "skipped".to_string(),
+                    };
+                    ("–".dimmed().to_string(), extra.dimmed().to_string())
                 } else if result.denied {
                     ("⛔".to_string(), "denied".red().to_string())
                 } else if result.success {
@@ -234,6 +240,7 @@ impl Reporter {
                     _ => eprintln!("{line}"),
                 }
             }
+            Progress::Output(..) => {}
         }
     }
 
