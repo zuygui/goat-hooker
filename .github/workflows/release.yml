@@ -38,7 +38,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libx11-xcb-dev libxcb1-dev
       - name: Run release-plz
         id: release-plz
-        uses: release-plz/action@v0.5.139
+        uses: release-plz/action@v0.5.148
         with:
           command: release
         env:
@@ -63,7 +63,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
-        uses: release-plz/action@v0.5.139
+        uses: release-plz/action@v0.5.148
         with:
           command: release-pr
         env:
