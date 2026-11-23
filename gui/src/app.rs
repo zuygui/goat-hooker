@@ -11,6 +11,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
+    menu::AppMenuBar,
     scroll::ScrollableElement,
     status_bar::StatusBar,
     v_flex,
@@ -28,6 +29,7 @@ use crate::{
     discover::{self, FoundRepo},
     editor::{EditorEvent, HookEditor},
     graph_view::ViewNode,
+    menus::*,
     recents,
     repo::{PreviewItem, Project, Repo},
 };
@@ -116,6 +118,10 @@ pub struct HookerApp {
     redo_stack: Vec<Vec<(PathBuf, Option<String>)>>,
     /// JSON editor of a config, in place of the detail
     json_editor: Option<Entity<crate::json_editor::JsonEditor>>,
+    /// Root of the window: receives the actions of the menus and the shortcuts
+    focus_handle: FocusHandle,
+    /// Menu bar in the title bar (Linux and Windows; native on macOS)
+    menu_bar: Entity<AppMenuBar>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -226,8 +232,11 @@ impl HookerApp {
             update: None,
             redo_stack: vec![],
             json_editor: None,
+            focus_handle: cx.focus_handle(),
+            menu_bar: AppMenuBar::new(cx),
             _subscriptions: vec![subscription, graph_subscription],
         };
+        app.focus_handle.focus(window, cx);
         if let Some(dir) = dir {
             app.open(dir);
             app.select_first(cx);
@@ -245,6 +254,50 @@ impl HookerApp {
         })
         .detach();
         app
+    }
+
+    /// Actions of the menus that need a repository with a config
+    fn on_menu_action(
+        &mut self,
+        action: &dyn std::any::Any,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if action.is::<NewHook>() {
+            self.open_editor(self.target_project(), None, window, cx);
+        } else if action.is::<RunPreCommit>() {
+            self.run_pre_commit(cx);
+        } else if action.is::<InstallHooks>() {
+            self.install(cx);
+        } else if action.is::<ReloadConfigs>() {
+            self.reload();
+            cx.notify();
+        } else if action.is::<ShowList>() || action.is::<ShowGraph>() {
+            self.graph_mode = action.is::<ShowGraph>();
+            self.graph_dirty = true;
+            if self.filter.is_page() {
+                self.set_filter(Filter::All, cx);
+            }
+            cx.notify();
+        } else {
+            let filter = if action.is::<GoAll>() {
+                Filter::All
+            } else if action.is::<GoNextCommit>() {
+                Filter::NextCommit
+            } else if action.is::<GoVariables>() {
+                Filter::Variables
+            } else if action.is::<GoBrowse>() {
+                Filter::Browse
+            } else if action.is::<GoReview>() {
+                Filter::Review
+            } else if action.is::<GoHistory>() {
+                Filter::History
+            } else {
+                return;
+            };
+            self.graph_mode = false;
+            self.set_filter(filter, cx);
+        }
     }
 
     // MARK: data
@@ -1102,6 +1155,9 @@ impl HookerApp {
                         .gap_1p5()
                         .text_sm()
                         .child(div().font_weight(FontWeight::SEMIBOLD).child("Goat Hooker"))
+                        .when(!cfg!(target_os = "macos"), |this| {
+                            this.child(self.menu_bar.clone())
+                        })
                         .when_some(self.update.clone(), |this, version| {
                             this.child(
                                 Button::new("update-available")
@@ -2342,8 +2398,36 @@ impl Render for HookerApp {
 
         v_flex()
             .size_full()
-            .bg(theme.background)
-            .text_color(theme.foreground)
+            .key_context("HookerApp")
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &OpenRepository, _, cx| this.pick_folder(cx)))
+            .on_action(cx.listener(|this, _: &ScanFolder, _, cx| this.pick_scan_folder(cx)))
+            .on_action(cx.listener(|this, _: &CloseRepository, _, cx| this.go_home(cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleTheme, window, cx| this.toggle_theme(window, cx)),
+            )
+            .when(
+                self.repo.as_ref().is_some_and(|r| !r.projects.is_empty()),
+                |this| {
+                    fn on<A: Action>(this: Div, cx: &mut Context<HookerApp>) -> Div {
+                        this.on_action(cx.listener(|this, action: &A, window, cx| {
+                            this.on_menu_action(action, window, cx)
+                        }))
+                    }
+                    let this = on::<NewHook>(this, cx);
+                    let this = on::<RunPreCommit>(this, cx);
+                    let this = on::<InstallHooks>(this, cx);
+                    let this = on::<ReloadConfigs>(this, cx);
+                    let this = on::<ShowList>(this, cx);
+                    let this = on::<ShowGraph>(this, cx);
+                    let this = on::<GoAll>(this, cx);
+                    let this = on::<GoNextCommit>(this, cx);
+                    let this = on::<GoVariables>(this, cx);
+                    let this = on::<GoBrowse>(this, cx);
+                    let this = on::<GoReview>(this, cx);
+                    on::<GoHistory>(this, cx)
+                },
+            )
             .child(self.render_title_bar(cx))
             .when_some(self.notice.clone(), |this, (message, success)| {
                 let color = if success { theme.success } else { theme.danger };

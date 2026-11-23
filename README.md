@@ -137,6 +137,7 @@ Hooks show a spinner while running, then a summary. Only the output of the faile
 - **Browse hooks**: search the hooks shared on GitHub, set their parameters and add them
 - **To review**: the commands and permissions of the hooks of other repositories, to trust them
 - a repository without config offers to import husky, lint-staged, lefthook or pre-commit
+- a menu bar (native on macOS, in the title bar on Linux and Windows) with shortcuts: ⌘/Ctrl+O open a repository, ⌘/Ctrl+N new hook, ⌘/Ctrl+R run the pre-commit, ⌘/Ctrl+Shift+R reload the configs, ⌘/Ctrl+1 / 2 list or graph, ⌘/Ctrl+Shift+D dark mode
 
 ## Contributing 🤝
 
