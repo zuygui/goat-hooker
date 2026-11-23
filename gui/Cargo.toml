@@ -24,7 +24,7 @@ serde_json = "1"
 [dev-dependencies]
 tempfile = "3.6"
 
-# Empaquetage de l'app (cargo-packager) : .app/.dmg, .exe (NSIS), .deb/.AppImage
+# Packaging of the app (cargo-packager): .app/.dmg, .exe (NSIS), .deb/.AppImage
 # The binaries must be built first: `cargo build --release -p goat-hooker -p goat-hooker-gui`
 [package.metadata.packager]
 product-name = "Goat Hooker"

@@ -63,6 +63,13 @@ pub struct Config {
     #[schemars(description = "Run hooks in parallel (root config only)")]
     pub parallel: Option<bool>,
 
+    /// Projects this one depends on, besides the ones found in its manifests
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Folders of the projects this one depends on (relative to it), besides the ones found in Cargo.toml, package.json, go.mod and pyproject.toml. Hooks with `affected` run when they change"
+    )]
+    pub depends_on: Option<Vec<String>>,
+
     /// Values shared between hooks, kept between runs
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -169,9 +176,27 @@ pub struct Hook {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
+        description = "Also run the hook when a project this one depends on changes (Cargo path dependencies, workspace packages, go.mod replace, `depends_on`)"
+    )]
+    pub affected: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
         description = "Skip the hook when it already passed with the same files, commands, inputs and variables. Default: true for hooks with `include`"
     )]
     pub cache: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Run the hook only on these branches (globs: `main`, `release/*`)")]
+    pub branches: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Don't run the hook on these branches (globs: `wip/*`)")]
+    pub skip_branches: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Stop the hook after this time and fail it: `30s`, `2m`, `500ms`")]
+    pub timeout: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -432,7 +457,48 @@ impl Trigger {
     }
 }
 
+/// `30s`, `2m`, `1h`, `500ms` or a number of seconds
+pub fn parse_duration(text: &str) -> Option<std::time::Duration> {
+    let text = text.trim();
+    let split = text
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(text.len());
+    let (number, unit) = text.split_at(split);
+    let number: f64 = number.parse().ok()?;
+    let seconds = match unit.trim() {
+        "" | "s" => number,
+        "ms" => number / 1000.,
+        "m" | "min" => number * 60.,
+        "h" => number * 3600.,
+        _ => return None,
+    };
+    (seconds > 0.).then(|| std::time::Duration::from_secs_f64(seconds))
+}
+
 impl Hook {
+    /// Maximum duration of the hook (`timeout`)
+    pub fn timeout(&self) -> Option<std::time::Duration> {
+        self.timeout.as_deref().and_then(parse_duration)
+    }
+
+    /// Does the hook run on this branch (`branches`, `skip_branches`)?
+    /// Without a branch (detached HEAD), only the hooks without `branches` run.
+    pub fn runs_on_branch(&self, branch: Option<&str>) -> bool {
+        let matches = |patterns: &Option<Vec<String>>, branch: &str| {
+            patterns
+                .iter()
+                .flatten()
+                .any(|p| glob::Pattern::new(p).is_ok_and(|p| p.matches(branch)))
+        };
+        match branch {
+            Some(branch) => {
+                (self.branches.is_none() || matches(&self.branches, branch))
+                    && !matches(&self.skip_branches, branch)
+            }
+            None => self.branches.is_none(),
+        }
+    }
+
     /// Commands to run, in order
     /// (the steps, in the order of the file, for a hook with `steps`)
     pub fn commands(&self) -> Vec<&str> {
@@ -517,6 +583,18 @@ impl Hook {
         if self.with.is_some() && self.path.is_none() {
             return Err(invalid("`with` requires `path`"));
         }
+        if let Some(timeout) = self.timeout.as_deref()
+            && parse_duration(timeout).is_none()
+        {
+            return Err(invalid(&format!(
+                "`timeout` must look like `30s`, `2m` or `500ms`, not `{timeout}`"
+            )));
+        }
+        for pattern in self.branches.iter().chain(&self.skip_branches).flatten() {
+            if glob::Pattern::new(pattern).is_err() {
+                return Err(invalid(&format!("invalid branch pattern `{pattern}`")));
+            }
+        }
         if self.is_import() {
             if self.cmd.is_some() || self.cmds.is_some() {
                 return Err(invalid("`path` can't be used with `cmd` or `cmds`"));
@@ -581,7 +659,7 @@ impl Hook {
     }
 }
 
-/// JSON Schema de `hooker.config.json`
+/// JSON Schema of `hooker.config.json`
 pub fn json_schema() -> String {
     let schema = schemars::schema_for!(Config);
     serde_json::to_string_pretty(&schema).unwrap() + "\n"
@@ -599,11 +677,21 @@ impl Config {
         importer: &str,
     ) -> Result<Config, GoatHookerError> {
         let content = fs::read_to_string(path).map_err(GoatHookerError::ReadError)?;
+        Self::parse_with(path, &content, with, importer)
+    }
+
+    /// Like `load_with`, from the content of a file (`path`: for the errors and `base_dir`)
+    pub fn parse_with(
+        path: &Path,
+        content: &str,
+        with: Option<&BTreeMap<String, serde_json::Value>>,
+        importer: &str,
+    ) -> Result<Config, GoatHookerError> {
         let parse_error = |source| GoatHookerError::ParseError {
             path: path.to_path_buf(),
             source,
         };
-        let mut value: serde_json::Value = serde_json::from_str(&content).map_err(parse_error)?;
+        let mut value: serde_json::Value = serde_json::from_str(content).map_err(parse_error)?;
 
         // Parameters: replaced in the hooks before reading them
         if let Some(params) = value.get("params").cloned() {
@@ -663,6 +751,152 @@ impl Config {
     }
 }
 
+/// Changes of a config on this computer only, next to `hooker.config.json` (not committed):
+/// ```json
+/// { "parallel": true,
+///   "hooks": [
+///     { "name": "test", "disabled": true },
+///     { "name": "clippy", "timeout": "2m" },
+///     { "name": "notes", "trigger": "post-commit", "cmd": "./my-notes.sh" } ] }
+/// ```
+/// A hook with the name of an existing one changes its fields (or removes it with
+/// `"disabled": true`); another name adds a hook. The other keys replace the ones of the config.
+pub const LOCAL_CONFIG_FILENAME: &str = "hooker.local.json";
+
+/// Applies `hooker.local.json` (see `LOCAL_CONFIG_FILENAME`) to a loaded config
+pub fn apply_local(config: &mut Config, local_file: &Path) -> Result<(), GoatHookerError> {
+    let Ok(content) = fs::read_to_string(local_file) else {
+        return Ok(());
+    };
+    let parse_error = |source| GoatHookerError::ParseError {
+        path: local_file.to_path_buf(),
+        source,
+    };
+    let local: serde_json::Value = serde_json::from_str(&content).map_err(parse_error)?;
+    let serde_json::Value::Object(local) = local else {
+        return Ok(());
+    };
+
+    let (base_dir, file) = (config.base_dir.clone(), config.file.clone());
+    let mut hooks = config.hooks.take().unwrap_or_default();
+    let mut merged = serde_json::to_value(&*config).map_err(parse_error)?;
+    for (key, value) in &local {
+        if key != "hooks" {
+            merged[key] = value.clone();
+        }
+    }
+    *config = serde_json::from_value(merged).map_err(parse_error)?;
+    config.base_dir = base_dir;
+    config.file = file;
+
+    for change in local
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .into_iter()
+        .flatten()
+    {
+        let Some(change) = change.as_object() else {
+            continue;
+        };
+        let name = change
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or_default();
+        let disabled = change.get("disabled").and_then(|d| d.as_bool()) == Some(true);
+        let mut fields = change.clone();
+        fields.remove("disabled");
+        match hooks.iter().position(|h| h.name == name) {
+            Some(index) if disabled => {
+                hooks.remove(index);
+            }
+            Some(index) => {
+                let origin = hooks[index].origin.take();
+                let mut hook = serde_json::to_value(&hooks[index]).map_err(parse_error)?;
+                for (key, value) in fields {
+                    hook[key] = value;
+                }
+                let mut hook: Hook = serde_json::from_value(hook).map_err(parse_error)?;
+                hook.validate()?;
+                hook.origin = origin;
+                hooks[index] = hook;
+            }
+            None if disabled => {}
+            None => {
+                let hook: Hook = serde_json::from_value(serde_json::Value::Object(fields))
+                    .map_err(parse_error)?;
+                hook.validate()?;
+                hooks.push(hook);
+            }
+        }
+    }
+    config.hooks = Some(hooks);
+    Ok(())
+}
+
+/// Hooks turned off in the `hooker.local.json` of a project folder
+pub fn locally_disabled(dir: &Path) -> Vec<String> {
+    fs::read_to_string(dir.join(LOCAL_CONFIG_FILENAME))
+        .ok()
+        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        .and_then(|v| v.get("hooks")?.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter(|h| h.get("disabled").and_then(|d| d.as_bool()) == Some(true))
+        .filter_map(|h| h.get("name")?.as_str().map(String::from))
+        .collect()
+}
+
+/// Turns a hook off (or on again) on this computer, in the `hooker.local.json` of `dir`
+pub fn set_locally_disabled(dir: &Path, name: &str, disabled: bool) -> Result<(), GoatHookerError> {
+    let file = dir.join(LOCAL_CONFIG_FILENAME);
+    let mut local: serde_json::Value = fs::read_to_string(&file)
+        .ok()
+        .and_then(|c| serde_json::from_str(&c).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !local.is_object() {
+        local = serde_json::json!({});
+    }
+    let hooks = local
+        .as_object_mut()
+        .unwrap()
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!([]));
+    if !hooks.is_array() {
+        *hooks = serde_json::json!([]);
+    }
+    let hooks = hooks.as_array_mut().unwrap();
+    let index = hooks
+        .iter()
+        .position(|h| h.get("name").and_then(|n| n.as_str()) == Some(name));
+    match (index, disabled) {
+        (Some(i), true) => {
+            hooks[i]["disabled"] = serde_json::json!(true);
+        }
+        (Some(i), false) => {
+            if let Some(entry) = hooks[i].as_object_mut() {
+                entry.remove("disabled");
+                // Only the name left: nothing changes this hook anymore
+                if entry.len() <= 1 {
+                    hooks.remove(i);
+                }
+            }
+        }
+        (None, true) => hooks.push(serde_json::json!({ "name": name, "disabled": true })),
+        (None, false) => {}
+    }
+    if hooks.is_empty() && local.as_object().is_some_and(|o| o.len() == 1) {
+        if file.exists() {
+            fs::remove_file(&file)?;
+        }
+        return Ok(());
+    }
+    fs::write(
+        &file,
+        serde_json::to_string_pretty(&local).unwrap_or_default() + "\n",
+    )?;
+    Ok(())
+}
+
 /// Max number of nested hooks files (`path` loading a `path`...)
 const MAX_HOOKS_FILES_DEPTH: usize = 10;
 
@@ -703,6 +937,8 @@ impl ConfigLoader {
         if let Some(hooks) = root.hooks.take() {
             root.hooks = Some(self.expand_hooks(hooks, &base_dir, 0, None)?);
         }
+        // Then the changes of this computer (`hooker.local.json`)
+        apply_local(&mut root, &base_dir.join(LOCAL_CONFIG_FILENAME))?;
 
         let mut all_cfg = vec![root.clone()];
 
@@ -997,7 +1233,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join(HOOK_CONFIG_FILENAME);
 
-        // ni cmd ni cmds
+        // neither cmd nor cmds
         write_json(
             &config_path,
             r#"{ "hooks": [ { "name": "empty", "trigger": "pre-commit" } ] }"#,
@@ -1272,5 +1508,69 @@ mod tests {
             err.to_string().contains("parameter `files` is required"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn hooks_are_turned_off_and_on_locally() {
+        let dir = tempfile::tempdir().unwrap();
+        set_locally_disabled(dir.path(), "test", true).unwrap();
+        assert_eq!(locally_disabled(dir.path()), ["test"]);
+        set_locally_disabled(dir.path(), "test", false).unwrap();
+        assert!(locally_disabled(dir.path()).is_empty());
+        assert!(!dir.path().join(LOCAL_CONFIG_FILENAME).exists());
+    }
+
+    #[test]
+    fn durations_and_branches() {
+        use std::time::Duration;
+        assert_eq!(parse_duration("30s"), Some(Duration::from_secs(30)));
+        assert_eq!(parse_duration("2m"), Some(Duration::from_secs(120)));
+        assert_eq!(parse_duration("500ms"), Some(Duration::from_millis(500)));
+        assert_eq!(parse_duration("10"), Some(Duration::from_secs(10)));
+        assert_eq!(parse_duration("soon"), None);
+
+        let hook: Hook = serde_json::from_str(
+            r#"{ "name": "x", "cmd": "x", "branches": ["main", "release/*"], "skip_branches": ["release/old"] }"#,
+        )
+        .unwrap();
+        assert!(hook.runs_on_branch(Some("main")));
+        assert!(hook.runs_on_branch(Some("release/1.0")));
+        assert!(!hook.runs_on_branch(Some("release/old")));
+        assert!(!hook.runs_on_branch(Some("feat/x")));
+        assert!(!hook.runs_on_branch(None));
+    }
+
+    #[test]
+    fn local_config_changes_removes_and_adds_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(HOOK_CONFIG_FILENAME),
+            r#"{ "hooks": [
+                { "name": "lint", "trigger": "pre-commit", "cmd": "lint" },
+                { "name": "test", "trigger": "pre-commit", "cmd": "test" }
+            ] }"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join(LOCAL_CONFIG_FILENAME),
+            r#"{ "parallel": true, "hooks": [
+                { "name": "test", "disabled": true },
+                { "name": "lint", "timeout": "1m" },
+                { "name": "mine", "trigger": "post-commit", "cmd": "notes" }
+            ] }"#,
+        )
+        .unwrap();
+        let configs = ConfigLoader::new()
+            .load_recursive(&dir.path().join(HOOK_CONFIG_FILENAME))
+            .unwrap();
+        let hooks = configs[0].hooks.as_ref().unwrap();
+        let names: Vec<&str> = hooks.iter().map(|h| h.name.as_str()).collect();
+        assert_eq!(names, ["lint", "mine"]);
+        assert_eq!(hooks[0].timeout.as_deref(), Some("1m"));
+        assert_eq!(hooks[0].cmd.as_deref(), Some("lint"));
+        assert_eq!(configs[0].parallel, Some(true));
+        // the shared file is untouched
+        let raw = Config::load_from_file(&dir.path().join(HOOK_CONFIG_FILENAME)).unwrap();
+        assert_eq!(raw.hooks.unwrap().len(), 2);
     }
 }

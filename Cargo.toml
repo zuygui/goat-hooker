@@ -26,7 +26,7 @@ homepage.workspace = true
 readme = "README.md"
 keywords = ["git", "hooks", "pre-commit", "monorepo", "cli"]
 categories = ["command-line-utilities", "development-tools"]
-include = ["src/**", "schema.json", "README.md", "LICENSE"]
+include = ["src/**", "hooks/*.json", "schema.json", "README.md", "LICENSE"]
 
 # `cargo binstall goat-hooker`: the CLI built by the release
 [package.metadata.binstall]

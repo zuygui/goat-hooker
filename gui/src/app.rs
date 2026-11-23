@@ -11,6 +11,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
+    menu::AppMenuBar,
     scroll::ScrollableElement,
     status_bar::StatusBar,
     v_flex,
@@ -28,6 +29,7 @@ use crate::{
     discover::{self, FoundRepo},
     editor::{EditorEvent, HookEditor},
     graph_view::ViewNode,
+    menus::*,
     recents,
     repo::{PreviewItem, Project, Repo},
 };
@@ -46,19 +48,32 @@ enum Filter {
     Browse,
     Review,
     History,
+    Doctor,
+    Impact,
+    Projects,
+    Fixes,
 }
 
 impl Filter {
     fn is_page(self) -> bool {
         matches!(
             self,
-            Filter::Variables | Filter::Browse | Filter::Review | Filter::History
+            Filter::Variables
+                | Filter::Browse
+                | Filter::Review
+                | Filter::History
+                | Filter::Doctor
+                | Filter::Impact
+                | Filter::Projects
+                | Filter::Fixes
         )
     }
 }
 
 mod pages;
+mod palette;
 mod source;
+mod tools;
 
 /// A hook in a project
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -88,7 +103,7 @@ pub struct HookerApp {
     repo: Option<Repo>,
     /// Error when opening the repository / loading the configs
     error: Option<String>,
-    /// Message temporaire (installation, enregistrement...)
+    /// Temporary message (install, save...)
     notice: Option<(String, bool)>,
     filter: Filter,
     selected: Option<HookRef>,
@@ -116,6 +131,16 @@ pub struct HookerApp {
     redo_stack: Vec<Vec<(PathBuf, Option<String>)>>,
     /// JSON editor of a config, in place of the detail
     json_editor: Option<Entity<crate::json_editor::JsonEditor>>,
+    /// Output of the hooks while they run
+    live: std::sync::Arc<std::sync::Mutex<HashMap<RunKey, String>>>,
+    /// The window is redrawn regularly while hooks run (live output)
+    ticking: bool,
+    /// Command palette (⌘K), when open
+    palette: Option<Entity<gpui_kit::component::command::CommandState>>,
+    /// Root of the window: receives the actions of the menus and the shortcuts
+    focus_handle: FocusHandle,
+    /// Menu bar in the title bar (Linux and Windows; native on macOS)
+    menu_bar: Entity<AppMenuBar>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -226,8 +251,14 @@ impl HookerApp {
             update: None,
             redo_stack: vec![],
             json_editor: None,
+            live: Default::default(),
+            palette: None,
+            ticking: false,
+            focus_handle: cx.focus_handle(),
+            menu_bar: AppMenuBar::new(cx),
             _subscriptions: vec![subscription, graph_subscription],
         };
+        app.focus_handle.focus(window, cx);
         if let Some(dir) = dir {
             app.open(dir);
             app.select_first(cx);
@@ -245,6 +276,61 @@ impl HookerApp {
         })
         .detach();
         app
+    }
+
+    /// Actions of the menus that need a repository with a config
+    fn on_menu_action(
+        &mut self,
+        action: &dyn std::any::Any,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if action.is::<NewHook>() {
+            self.open_editor(self.target_project(), None, window, cx);
+        } else if action.is::<RunPreCommit>() {
+            self.run_pre_commit(cx);
+        } else if action.is::<RunPrePush>() {
+            self.run_trigger(Trigger::PrePush, cx);
+        } else if action.is::<InstallHooks>() {
+            self.install(cx);
+        } else if action.is::<ReloadConfigs>() {
+            self.reload();
+            cx.notify();
+        } else if action.is::<ShowList>() || action.is::<ShowGraph>() {
+            self.graph_mode = action.is::<ShowGraph>();
+            self.graph_dirty = true;
+            if self.filter.is_page() {
+                self.set_filter(Filter::All, cx);
+            }
+            cx.notify();
+        } else {
+            let filter = if action.is::<GoAll>() {
+                Filter::All
+            } else if action.is::<GoNextCommit>() {
+                Filter::NextCommit
+            } else if action.is::<GoVariables>() {
+                Filter::Variables
+            } else if action.is::<GoBrowse>() {
+                Filter::Browse
+            } else if action.is::<GoReview>() {
+                Filter::Review
+            } else if action.is::<GoHistory>() {
+                Filter::History
+            } else if action.is::<GoDoctor>() {
+                Filter::Doctor
+            } else if action.is::<GoImpact>() {
+                Filter::Impact
+            } else if action.is::<GoProjects>() {
+                Filter::Projects
+            } else if action.is::<GoFixes>() {
+                self.run_fixes(cx);
+                Filter::Fixes
+            } else {
+                return;
+            };
+            self.graph_mode = false;
+            self.set_filter(filter, cx);
+        }
     }
 
     // MARK: data
@@ -296,19 +382,27 @@ impl HookerApp {
         (dir.canonicalize().unwrap_or(dir), hook.name.clone())
     }
 
-    /// Result of a hook, or of its steps together (`lint › eslint`, `lint › types`...)
-    fn last_status(&self, key: &RunKey) -> Option<RunStatus> {
-        let results: Vec<&HookResult> = match self.results.get(key) {
+    /// Last results of a hook: its own, or the ones of its steps (`lint › eslint`...)
+    fn results_for(&self, key: &RunKey) -> Vec<&HookResult> {
+        match self.results.get(key) {
             Some(result) => vec![result],
             None => {
                 let prefix = format!("{} › ", key.1);
-                self.results
+                let mut results: Vec<&HookResult> = self
+                    .results
                     .iter()
                     .filter(|((dir, name), _)| *dir == key.0 && name.starts_with(&prefix))
                     .map(|(_, result)| result)
-                    .collect()
+                    .collect();
+                results.sort_by(|a, b| a.name.cmp(&b.name));
+                results
             }
-        };
+        }
+    }
+
+    /// Result of a hook, or of its steps together (`lint › eslint`, `lint › types`...)
+    fn last_status(&self, key: &RunKey) -> Option<RunStatus> {
+        let results = self.results_for(key);
         if results.is_empty() {
             None
         } else if results.iter().any(|r| r.denied) {
@@ -372,7 +466,14 @@ impl HookerApp {
                     Filter::Project(i) => i == p,
                     Filter::Trigger(trigger) => hook.trigger == Some(trigger),
                     Filter::NextCommit => self.runs_next_commit(project, hook),
-                    Filter::Variables | Filter::Browse | Filter::Review | Filter::History => false,
+                    Filter::Variables
+                    | Filter::Browse
+                    | Filter::Review
+                    | Filter::History
+                    | Filter::Doctor
+                    | Filter::Impact
+                    | Filter::Projects
+                    | Filter::Fixes => false,
                 };
                 let matches_search = query.is_empty()
                     || hook.name.to_lowercase().contains(&query)
@@ -635,14 +736,26 @@ impl HookerApp {
         let project = project.clone();
         let name = hook.name.clone();
         self.running.insert(key.clone());
+        self.live.lock().unwrap().insert(key.clone(), String::new());
+        self.start_ticking(cx);
         cx.notify();
 
+        let live = self.live.clone();
+        let live_key = key.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { repo.run_hook(&project, &name) })
+                .background_spawn(async move {
+                    let on_output = |text: &str| {
+                        if let Some(buffer) = live.lock().unwrap().get_mut(&live_key) {
+                            buffer.push_str(text);
+                        }
+                    };
+                    repo.run_hook(&project, &name, Some(&on_output))
+                })
                 .await;
             this.update(cx, |this, cx| {
                 this.running.remove(&key);
+                this.live.lock().unwrap().remove(&key);
                 match result {
                     Ok(result) => {
                         this.results.insert(key, result);
@@ -657,6 +770,47 @@ impl HookerApp {
         .detach();
     }
 
+    /// Redraws the window while hooks run, to show their output
+    fn start_ticking(&mut self, cx: &mut Context<Self>) {
+        if self.ticking {
+            return;
+        }
+        self.ticking = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(150))
+                    .await;
+                let busy = this
+                    .update(cx, |this, cx| {
+                        let busy = this.running_all || !this.running.is_empty();
+                        this.ticking = busy;
+                        cx.notify();
+                        busy
+                    })
+                    .unwrap_or(false);
+                if !busy {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Turns a hook off (or on) on this computer: `hooker.local.json`, used by Git too
+    fn toggle_local(&mut self, hook_ref: HookRef, disabled: bool, cx: &mut Context<Self>) {
+        let Some(name) = self.hook(hook_ref).map(|(_, h)| h.name.clone()) else {
+            return;
+        };
+        if let Some(repo) = self.repo.as_mut()
+            && let Err(err) = repo.set_locally_disabled(hook_ref.project, &name, disabled)
+        {
+            self.notice = Some((err.to_string(), false));
+        }
+        self.reload();
+        cx.notify();
+    }
+
     /// Runs the whole pre-commit, like `git commit`
     fn run_pre_commit(&mut self, cx: &mut Context<Self>) {
         self.run_trigger(Trigger::PreCommit, cx);
@@ -669,14 +823,47 @@ impl HookerApp {
         };
         self.running_all = true;
         self.graph_dirty = true;
+        self.start_ticking(cx);
         cx.notify();
 
+        let live = self.live.clone();
         cx.spawn(async move |this, cx| {
             let results = cx
-                .background_spawn(async move { repo.run_trigger(trigger) })
+                .background_spawn(async move {
+                    // Node index → key of its result, to show its output while it runs
+                    let keys = std::sync::Mutex::new(Vec::<RunKey>::new());
+                    let on_progress = |progress: goat_hooker::runner::Progress| match progress {
+                        goat_hooker::runner::Progress::Planned(graph) => {
+                            *keys.lock().unwrap() = graph
+                                .nodes
+                                .iter()
+                                .map(|n| {
+                                    let dir =
+                                        n.base_dir.canonicalize().unwrap_or(n.base_dir.clone());
+                                    (dir, n.label())
+                                })
+                                .collect();
+                        }
+                        goat_hooker::runner::Progress::Started(index) => {
+                            if let Some(key) = keys.lock().unwrap().get(index) {
+                                live.lock().unwrap().insert(key.clone(), String::new());
+                            }
+                        }
+                        goat_hooker::runner::Progress::Output(index, text) => {
+                            if let Some(key) = keys.lock().unwrap().get(index)
+                                && let Some(buffer) = live.lock().unwrap().get_mut(key)
+                            {
+                                buffer.push_str(text);
+                            }
+                        }
+                        goat_hooker::runner::Progress::Finished(..) => {}
+                    };
+                    repo.run_trigger(trigger, Some(&on_progress))
+                })
                 .await;
             this.update(cx, |this, cx| {
                 this.running_all = false;
+                this.live.lock().unwrap().clear();
                 this.graph_dirty = true;
                 match results {
                     Ok(results) => {
@@ -718,7 +905,7 @@ impl HookerApp {
         .detach();
     }
 
-    // MARK: graphe
+    // MARK: graph
 
     /// Triggers with at least one hook (in the order of `Trigger::ALL`)
     fn graph_triggers(&self) -> Vec<Trigger> {
@@ -1081,7 +1268,7 @@ impl HookerApp {
         self.reload();
     }
 
-    // MARK: rendu
+    // MARK: render
 
     fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
@@ -1102,6 +1289,9 @@ impl HookerApp {
                         .gap_1p5()
                         .text_sm()
                         .child(div().font_weight(FontWeight::SEMIBOLD).child("Goat Hooker"))
+                        .when(!cfg!(target_os = "macos"), |this| {
+                            this.child(self.menu_bar.clone())
+                        })
                         .when_some(self.update.clone(), |this, version| {
                             this.child(
                                 Button::new("update-available")
@@ -1353,6 +1543,10 @@ impl HookerApp {
             Filter::Browse => "Browse hooks".to_string(),
             Filter::Review => "Review".to_string(),
             Filter::History => "History".to_string(),
+            Filter::Doctor => "Doctor".to_string(),
+            Filter::Impact => "Impact".to_string(),
+            Filter::Projects => "Project graph".to_string(),
+            Filter::Fixes => "Fix files".to_string(),
             Filter::Project(i) => self
                 .repo
                 .as_ref()
@@ -1548,6 +1742,14 @@ impl HookerApp {
         let key = self.run_key(project, hook);
         let running = self.running.contains(&key);
         let uses_files = matches!(hook.trigger, Some(Trigger::PreCommit | Trigger::PrePush));
+        let off_here = self
+            .repo
+            .as_ref()
+            .is_some_and(|r| r.locally_disabled(project).contains(&hook.name));
+        // Output while it runs (alone, or with its trigger)
+        let live_output = (running || self.running_all)
+            .then(|| self.live.lock().unwrap().get(&key).cloned())
+            .flatten();
 
         // Header: project / trigger, name, actions
         let header = v_flex()
@@ -1604,6 +1806,22 @@ impl HookerApp {
                                 })),
                         )
                     })
+                    .when(!hook.is_import(), |this| {
+                        this.child(
+                            Button::new("local-off")
+                                .ghost()
+                                .small()
+                                .icon(lucide(if off_here { "eye" } else { "eye-off" }))
+                                .tooltip(if off_here {
+                                    "Turn it on again on this computer"
+                                } else {
+                                    "Turn it off on this computer only (hooker.local.json)"
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.toggle_local(hook_ref, !off_here, cx)
+                                })),
+                        )
+                    })
                     .child(
                         Button::new("delete")
                             .ghost()
@@ -1626,6 +1844,15 @@ impl HookerApp {
                     })
                     .when(hook.is_import(), |this| {
                         this.child(chip("shared hooks", theme.info))
+                    })
+                    .when(off_here, |this| {
+                        this.child(chip("off on this computer", theme.warning))
+                    })
+                    .when_some(hook.timeout.clone(), |this, timeout| {
+                        this.child(chip(format!("timeout {timeout}"), theme.muted_foreground))
+                    })
+                    .when_some(hook.branches.clone(), |this, branches| {
+                        this.child(chip(format!("on {}", branches.join(", ")), theme.info))
                     }),
             )
             .child(
@@ -1776,10 +2003,28 @@ impl HookerApp {
         }
         body = body.child(self.source_card(project, hook, cx));
 
-        // Dernier lancement
+        // Last run
         let mut last_run = card().child(section("LAST RUN", cx));
-        match self.results.get(&key) {
-            None => {
+        if let Some(text) = live_output {
+            let lines: Vec<&str> = text.lines().collect();
+            let start = lines.len().saturating_sub(300);
+            let mut output = code_block();
+            for line in &lines[start..] {
+                output = output.child(div().child(line.to_string()));
+            }
+            last_run = last_run
+                .child(
+                    h_flex()
+                        .gap_1p5()
+                        .text_sm()
+                        .child(lucide("clock").small().text_color(theme.primary))
+                        .child("Running…"),
+                )
+                .when(!lines.is_empty(), |this| this.child(output));
+        } else {
+            let results = self.results_for(&key);
+            let steps = results.len() > 1 || results.iter().any(|r| r.name.contains(" › "));
+            if results.is_empty() {
                 last_run = last_run.child(
                     div()
                         .text_sm()
@@ -1787,7 +2032,7 @@ impl HookerApp {
                         .child(if running { "Running…" } else { "Not run yet" }),
                 );
             }
-            Some(result) => {
+            for result in results {
                 let mut output = code_block();
                 for cmd in &result.commands {
                     output = output.child(
@@ -1817,16 +2062,30 @@ impl HookerApp {
                                     .small()
                                     .text_color(theme.danger)
                             })
-                            .child(if result.skipped {
-                                "Skipped (a hook before it failed or was denied)"
+                            .when(steps, |this| {
+                                this.child(
+                                    div().font_weight(FontWeight::MEDIUM).child(
+                                        result
+                                            .name
+                                            .split(" › ")
+                                            .last()
+                                            .unwrap_or_default()
+                                            .to_string(),
+                                    ),
+                                )
+                            })
+                            .child(if let Some(note) = result.note.as_deref() {
+                                format!("Skipped ({note})")
+                            } else if result.skipped {
+                                "Skipped (a hook before it failed or was denied)".into()
                             } else if result.denied {
-                                "Denied: it did or needed what it isn't allowed to"
+                                "Denied: it did or needed what it isn't allowed to".into()
                             } else if result.cached {
-                                "Passed (cached: same files as a run that passed)"
+                                "Passed (cached: same files as a run that passed)".into()
                             } else if result.success {
-                                "Passed"
+                                "Passed".to_string()
                             } else {
-                                "Failed"
+                                "Failed".to_string()
                             })
                             .child(
                                 div()
@@ -1834,7 +2093,7 @@ impl HookerApp {
                                     .child(format!("in {:.2}s", result.duration.as_secs_f64())),
                             ),
                     )
-                    .child(output);
+                    .when(!result.commands.is_empty(), |this| this.child(output));
             }
         }
         body = body.child(last_run);
@@ -2166,7 +2425,7 @@ impl HookerApp {
                                     "From the status bar: from now on, Git runs them for you",
                                 )),
                         )
-                        // Liens
+                        // Links
                         .child(
                             h_flex()
                                 .gap_1()
@@ -2180,7 +2439,7 @@ impl HookerApp {
                                         .icon(lucide("book-open"))
                                         .label("Documentation")
                                         .on_click(|_, _, cx| {
-                                            cx.open_url(&format!("{REPOSITORY_URL}#readme"))
+                                            cx.open_url(&format!("{REPOSITORY_URL}/tree/main/docs"))
                                         }),
                                 )
                                 .child(
@@ -2341,9 +2600,46 @@ impl Render for HookerApp {
         };
 
         v_flex()
+            .relative()
             .size_full()
-            .bg(theme.background)
-            .text_color(theme.foreground)
+            .key_context("HookerApp")
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &OpenRepository, _, cx| this.pick_folder(cx)))
+            .on_action(cx.listener(|this, _: &ScanFolder, _, cx| this.pick_scan_folder(cx)))
+            .on_action(cx.listener(|this, _: &CloseRepository, _, cx| this.go_home(cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleTheme, window, cx| this.toggle_theme(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &TogglePalette, window, cx| this.toggle_palette(window, cx)),
+            )
+            .when(
+                self.repo.as_ref().is_some_and(|r| !r.projects.is_empty()),
+                |this| {
+                    fn on<A: Action>(this: Div, cx: &mut Context<HookerApp>) -> Div {
+                        this.on_action(cx.listener(|this, action: &A, window, cx| {
+                            this.on_menu_action(action, window, cx)
+                        }))
+                    }
+                    let this = on::<NewHook>(this, cx);
+                    let this = on::<RunPreCommit>(this, cx);
+                    let this = on::<InstallHooks>(this, cx);
+                    let this = on::<ReloadConfigs>(this, cx);
+                    let this = on::<ShowList>(this, cx);
+                    let this = on::<ShowGraph>(this, cx);
+                    let this = on::<GoAll>(this, cx);
+                    let this = on::<GoNextCommit>(this, cx);
+                    let this = on::<GoVariables>(this, cx);
+                    let this = on::<GoBrowse>(this, cx);
+                    let this = on::<GoReview>(this, cx);
+                    let this = on::<GoDoctor>(this, cx);
+                    let this = on::<GoImpact>(this, cx);
+                    let this = on::<GoProjects>(this, cx);
+                    let this = on::<GoFixes>(this, cx);
+                    let this = on::<RunPrePush>(this, cx);
+                    on::<GoHistory>(this, cx)
+                },
+            )
             .child(self.render_title_bar(cx))
             .when_some(self.notice.clone(), |this, (message, success)| {
                 let color = if success { theme.success } else { theme.danger };
@@ -2397,5 +2693,6 @@ impl Render for HookerApp {
             .when(self.repo.is_some(), |this| {
                 this.child(self.render_status_bar(cx))
             })
+            .when_some(self.render_palette(cx), |this, palette| this.child(palette))
     }
 }

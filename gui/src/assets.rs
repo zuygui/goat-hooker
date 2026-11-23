@@ -1,5 +1,5 @@
 //! Lucide icons besides the ones of gpui-kit (license in `assets/LICENSE-LUCIDE`)
-//! et images de l'app
+//! and images of the app
 
 use std::borrow::Cow;
 
@@ -14,6 +14,12 @@ macro_rules! icons {
 const ICONS: &[(&str, &[u8])] = icons![
     "circle-dot",
     "clock",
+    "stethoscope",
+    "eye-off",
+    "eye",
+    "network",
+    "wand",
+    "crosshair",
     "book-open",
     "folder-git-2",
     "git-branch",

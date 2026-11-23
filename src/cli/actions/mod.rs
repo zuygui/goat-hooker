@@ -1,5 +1,7 @@
 pub mod add;
 pub mod ci;
+pub mod doctor;
+pub mod fix;
 pub mod generator;
 pub mod history;
 pub mod import;
@@ -13,3 +15,4 @@ pub mod status;
 pub mod trust;
 pub mod update;
 pub mod vars;
+pub mod watch;

@@ -398,7 +398,7 @@ impl GraphCanvas {
         window_position - self.bounds.get().origin
     }
 
-    // MARK: souris
+    // MARK: mouse
 
     fn on_mouse_down(
         &mut self,
@@ -492,7 +492,7 @@ impl GraphCanvas {
         cx.notify();
     }
 
-    // MARK: rendu
+    // MARK: render
 
     /// Wires to paint (local points): (start, end, color, dashed)
     fn wires(&self, layout: &[(f32, f32)], cx: &App) -> Vec<Wire> {

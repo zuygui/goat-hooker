@@ -70,6 +70,7 @@ impl Repo {
                         hook,
                         base_dir: base_dir.clone(),
                         files: vec![],
+                        affected_by: None,
                     });
                 }
             }

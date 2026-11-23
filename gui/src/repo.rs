@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use goat_hooker::{
-    config::{Config, ConfigLoader, HOOK_CONFIG_FILENAME, Hook, SCHEMA_URL, Trigger},
+    config::{Config, ConfigLoader, HOOK_CONFIG_FILENAME, Hook, Trigger},
     errors::GoatHookerError,
     git, install,
     matcher::{MatchedHook, Matcher},
@@ -109,15 +109,12 @@ impl Repo {
         Ok(())
     }
 
-    /// Creates `hooker.config.json` at the root (like `hooker init`)
+    /// Creates `hooker.config.json` at the root, with the hooks found for the project
+    /// (like `hooker init --template auto`)
     pub fn init_config(&mut self) -> Result<(), GoatHookerError> {
         if !self.config_file().exists() {
-            Config {
-                schema: Some(SCHEMA_URL.to_string()),
-                hooks: Some(vec![]),
-                ..Default::default()
-            }
-            .write_to_dir(&self.root)?;
+            let detected = goat_hooker::templates::detect(&self.root);
+            goat_hooker::templates::config_with(&detected)?.write_to_dir(&self.root)?;
         }
         self.reload()
     }
@@ -152,7 +149,11 @@ impl Repo {
     }
 
     /// Runs all the hooks of a trigger, like Git would
-    pub fn run_trigger(&self, trigger: Trigger) -> Result<Vec<HookResult>, GoatHookerError> {
+    pub fn run_trigger(
+        &self,
+        trigger: Trigger,
+        on_progress: Option<runner::OnProgress>,
+    ) -> Result<Vec<HookResult>, GoatHookerError> {
         let configs = self.load_configs()?;
         runner::run_trigger(
             &self.root,
@@ -160,7 +161,7 @@ impl Repo {
             trigger,
             &HookInput::default(),
             Output::Capture,
-            None,
+            on_progress,
         )
     }
 
@@ -170,6 +171,7 @@ impl Repo {
         &self,
         project: &Project,
         hook_name: &str,
+        live: Option<runner::Live>,
     ) -> Result<HookResult, GoatHookerError> {
         let configs = self.load_configs()?;
         let project_dir = project.dir().canonicalize()?;
@@ -202,10 +204,17 @@ impl Repo {
             hook,
             base_dir: project_dir,
             files,
+            affected_by: None,
         };
         goat_hooker::trust::check(&self.root, [hook])?;
         let shared = runner::Shared::load(&self.root, &configs)?;
-        let result = runner::run_hook(&matched, &HookInput::default(), Output::Capture, &shared)?;
+        let result = runner::run_hook_live(
+            &matched,
+            &HookInput::default(),
+            Output::Capture,
+            &shared,
+            live,
+        )?;
         if result.success {
             shared.save(&self.root)?;
         }
@@ -300,10 +309,10 @@ mod tests {
         assert_eq!(preview[0].project_dir, root.join("api"));
         assert_eq!(preview[0].files, vec![PathBuf::from("lib.rs")]);
 
-        let result = repo.run_hook(&repo.projects[1], "api").unwrap();
+        let result = repo.run_hook(&repo.projects[1], "api", None).unwrap();
         assert_eq!(result.commands[0].output, "api lib.rs\n");
 
-        let results = repo.run_trigger(Trigger::PreCommit).unwrap();
+        let results = repo.run_trigger(Trigger::PreCommit, None).unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].success);
     }
@@ -335,6 +344,29 @@ pub struct Untrusted {
 
 impl Repo {
     /// Variables with their writers, readers and value
+    /// What could go wrong (see `hooker doctor`)
+    pub fn diagnose(&self) -> Vec<goat_hooker::doctor::Finding> {
+        self.load_configs()
+            .map(|configs| goat_hooker::doctor::diagnose(&self.root, &configs))
+            .unwrap_or_default()
+    }
+
+    /// Hooks of a project turned off on this computer (`hooker.local.json`)
+    pub fn locally_disabled(&self, project: &Project) -> Vec<String> {
+        goat_hooker::config::locally_disabled(&project.dir())
+    }
+
+    pub fn set_locally_disabled(
+        &mut self,
+        project: usize,
+        name: &str,
+        disabled: bool,
+    ) -> Result<(), GoatHookerError> {
+        let dir = self.projects[project].dir();
+        goat_hooker::config::set_locally_disabled(&dir, name, disabled)?;
+        self.reload()
+    }
+
     pub fn variables(&self) -> Result<Vec<goat_hooker::variables::Usage>, GoatHookerError> {
         let configs = self.load_configs()?;
         goat_hooker::variables::usage(&self.root, &configs)

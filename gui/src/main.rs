@@ -8,6 +8,7 @@ mod editor;
 mod graph_view;
 mod json_complete;
 mod json_editor;
+mod menus;
 mod recents;
 mod repo;
 mod update;
@@ -31,6 +32,7 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             canvas::bind_keys(cx);
+            menus::init(cx);
             cx.on_window_closed(|cx, _| cx.quit()).detach();
 
             let bounds = Bounds::centered(None, size(px(1180.), px(760.)), cx);

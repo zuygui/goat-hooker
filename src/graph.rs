@@ -51,10 +51,12 @@ pub struct Node<'a> {
     /// Why it isn't allowed to run (not trusted, forbidden variable): it and everything
     /// after it are cut
     pub denied: Option<String>,
+    /// Runs because this project, which it depends on, changed (`affected`)
+    pub affected_by: Option<String>,
 }
 
 impl Node<'_> {
-    /// `lint` ou `lint › types`
+    /// `lint` or `lint › types`
     pub fn label(&self) -> String {
         match self.step {
             Some(step) => format!("{} › {}", self.hook.name, step.id),
@@ -155,6 +157,7 @@ pub fn build<'a>(
 
     // Hooks to run: the matching ones, then the ones they wait for
     let mut files: HashMap<usize, Vec<PathBuf>> = HashMap::new();
+    let mut affected: HashMap<usize, String> = HashMap::new();
     let mut queue = VecDeque::new();
     for matched in selected {
         let Some(index) = entries
@@ -163,6 +166,9 @@ pub fn build<'a>(
         else {
             continue;
         };
+        if let Some(changed) = matched.affected_by.as_ref() {
+            affected.insert(index, project_name(&root, changed));
+        }
         if files.insert(index, matched.files.clone()).is_none() {
             queue.push_back(index);
         }
@@ -217,6 +223,7 @@ pub fn build<'a>(
                     .get(&format!("{}:{}", entry.project, entry.hook.name))
                     .cloned()
                     .or_else(|| untrusted(&root, entry.hook)),
+                affected_by: affected.get(&index).cloned(),
             });
         }
     }
@@ -229,7 +236,7 @@ pub fn build<'a>(
         }
     };
 
-    // Liens
+    // Links
     for &index in &included {
         let entry = &entries[index];
         let hook = entry.hook;

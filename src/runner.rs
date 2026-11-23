@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, VecDeque},
-    io::Write,
+    io::{Read, Write},
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
     sync::{
@@ -31,6 +31,8 @@ pub struct Shared {
     changed: AtomicBool,
     /// Results of the hooks that passed (`None`: no cache)
     pub cache: Option<crate::cache::Cache>,
+    /// Current branch, for `branches` and `skip_branches` (`None`: detached HEAD)
+    pub branch: Option<String>,
 }
 
 impl Shared {
@@ -41,6 +43,7 @@ impl Shared {
             values: Mutex::new(crate::variables::load(root, &declared)),
             changed: AtomicBool::new(false),
             cache: None,
+            branch: git::current_branch(root),
         })
     }
 
@@ -62,22 +65,30 @@ impl Shared {
     }
 }
 
+/// Receives the output of a command while it runs
+pub type Live<'a> = &'a (dyn Fn(&str) + Sync);
+
 /// Environment and restrictions of a command
-#[derive(Debug, Clone)]
-struct Sandbox {
+struct Sandbox<'a> {
     /// More environment variables (`$HOOKER_VARS`, variables read by the hook)
     extra_env: Vec<(String, String)>,
     /// `Some`: only these environment variables besides the basic ones
     env: Option<Vec<String>>,
     network: bool,
+    /// The command is stopped and fails at this time (`timeout` of the hook)
+    deadline: Option<Instant>,
+    /// Output of the command while it runs (captured output only)
+    live: Option<Live<'a>>,
 }
 
-impl Default for Sandbox {
+impl Default for Sandbox<'_> {
     fn default() -> Self {
         Self {
             extra_env: vec![],
             env: None,
             network: true,
+            deadline: None,
+            live: None,
         }
     }
 }
@@ -122,6 +133,8 @@ pub struct HookInput {
     /// CI: the hooks run on these files (changed since the base), nothing is put aside or
     /// staged, and a hook modifying files fails (they should have been fixed before the commit)
     pub ci_files: Option<Vec<PathBuf>>,
+    /// Hooks not to run (`HOOKER_SKIP=lint,test`): names, `project:name` or `hook/step`
+    pub skip: Vec<String>,
 }
 
 /// Progress of a run (to show spinners)
@@ -132,6 +145,8 @@ pub enum Progress<'a> {
     Started(usize),
     /// The node `index` is done (or skipped, if a dependency failed)
     Finished(usize, &'a HookResult),
+    /// Output of the node `index` while it runs (captured output only)
+    Output(usize, &'a str),
 }
 
 /// Value received from another node
@@ -158,7 +173,7 @@ pub enum Output {
 pub struct CommandResult {
     pub cmd: String,
     pub success: bool,
-    /// Sortie (stdout + stderr) en mode `Capture`
+    /// Output (stdout + stderr) in `Capture` mode
     pub output: String,
 }
 
@@ -169,8 +184,10 @@ pub struct HookResult {
     /// Folder of the project of the hook
     pub base_dir: PathBuf,
     pub success: bool,
-    /// Not run: a node it waits for failed
+    /// Not run: a node it waits for failed, or skipped on purpose (see `note`)
     pub skipped: bool,
+    /// Why it was skipped on purpose (`HOOKER_SKIP`, branch)
+    pub note: Option<String>,
     /// Not allowed: not run (not trusted, forbidden variable) or stopped for doing what it
     /// may not do. The nodes after it (needs and variables) are skipped
     pub denied: bool,
@@ -256,6 +273,7 @@ fn standalone_node<'a>(matched: &MatchedHook<'a>) -> Node<'a> {
         writes: matched.hook.writes.clone().unwrap_or_default(),
         after: vec![],
         denied: None,
+        affected_by: None,
     }
 }
 
@@ -340,6 +358,22 @@ pub fn run_graph(
                     release(index, &mut remaining, &mut ready);
                     continue;
                 }
+                if let Some(note) = skip_note(node, input, shared) {
+                    // Skipped on purpose: what waits for it still runs
+                    let result = HookResult {
+                        name: node.label(),
+                        base_dir: node.base_dir.clone(),
+                        success: true,
+                        skipped: true,
+                        note: Some(note),
+                        files: node.files.clone(),
+                        ..Default::default()
+                    };
+                    notify(Progress::Finished(index, &result));
+                    results[index] = Some(result);
+                    release(index, &mut remaining, &mut ready);
+                    continue;
+                }
                 if let Some(reason) = node.denied.as_ref() {
                     let result = HookResult {
                         name: node.label(),
@@ -365,7 +399,14 @@ pub fn run_graph(
                 running += 1;
                 let sender = sender.clone();
                 scope.spawn(move || {
-                    let result = run_node(node, input, &values, node_output, shared);
+                    let live = move |text: &str| {
+                        if let Some(on_progress) = on_progress {
+                            on_progress(Progress::Output(index, text));
+                        }
+                    };
+                    let live: Option<Live> =
+                        (on_progress.is_some() && node_output == Output::Capture).then_some(&live);
+                    let result = run_node(node, input, &values, node_output, shared, live);
                     let _ = sender.send((index, result));
                 });
             }
@@ -390,6 +431,31 @@ pub fn run_graph(
     })?;
 
     Ok(results.into_iter().flatten().collect())
+}
+
+/// Why a node is skipped on purpose: named in `HOOKER_SKIP`, or not for this branch
+fn skip_note(node: &Node, input: &HookInput, shared: &Shared) -> Option<String> {
+    let hook = &node.hook.name;
+    let names = [
+        hook.clone(),
+        node.label(),
+        node.reference(),
+        format!("{}:{hook}", node.project),
+    ];
+    if input
+        .skip
+        .iter()
+        .any(|skip| names.iter().any(|name| name == skip.trim()))
+    {
+        return Some("HOOKER_SKIP".to_string());
+    }
+    if !node.hook.runs_on_branch(shared.branch.as_deref()) {
+        return Some(match shared.branch.as_deref() {
+            Some(branch) => format!("not on {branch}"),
+            None => "detached HEAD".to_string(),
+        });
+    }
+    None
 }
 
 /// Values of the inputs of a node, from the results of the nodes it waits for
@@ -435,7 +501,7 @@ fn input_values(
         .collect()
 }
 
-/// Chemin de `path` vu depuis `dir` (`../api/src/lib.rs`)
+/// Path of `path` seen from `dir` (`../api/src/lib.rs`)
 fn relative_to(dir: &Path, path: &Path) -> PathBuf {
     let dir: Vec<Component> = dir.components().collect();
     let path_components: Vec<Component> = path.components().collect();
@@ -544,7 +610,18 @@ pub fn run_hook(
     output: Output,
     shared: &Shared,
 ) -> Result<HookResult, GoatHookerError> {
-    run_node(&standalone_node(matched), input, &[], output, shared)
+    run_hook_live(matched, input, output, shared, None)
+}
+
+/// Like `run_hook`, with the output of the commands while they run (captured output only)
+pub fn run_hook_live(
+    matched: &MatchedHook,
+    input: &HookInput,
+    output: Output,
+    shared: &Shared,
+    live: Option<Live>,
+) -> Result<HookResult, GoatHookerError> {
+    run_node(&standalone_node(matched), input, &[], output, shared, live)
 }
 
 /// Runs the commands of a node, with the values of its inputs
@@ -554,6 +631,7 @@ fn run_node(
     values: &[(String, Value)],
     output: Output,
     shared: &Shared,
+    live: Option<Live>,
 ) -> Result<HookResult, GoatHookerError> {
     if output == Output::Inherit {
         println!("{}", format!("🐐 Running hook `{}`", node.label()).bold());
@@ -578,6 +656,8 @@ fn run_node(
         )],
         env: granted.env.clone(),
         network: granted.network,
+        deadline: node.hook.timeout().map(|t| Instant::now() + t),
+        live,
     };
     let read_variables: Vec<(String, String)> = node
         .reads
@@ -876,6 +956,23 @@ fn execute_command(
     )
 }
 
+/// Stops a command and what it started
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill")
+            .args(["-s", "KILL", "--", &format!("-{}", child.id())])
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .status();
+    }
+    let _ = child.kill();
+}
+
 /// Like `execute_command`, with the environment and restrictions of the hook
 #[allow(clippy::too_many_arguments)]
 fn execute_in(
@@ -970,6 +1067,13 @@ fn execute_in(
         Output::Capture => command.stdout(Stdio::piped()).stderr(Stdio::piped()),
     };
 
+    // With a timeout, the command gets its own process group: everything it started is stopped
+    #[cfg(unix)]
+    if sandbox.deadline.is_some() {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
     let mut child = command.spawn()?;
 
     if let (Some(content), Some(mut child_stdin)) = (input.stdin.as_ref(), child.stdin.take()) {
@@ -977,14 +1081,68 @@ fn execute_in(
         let _ = child_stdin.write_all(content.as_bytes());
     }
 
-    let out = child.wait_with_output()?;
-    let success = out.status.success();
+    // The output is read while the command runs (live output, timeout)
+    let collected = Mutex::new(Vec::<u8>::new());
+    let (status, timed_out) = std::thread::scope(|scope| -> std::io::Result<_> {
+        let pipes: Vec<Box<dyn std::io::Read + Send>> = [
+            child
+                .stdout
+                .take()
+                .map(|p| Box::new(p) as Box<dyn std::io::Read + Send>),
+            child
+                .stderr
+                .take()
+                .map(|p| Box::new(p) as Box<dyn std::io::Read + Send>),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let readers: Vec<_> = pipes
+            .into_iter()
+            .map(|mut pipe| {
+                let collected = &collected;
+                let live = sandbox.live;
+                scope.spawn(move || {
+                    let mut buffer = [0u8; 8192];
+                    while let Ok(n) = pipe.read(&mut buffer) {
+                        if n == 0 {
+                            break;
+                        }
+                        collected.lock().unwrap().extend_from_slice(&buffer[..n]);
+                        if let Some(live) = live {
+                            live(&String::from_utf8_lossy(&buffer[..n]));
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        let mut timed_out = false;
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if sandbox.deadline.is_some_and(|d| Instant::now() >= d) {
+                kill_tree(&mut child);
+                timed_out = true;
+                break child.wait()?;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        for reader in readers {
+            let _ = reader.join();
+        }
+        Ok((status, timed_out))
+    })?;
+    let success = status.success() && !timed_out;
 
     if output == Output::Inherit {
-        if success {
+        if timed_out {
+            eprintln!("{}", "⏱ Command stopped: timeout".red());
+        } else if success {
             println!("{}", "✅ Command executed successfully".green());
         } else {
-            eprintln!("{}", format!("❌ Command failed with {}", out.status).red());
+            eprintln!("{}", format!("❌ Command failed with {status}").red());
         }
     }
 
@@ -992,8 +1150,10 @@ fn execute_in(
     if let Some(note) = network_note {
         captured.push_str(note);
     }
-    captured.push_str(&String::from_utf8_lossy(&out.stdout));
-    captured.push_str(&String::from_utf8_lossy(&out.stderr));
+    captured.push_str(&String::from_utf8_lossy(&collected.into_inner().unwrap()));
+    if timed_out {
+        captured.push_str("\n⏱ stopped: the hook took longer than its `timeout`\n");
+    }
 
     Ok(CommandResult {
         cmd: cmd.to_string(),
@@ -1019,6 +1179,7 @@ mod tests {
             force_color: false,
             no_cache: false,
             ci_files: None,
+            skip: vec![],
         }
     }
 
@@ -1162,6 +1323,7 @@ mod tests {
                 hook: h,
                 base_dir: dir.path().to_path_buf(),
                 files: vec![],
+                affected_by: None,
             })
             .collect();
 
@@ -1188,6 +1350,7 @@ mod tests {
                 hook: h,
                 base_dir: dir.path().to_path_buf(),
                 files: vec![],
+                affected_by: None,
             })
             .collect();
 
@@ -1207,6 +1370,7 @@ mod tests {
             hook: &fmt,
             base_dir: dir.path().to_path_buf(),
             files: vec![PathBuf::from("a.rs"), PathBuf::from("deleted.rs")],
+            affected_by: None,
         };
 
         let result = run_hook(
@@ -1233,16 +1397,19 @@ mod tests {
                 hook: h,
                 base_dir: dir.path().to_path_buf(),
                 files: vec![],
+                affected_by: None,
             })
             .collect();
 
         let events = Mutex::new(Vec::new());
         let on_progress = |progress: Progress| {
-            events.lock().unwrap().push(match progress {
+            let event = match progress {
                 Progress::Planned(graph) => format!("planned {}", graph.nodes.len()),
                 Progress::Started(i) => format!("started {i}"),
                 Progress::Finished(i, r) => format!("finished {i} {}", r.success),
-            });
+                Progress::Output(..) => return,
+            };
+            events.lock().unwrap().push(event);
         };
         run_all(
             &matched,
@@ -1484,6 +1651,7 @@ mod tests {
             hook: &hook,
             base_dir: dir.path().to_path_buf(),
             files: vec![PathBuf::from("a.txt")],
+            affected_by: None,
         };
         let result = run_hook(
             &matched,
@@ -1503,7 +1671,7 @@ mod tests {
         let sandbox = Sandbox {
             extra_env: vec![],
             env: Some(vec!["HOOKER_TEST_ALLOWED".into()]),
-            network: true,
+            ..Default::default()
         };
         // SAFETY: tests of this module don't read these variables concurrently
         unsafe {
@@ -1571,5 +1739,94 @@ mod tests {
         git(&["add", "a.txt"]);
         assert!(!run()[0].cached);
         assert_eq!(read(&root, "a.txt"), "HELLO\n");
+    }
+
+    /// A repository with a config, and a way to run its pre-commit on all its staged files
+    fn repo_with(config: &str) -> (tempfile::TempDir, PathBuf, Vec<Config>) {
+        let dir = tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .unwrap()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "core.autocrlf", "false"]);
+        std::fs::write(root.join("hooker.config.json"), config).unwrap();
+        std::fs::write(root.join("a.txt"), "a\n").unwrap();
+        git(&["add", "a.txt"]);
+        let configs = crate::config::ConfigLoader::new()
+            .load_recursive(&root.join("hooker.config.json"))
+            .unwrap();
+        (dir, root, configs)
+    }
+
+    #[test]
+    fn hooks_are_skipped_by_name_and_branch() {
+        let (_dir, root, configs) = repo_with(
+            r#"{ "hooks": [
+                { "name": "lint", "trigger": "pre-commit", "cmd": "true" },
+                { "name": "test", "trigger": "pre-commit", "cmd": "false", "needs": ["lint"] },
+                { "name": "deploy", "trigger": "pre-commit", "cmd": "false", "branches": ["release/*"] },
+                { "name": "wip", "trigger": "pre-commit", "cmd": "false", "skip_branches": ["ma*"] }
+            ] }"#,
+        );
+        let input = HookInput {
+            skip: vec!["test".into()],
+            no_cache: true,
+            ..Default::default()
+        };
+        let results = run_trigger(
+            &root,
+            &configs,
+            Trigger::PreCommit,
+            &input,
+            Output::Capture,
+            None,
+        )
+        .unwrap();
+        assert!(results.iter().all(|r| r.success), "{results:#?}");
+        assert_eq!(
+            by_name(&results, "test").note.as_deref(),
+            Some("HOOKER_SKIP")
+        );
+        assert_eq!(
+            by_name(&results, "deploy").note.as_deref(),
+            Some("not on main")
+        );
+        assert!(by_name(&results, "wip").skipped);
+        assert!(!by_name(&results, "lint").skipped);
+    }
+
+    #[test]
+    fn a_hook_is_stopped_after_its_timeout() {
+        let (_dir, root, configs) = repo_with(
+            r#"{ "hooks": [
+                { "name": "slow", "trigger": "pre-commit", "cmd": "echo started; sleep 20", "timeout": "300ms" }
+            ] }"#,
+        );
+        let start = Instant::now();
+        let lines = Mutex::new(String::new());
+        let on_progress = |progress: Progress| {
+            if let Progress::Output(_, text) = progress {
+                lines.lock().unwrap().push_str(text);
+            }
+        };
+        let results = run_trigger(
+            &root,
+            &configs,
+            Trigger::PreCommit,
+            &HookInput::default(),
+            Output::Capture,
+            Some(&on_progress),
+        )
+        .unwrap();
+        assert!(start.elapsed() < Duration::from_secs(5));
+        assert!(results[0].failed());
+        assert!(results[0].stdout().contains("timeout"));
+        // the output came while the hook was running
+        assert!(lines.lock().unwrap().contains("started"));
     }
 }

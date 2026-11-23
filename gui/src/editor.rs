@@ -1,4 +1,4 @@
-//! Formulaire d'ajout / modification d'un hook
+//! Form to add / edit a hook
 
 use gpui_kit::component::{
     ActiveTheme, IndexPath, Sizable,

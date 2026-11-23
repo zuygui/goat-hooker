@@ -10,6 +10,32 @@ use crate::errors::GoatHookerError;
 /// Also used for our own git commands (the `checkout` of the stash must not run the post-checkout).
 pub const SKIP_ENV: &str = "HOOKER_SKIP";
 
+/// What `HOOKER_SKIP` asks to skip
+#[derive(Debug, PartialEq, Eq)]
+pub enum Skip {
+    /// `1`, `true`, `all`: goat-hooker doesn't run
+    All,
+    /// `lint,test`: these hooks (names, `project:name` or `hook/step`); empty: none
+    Hooks(Vec<String>),
+}
+
+pub fn skip_setting() -> Skip {
+    parse_skip(&std::env::var(SKIP_ENV).unwrap_or_default())
+}
+
+fn parse_skip(value: &str) -> Skip {
+    match value.trim() {
+        "" | "0" | "false" | "no" => Skip::Hooks(vec![]),
+        "1" | "true" | "yes" | "all" => Skip::All,
+        list => Skip::Hooks(
+            list.split(',')
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty())
+                .collect(),
+        ),
+    }
+}
+
 /// Runs a git command in `dir` and returns its standard output
 fn git(dir: &Path, args: &[&str]) -> Result<String, GoatHookerError> {
     git_bytes(dir, args).map(|out| String::from_utf8_lossy(&out).to_string())
@@ -35,12 +61,21 @@ fn git_bytes(dir: &Path, args: &[&str]) -> Result<Vec<u8>, GoatHookerError> {
 
 /// Path of a file in the `.git` folder (handles worktrees)
 fn git_path(root: &Path, name: &str) -> Result<PathBuf, GoatHookerError> {
+    // Asked several times by a run (variables, cache, history...): one git command each
+    static KNOWN: std::sync::Mutex<Vec<((PathBuf, String), PathBuf)>> =
+        std::sync::Mutex::new(Vec::new());
+    let key = (root.to_path_buf(), name.to_string());
+    if let Some((_, path)) = KNOWN.lock().unwrap().iter().find(|(k, _)| *k == key) {
+        return Ok(path.clone());
+    }
     let path = PathBuf::from(git(root, &["rev-parse", "--git-path", name])?.trim());
-    Ok(if path.is_absolute() {
+    let path = if path.is_absolute() {
         path
     } else {
         root.join(path)
-    })
+    };
+    KNOWN.lock().unwrap().push((key, path.clone()));
+    Ok(path)
 }
 
 /// A path Git understands: without the `\\?\` prefix of canonical paths on Windows
@@ -95,7 +130,7 @@ impl UnstagedStash {
     /// Puts aside the unstaged changes of the tracked files (nothing to do if there are none)
     pub fn save(root: &Path) -> Result<Option<Self>, GoatHookerError> {
         // During a merge, the index has conflicts: nothing is touched
-        if git(root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).is_ok() {
+        if git_path(root, "MERGE_HEAD").is_ok_and(|p| p.exists()) {
             return Ok(None);
         }
 
@@ -263,6 +298,14 @@ pub fn repo_root(dir: &Path) -> Result<PathBuf, GoatHookerError> {
 
 /// Current branch (`None` on a detached HEAD)
 pub fn current_branch(dir: &Path) -> Option<String> {
+    // Read from `HEAD` (`ref: refs/heads/main`), without starting git
+    if let Ok(head) = git_path(dir, "HEAD").and_then(|p| Ok(std::fs::read_to_string(p)?)) {
+        return head
+            .trim()
+            .strip_prefix("ref: refs/heads/")
+            .map(String::from)
+            .filter(|b| !b.is_empty());
+    }
     let branch = git(dir, &["symbolic-ref", "--quiet", "--short", "HEAD"]).ok()?;
     Some(branch.trim().to_string()).filter(|b| !b.is_empty())
 }
@@ -294,6 +337,23 @@ pub fn staged_files(root: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
     )?;
 
     Ok(split_paths(root, &output))
+}
+
+/// Tracked files with unstaged changes, as absolute paths
+pub fn unstaged_files(root: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
+    let output = git(root, &["diff", "--name-only", "-z"])?;
+    Ok(split_paths(root, &output))
+}
+
+/// New files, not ignored by git, as absolute paths
+pub fn untracked_files(root: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
+    let output = git(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    Ok(split_paths(root, &output))
+}
+
+/// Path of a file in the `.git` folder, like `index` (handles worktrees)
+pub fn git_file(root: &Path, name: &str) -> Result<PathBuf, GoatHookerError> {
+    git_path(root, name)
 }
 
 /// Files changed by the pushed commits (added, copied, modified, renamed).
@@ -395,6 +455,16 @@ pub fn hooks_path_setting(root: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skip_setting_is_all_or_a_list() {
+        assert_eq!(parse_skip(""), Skip::Hooks(vec![]));
+        assert_eq!(parse_skip("1"), Skip::All);
+        assert_eq!(
+            parse_skip("lint, api:test"),
+            Skip::Hooks(vec!["lint".into(), "api:test".into()])
+        );
+    }
     use std::fs;
     use tempfile::tempdir;
 
@@ -497,7 +567,7 @@ mod tests {
             vec![root.join("api/new.rs")]
         );
 
-        // suppression de branche → rien
+        // deletion of a branch → nothing
         let refs = format!(
             "(delete) {} refs/heads/old {}\n",
             "0".repeat(40),
