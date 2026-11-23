@@ -257,11 +257,15 @@ impl Reporter {
             .iter()
             .enumerate()
             .map(|(index, n)| {
-                n.needs
+                let mut needs: Vec<String> = n
+                    .needs
                     .iter()
                     .map(|&need| label_from(graph, index, need))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                    .collect();
+                if let Some(project) = n.affected_by.as_ref() {
+                    needs.push(format!("{project} changed"));
+                }
+                needs.join(", ")
             })
             .collect();
         state.width = state
@@ -431,6 +435,13 @@ fn print_dry_run(trigger: Trigger, graph: &Graph, root: &Path) {
             .collect();
         if !needs.is_empty() {
             eprintln!("  {} waits for {}", "←".dimmed(), needs.join(", "));
+        }
+        if let Some(project) = node.affected_by.as_ref() {
+            eprintln!(
+                "  {} runs because {} changed (it depends on it)",
+                "←".dimmed(),
+                project.cyan()
+            );
         }
         for input in &node.inputs {
             eprintln!(

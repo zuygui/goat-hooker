@@ -27,10 +27,13 @@ pub struct MatchedHook<'a> {
     pub base_dir: PathBuf,
     /// Targeted files, relative to `base_dir` (empty when the trigger has no files)
     pub files: Vec<PathBuf>,
+    /// Runs because a project it depends on changed (`affected`), not for its own files
+    pub affected_by: Option<PathBuf>,
 }
 
 pub struct Matcher<'a> {
     hooks: Vec<CompiledHook<'a>>,
+    dependencies: crate::deps::Dependencies,
 }
 
 impl<'a> Matcher<'a> {
@@ -53,7 +56,10 @@ impl<'a> Matcher<'a> {
             }
         }
 
-        Ok(Self { hooks })
+        Ok(Self {
+            hooks,
+            dependencies: crate::deps::Dependencies::detect(configs),
+        })
     }
 
     /// Returns all the hooks matching the given file
@@ -78,6 +84,10 @@ impl<'a> Matcher<'a> {
     ) -> Vec<MatchedHook<'a>> {
         let files_abs: Option<Vec<PathBuf>> =
             files.map(|files| files.iter().map(|f| normalize_path(f)).collect());
+        let changed_projects = files_abs
+            .as_ref()
+            .map(|files| self.dependencies.changed_projects(files))
+            .unwrap_or_default();
 
         self.hooks
             .iter()
@@ -90,6 +100,19 @@ impl<'a> Matcher<'a> {
                             .filter_map(|f| compiled.matched_path(f))
                             .collect();
                         if matched.is_empty() {
+                            // A project it depends on changed
+                            if compiled.hook.affected == Some(true)
+                                && let Some(changed) = self
+                                    .dependencies
+                                    .affected_by(&compiled.base_dir, &changed_projects)
+                            {
+                                return Some(MatchedHook {
+                                    hook: compiled.hook,
+                                    base_dir: compiled.base_dir.clone(),
+                                    files: vec![],
+                                    affected_by: Some(changed),
+                                });
+                            }
                             return None;
                         }
                         matched
@@ -101,6 +124,7 @@ impl<'a> Matcher<'a> {
                     hook: compiled.hook,
                     base_dir: compiled.base_dir.clone(),
                     files: matched_files,
+                    affected_by: None,
                 })
             })
             .collect()

@@ -196,6 +196,11 @@ fn keys(path: &[Segment]) -> Vec<(&'static str, &'static str, &'static str)> {
             ("hooks", "Hooks of this project", "[]"),
             ("imports", "Sub-projects folders (globs supported)", "[]"),
             (
+                "depends_on",
+                "Projects this one depends on, besides its manifests",
+                "[]",
+            ),
+            (
                 "discover",
                 "Load every hooker.config.json of the repository",
                 "true",
@@ -247,6 +252,11 @@ fn keys(path: &[Segment]) -> Vec<(&'static str, &'static str, &'static str)> {
             (
                 "cache",
                 "Skip it when it passed with the same files",
+                "true",
+            ),
+            (
+                "affected",
+                "Also run it when a project this one depends on changes",
                 "true",
             ),
             ("path", "Hooks file to load", "\"\""),
@@ -313,7 +323,7 @@ fn values(path: &[Segment], known: &Known) -> Vec<(String, String)> {
         }
         "files" if parent == "permissions" => quoted(vec!["read".into(), "write".into()], "access"),
         "$schema" => quoted(vec![SCHEMA_URL.to_string()], "schema"),
-        "stage_fixed" | "parallel" | "discover" | "network" | "cache" => vec![
+        "stage_fixed" | "parallel" | "discover" | "network" | "cache" | "affected" => vec![
             ("true".to_string(), "boolean".to_string()),
             ("false".to_string(), "boolean".to_string()),
         ],

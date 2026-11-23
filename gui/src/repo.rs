@@ -202,6 +202,7 @@ impl Repo {
             hook,
             base_dir: project_dir,
             files,
+            affected_by: None,
         };
         goat_hooker::trust::check(&self.root, [hook])?;
         let shared = runner::Shared::load(&self.root, &configs)?;

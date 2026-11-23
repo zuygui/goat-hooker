@@ -63,6 +63,13 @@ pub struct Config {
     #[schemars(description = "Run hooks in parallel (root config only)")]
     pub parallel: Option<bool>,
 
+    /// Projects this one depends on, besides the ones found in its manifests
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Folders of the projects this one depends on (relative to it), besides the ones found in Cargo.toml, package.json, go.mod and pyproject.toml. Hooks with `affected` run when they change"
+    )]
+    pub depends_on: Option<Vec<String>>,
+
     /// Values shared between hooks, kept between runs
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -166,6 +173,12 @@ pub struct Hook {
         description = "Variables this hook writes with `echo \"name=value\" >> $HOOKER_VARS`"
     )]
     pub writes: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Also run the hook when a project this one depends on changes (Cargo path dependencies, workspace packages, go.mod replace, `depends_on`)"
+    )]
+    pub affected: Option<bool>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(

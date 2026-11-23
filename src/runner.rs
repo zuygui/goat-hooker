@@ -256,6 +256,7 @@ fn standalone_node<'a>(matched: &MatchedHook<'a>) -> Node<'a> {
         writes: matched.hook.writes.clone().unwrap_or_default(),
         after: vec![],
         denied: None,
+        affected_by: None,
     }
 }
 
@@ -1162,6 +1163,7 @@ mod tests {
                 hook: h,
                 base_dir: dir.path().to_path_buf(),
                 files: vec![],
+                affected_by: None,
             })
             .collect();
 
@@ -1188,6 +1190,7 @@ mod tests {
                 hook: h,
                 base_dir: dir.path().to_path_buf(),
                 files: vec![],
+                affected_by: None,
             })
             .collect();
 
@@ -1207,6 +1210,7 @@ mod tests {
             hook: &fmt,
             base_dir: dir.path().to_path_buf(),
             files: vec![PathBuf::from("a.rs"), PathBuf::from("deleted.rs")],
+            affected_by: None,
         };
 
         let result = run_hook(
@@ -1233,6 +1237,7 @@ mod tests {
                 hook: h,
                 base_dir: dir.path().to_path_buf(),
                 files: vec![],
+                affected_by: None,
             })
             .collect();
 
@@ -1484,6 +1489,7 @@ mod tests {
             hook: &hook,
             base_dir: dir.path().to_path_buf(),
             files: vec![PathBuf::from("a.txt")],
+            affected_by: None,
         };
         let result = run_hook(
             &matched,

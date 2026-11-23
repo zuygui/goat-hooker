@@ -308,6 +308,16 @@ Add `share` to the root `hooker.config.json` of a repository: `hooker search` (a
 
 A hooks file can have a `description`. GitHub's code search needs a token: `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth login`. `HOOKER_HUB_REPOS=owner/name,owner/other@branch` adds repositories the search can't find (private ones, branches).
 
+## Affected projects 🧬
+
+A hook with `"affected": true` also runs when a project its project depends on changes: change `core`, and the tests of `api` (which uses `core`) run too.
+
+```json
+{ "name": "test", "trigger": "pre-commit", "cmd": "cargo test", "include": ["**/*.rs"], "affected": true }
+```
+
+The dependencies are read from the manifests (Cargo `path` dependencies, packages of the repository in `package.json`, `replace` in `go.mod`, `path` dependencies in `pyproject.toml`), plus `depends_on` in a config (`"depends_on": ["../core"]`). `hooker run --dry-run` says why each hook runs.
+
 ## CI 🤖
 
 `hooker ci` runs the hooks of a trigger (`--trigger`, `pre-commit` by default) on the files changed since a base commit (`--base`, by default the base of the pull request or `origin/HEAD`). Nothing is staged: a formatter that changes a file fails, the file should have been fixed before the commit. Hooks of other repositories are trusted, since the CI runs the code of the repository anyway.
