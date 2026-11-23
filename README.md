@@ -131,6 +131,7 @@ Hooks show a spinner while running, then a summary. Only the output of the faile
   - double-click the background (or drop a wire on it) to create a hook, hover a node to delete it
   - variables are drawn from the hooks writing them to the hooks reading them
 - **History**: the last runs and the slowest hooks
+- **Doctor**: what could keep the hooks from running, with a button for the fixes the app can do
 - the **Source** of a hook: its JSON in the config file, the scripts it runs, the hooks file it loads; **Edit the JSON** opens an editor with colors and autocompletion (keys, triggers, hooks, variables, outputs) that checks the file while you type
 - the graph edits a node in a panel next to it, and its changes can be undone (⌘/Ctrl+Z)
 - **Variables**: value, writers and readers of each variable
@@ -308,6 +309,19 @@ Add `share` to the root `hooker.config.json` of a repository: `hooker search` (a
 ```
 
 A hooks file can have a `description`. GitHub's code search needs a token: `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth login`. `HOOKER_HUB_REPOS=owner/name,owner/other@branch` adds repositories the search can't find (private ones, branches).
+
+## Doctor 🩺
+
+`hooker doctor` checks the setup and says how to fix what it finds:
+
+- Git hooks not installed, overwritten by hand, or bypassed by `core.hooksPath`
+- tools the commands use that aren't installed
+- `include` patterns that match no file (the hook never runs)
+- variables nobody reads or writes, and denied accesses
+- hooks of other repositories that aren't trusted
+- from the history: slow pre-commit hooks (cache them or move them to pre-push) and hooks that fail most of the time
+
+It exits with an error when it finds one, so it can run in CI. The app shows the same checks on its **Doctor** page.
 
 ## Affected projects 🧬
 

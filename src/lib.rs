@@ -3,6 +3,7 @@
 pub mod cache;
 pub mod config;
 pub mod deps;
+pub mod doctor;
 pub mod errors;
 pub mod git;
 pub mod graph;

@@ -14,6 +14,7 @@ macro_rules! icons {
 const ICONS: &[(&str, &[u8])] = icons![
     "circle-dot",
     "clock",
+    "stethoscope",
     "book-open",
     "folder-git-2",
     "git-branch",

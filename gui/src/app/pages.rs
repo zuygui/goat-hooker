@@ -25,6 +25,8 @@ pub struct PagesState {
     pub variables: Vec<Usage>,
     pub variables_error: Option<String>,
     pub untrusted: Vec<Untrusted>,
+    /// Findings of the doctor
+    pub findings: Vec<goat_hooker::doctor::Finding>,
     /// Configs of other hooks managers found in a repository without hooker.config.json
     pub import: Option<Imported>,
     /// The source card of the hook detail is expanded
@@ -58,6 +60,7 @@ impl PagesState {
             variables: vec![],
             variables_error: None,
             untrusted: vec![],
+            findings: vec![],
             import: None,
             show_source: false,
             hub_query,
@@ -146,6 +149,7 @@ impl HookerApp {
         let Some(repo) = self.repo.as_ref() else {
             self.pages.variables.clear();
             self.pages.untrusted.clear();
+            self.pages.findings.clear();
             self.pages.import = None;
             return;
         };
@@ -160,6 +164,7 @@ impl HookerApp {
             }
         }
         self.pages.untrusted = repo.untrusted();
+        self.pages.findings = repo.diagnose();
         self.pages.import = if repo.projects.is_empty() {
             repo.import_preview()
         } else {
@@ -197,6 +202,7 @@ impl HookerApp {
     pub(super) fn tools_rows(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
         let review = self.pages.untrusted.len();
+        let problems = self.problems() > 0;
         v_flex()
             .gap_0p5()
             .child(self.nav_row(
@@ -215,6 +221,15 @@ impl HookerApp {
                 "History",
                 None,
                 Filter::History,
+                cx,
+            ))
+            .child(self.nav_row(
+                "doctor",
+                lucide("stethoscope"),
+                problems.then_some(theme.warning),
+                "Doctor",
+                problems.then_some(self.problems()),
+                Filter::Doctor,
                 cx,
             ))
             .child(self.nav_row(
@@ -248,6 +263,7 @@ impl HookerApp {
             Filter::Variables => self.render_variables(cx),
             Filter::Review => self.render_review(cx),
             Filter::History => self.render_history(cx),
+            Filter::Doctor => self.render_doctor(cx),
             _ => self.render_browse(window, cx),
         }
     }
@@ -1139,6 +1155,120 @@ fn card_div(cx: &App) -> Div {
 
 impl HookerApp {
     // MARK: history
+
+    /// Errors and warnings of the doctor (the hints aren't counted)
+    fn problems(&self) -> usize {
+        self.pages
+            .findings
+            .iter()
+            .filter(|f| f.level != goat_hooker::doctor::Level::Hint)
+            .count()
+    }
+
+    // MARK: doctor
+
+    fn render_doctor(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        use goat_hooker::doctor::Level;
+        let theme = cx.theme().clone();
+        let subtitle = "What could keep the hooks from running, or make them slow. Also in the terminal: `hooker doctor`.";
+        let check_again = Button::new("doctor-again")
+            .small()
+            .ghost()
+            .icon(lucide("redo"))
+            .label("Check again")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.reload();
+                cx.notify();
+            }));
+
+        if self.pages.findings.is_empty() {
+            return self.page(
+                "Doctor",
+                subtitle,
+                v_flex()
+                    .gap_3()
+                    .items_start()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_sm()
+                            .child(
+                                Icon::new(IconName::CircleCheck)
+                                    .small()
+                                    .text_color(theme.success),
+                            )
+                            .child("Everything looks good"),
+                    )
+                    .child(check_again),
+                cx,
+            );
+        }
+
+        let mut list = v_flex().gap_2();
+        for (i, finding) in self.pages.findings.iter().enumerate() {
+            let (icon, color) = match finding.level {
+                Level::Error => (Icon::new(IconName::CircleX), theme.danger),
+                Level::Warning => (Icon::new(IconName::TriangleAlert), theme.warning),
+                Level::Hint => (lucide("sparkles"), theme.info),
+            };
+            // Fixes the app can do itself
+            let action = match finding.fix.as_deref() {
+                Some(fix) if fix.starts_with("hooker install") => Some(
+                    Button::new(("doctor-fix", i))
+                        .small()
+                        .primary()
+                        .label("Install")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.install(cx);
+                            this.reload();
+                        }))
+                        .into_any_element(),
+                ),
+                Some("hooker trust") => Some(
+                    Button::new(("doctor-fix", i))
+                        .small()
+                        .label("Review")
+                        .on_click(cx.listener(|this, _, _, cx| this.set_filter(Filter::Review, cx)))
+                        .into_any_element(),
+                ),
+                _ => None,
+            };
+            list = list.child(
+                card_div(cx).border_l_2().border_color(color).child(
+                    h_flex()
+                        .gap_3()
+                        .items_start()
+                        .child(icon.small().text_color(color).mt_0p5())
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .gap_1()
+                                .child(div().text_sm().child(finding.title.replace('`', "")))
+                                .when_some(finding.detail.clone(), |this, detail| {
+                                    this.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child(detail.replace('`', "")),
+                                    )
+                                })
+                                .when(action.is_none(), |this| {
+                                    this.when_some(finding.fix.clone(), |this, fix| {
+                                        this.child(code_line(fix, cx))
+                                    })
+                                }),
+                        )
+                        .when_some(action, |this, action| this.child(action)),
+                ),
+            );
+        }
+        self.page(
+            "Doctor",
+            subtitle,
+            v_flex().gap_3().child(list).child(check_again),
+            cx,
+        )
+    }
 
     fn render_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
         use goat_hooker::history::{self, Status};

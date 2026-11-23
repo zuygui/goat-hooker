@@ -336,6 +336,13 @@ pub struct Untrusted {
 
 impl Repo {
     /// Variables with their writers, readers and value
+    /// What could go wrong (see `hooker doctor`)
+    pub fn diagnose(&self) -> Vec<goat_hooker::doctor::Finding> {
+        self.load_configs()
+            .map(|configs| goat_hooker::doctor::diagnose(&self.root, &configs))
+            .unwrap_or_default()
+    }
+
     pub fn variables(&self) -> Result<Vec<goat_hooker::variables::Usage>, GoatHookerError> {
         let configs = self.load_configs()?;
         goat_hooker::variables::usage(&self.root, &configs)

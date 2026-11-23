@@ -193,6 +193,10 @@ pub enum AppCommands {
         verbose: bool,
     },
 
+    /// Check the setup: Git hooks, missing tools, patterns matching nothing, variables, trust
+    #[command()]
+    Doctor,
+
     /// Show the last runs of the hooks and the slowest hooks
     #[command()]
     History {

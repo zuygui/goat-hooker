@@ -24,6 +24,7 @@ gpui_kit::actions!(
         GoBrowse,
         GoReview,
         GoHistory,
+        GoDoctor,
         OpenDocs,
         ReportIssue,
         OpenReleases,
@@ -105,6 +106,7 @@ fn menus() -> Vec<Menu> {
             MenuItem::action("Browse Shared Hooks", GoBrowse),
             MenuItem::action("Review Updates", GoReview),
             MenuItem::action("History", GoHistory),
+            MenuItem::action("Doctor", GoDoctor),
         ]),
         Menu::new("Help").items([
             MenuItem::action("Documentation", OpenDocs),

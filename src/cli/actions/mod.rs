@@ -1,5 +1,6 @@
 pub mod add;
 pub mod ci;
+pub mod doctor;
 pub mod generator;
 pub mod history;
 pub mod import;

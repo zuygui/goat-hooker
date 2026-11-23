@@ -48,13 +48,14 @@ enum Filter {
     Browse,
     Review,
     History,
+    Doctor,
 }
 
 impl Filter {
     fn is_page(self) -> bool {
         matches!(
             self,
-            Filter::Variables | Filter::Browse | Filter::Review | Filter::History
+            Filter::Variables | Filter::Browse | Filter::Review | Filter::History | Filter::Doctor
         )
     }
 }
@@ -292,6 +293,8 @@ impl HookerApp {
                 Filter::Review
             } else if action.is::<GoHistory>() {
                 Filter::History
+            } else if action.is::<GoDoctor>() {
+                Filter::Doctor
             } else {
                 return;
             };
@@ -425,7 +428,11 @@ impl HookerApp {
                     Filter::Project(i) => i == p,
                     Filter::Trigger(trigger) => hook.trigger == Some(trigger),
                     Filter::NextCommit => self.runs_next_commit(project, hook),
-                    Filter::Variables | Filter::Browse | Filter::Review | Filter::History => false,
+                    Filter::Variables
+                    | Filter::Browse
+                    | Filter::Review
+                    | Filter::History
+                    | Filter::Doctor => false,
                 };
                 let matches_search = query.is_empty()
                     || hook.name.to_lowercase().contains(&query)
@@ -1409,6 +1416,7 @@ impl HookerApp {
             Filter::Browse => "Browse hooks".to_string(),
             Filter::Review => "Review".to_string(),
             Filter::History => "History".to_string(),
+            Filter::Doctor => "Doctor".to_string(),
             Filter::Project(i) => self
                 .repo
                 .as_ref()
@@ -2425,6 +2433,7 @@ impl Render for HookerApp {
                     let this = on::<GoVariables>(this, cx);
                     let this = on::<GoBrowse>(this, cx);
                     let this = on::<GoReview>(this, cx);
+                    let this = on::<GoDoctor>(this, cx);
                     on::<GoHistory>(this, cx)
                 },
             )
