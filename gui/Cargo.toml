@@ -15,7 +15,7 @@ name = "goat-hooker-gui"
 path = "src/main.rs"
 
 [dependencies]
-goat-hooker = { path = "..", version = "0.4.0" }
+goat-hooker = { path = "..", version = "0.4.1" }
 gpui-kit = { version = "0.10", features = ["tree-sitter"] }
 lsp-types = { version = "0.97", features = ["proposed"] }
 anyhow = "1"
