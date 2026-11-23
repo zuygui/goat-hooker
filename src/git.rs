@@ -390,6 +390,8 @@ mod tests {
         git(dir, &["init", "-q"]).unwrap();
         git(dir, &["config", "user.name", "test"]).unwrap();
         git(dir, &["config", "user.email", "test@test"]).unwrap();
+        // The files are compared byte by byte (Windows converts the line endings by default)
+        git(dir, &["config", "core.autocrlf", "false"]).unwrap();
     }
 
     #[test]

@@ -1536,6 +1536,7 @@ mod tests {
                 .unwrap()
         };
         git(&["init", "-q"]);
+        git(&["config", "core.autocrlf", "false"]);
         std::fs::write(
             root.join("hooker.config.json"),
             r#"{ "hooks": [

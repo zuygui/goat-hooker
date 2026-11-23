@@ -854,9 +854,18 @@ fn resolve_import(base_dir: &Path, inc: &str) -> Result<Vec<PathBuf>, GoatHooker
     }
 
     // Le dossier de base est échappé pour qu'un `[` dans son chemin ne casse pas le glob
+    // Without the `\\?\` prefix of canonical paths on Windows, glob doesn't support it
+    let base = base_dir.to_string_lossy();
+    let base = match base.strip_prefix(r"\\?\") {
+        Some(rest) => match rest.strip_prefix(r"UNC\") {
+            Some(unc) => format!(r"\\{unc}"),
+            None => rest.to_string(),
+        },
+        None => base.to_string(),
+    };
     let pattern = format!(
         "{}/{}/{}",
-        glob::Pattern::escape(&base_dir.to_string_lossy()),
+        glob::Pattern::escape(&base),
         inc.trim_start_matches("./").trim_end_matches('/'),
         HOOK_CONFIG_FILENAME
     );
@@ -1183,7 +1192,8 @@ mod tests {
         git(&["add", "."]);
         git(&["commit", "-q", "-m", "init"]);
 
-        let url = format!("file://{}", shared.display());
+        // A local path works as a URL (with `/`, it is valid in JSON on Windows too)
+        let url = shared.display().to_string().replace('\\', "/");
         let project = dir.path().join("project");
         fs::create_dir_all(&project).unwrap();
         let root_path = project.join(HOOK_CONFIG_FILENAME);
