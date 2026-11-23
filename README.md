@@ -6,7 +6,8 @@
 </p>
 
 <p align="center">
-  <a href="docs/README.md">Documentation</a> ·
+  <a href="https://zuygui.github.io/goat-hooker/">Website</a> ·
+  <a href="https://zuygui.github.io/goat-hooker/docs/">Documentation</a> ·
   <a href="docs/installation.md">Install</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="https://github.com/zuygui/goat-hooker/releases/latest">Latest release</a>
@@ -75,13 +76,13 @@ lefthook and pre-commit are great tools, and pre-commit still does something Goa
 ## Speed
 
 <p align="center">
-  <img src=".github/assets/speed-light.svg#gh-light-mode-only" alt="Time of a git commit. One hook doing nothing: Goat Hooker 30 ms, lefthook 28 ms, pre-commit 146 ms, husky + lint-staged 395 ms. Five hooks of 200 ms: Goat Hooker 238 ms, lefthook 241 ms, pre-commit 1173 ms, husky + lint-staged 541 ms. The same commit again: Goat Hooker 24 ms, lefthook 233 ms, pre-commit 1176 ms, husky + lint-staged 567 ms" />
-  <img src=".github/assets/speed-dark.svg#gh-dark-mode-only" alt="Time of a git commit. One hook doing nothing: Goat Hooker 30 ms, lefthook 28 ms, pre-commit 146 ms, husky + lint-staged 395 ms. Five hooks of 200 ms: Goat Hooker 238 ms, lefthook 241 ms, pre-commit 1173 ms, husky + lint-staged 541 ms. The same commit again: Goat Hooker 24 ms, lefthook 233 ms, pre-commit 1176 ms, husky + lint-staged 567 ms" />
+  <img src=".github/assets/speed-light.svg#gh-light-mode-only" alt="Time of a git commit. One hook doing nothing: Goat Hooker 36 ms, lefthook 33 ms, pre-commit 181 ms, husky + lint-staged 441 ms. Five hooks of 200 ms: Goat Hooker 244 ms, lefthook 247 ms, pre-commit 1206 ms, husky + lint-staged 646 ms. The same commit again: Goat Hooker 24 ms, lefthook 248 ms, pre-commit 1206 ms, husky + lint-staged 636 ms" />
+  <img src=".github/assets/speed-dark.svg#gh-dark-mode-only" alt="Time of a git commit. One hook doing nothing: Goat Hooker 36 ms, lefthook 33 ms, pre-commit 181 ms, husky + lint-staged 441 ms. Five hooks of 200 ms: Goat Hooker 244 ms, lefthook 247 ms, pre-commit 1206 ms, husky + lint-staged 646 ms. The same commit again: Goat Hooker 24 ms, lefthook 248 ms, pre-commit 1206 ms, husky + lint-staged 636 ms" />
 </p>
 
-- **The tool itself:** Goat Hooker adds about as much to a commit as lefthook, a fifth of what pre-commit adds, and a sixteenth of what husky + lint-staged adds through `npx`.
+- **The tool itself:** Goat Hooker adds about as much to a commit as lefthook, a sixth of what pre-commit adds, and a fifteenth of what husky + lint-staged adds through `npx`.
 - **Five hooks:** they run in parallel, like with lefthook, where pre-commit runs them one after the other.
-- **The same commit again**, after a rejected commit message for example: the hooks come from the cache, so the commit takes 24 ms instead of 233 ms or more.
+- **The same commit again**, after a rejected commit message for example: the hooks come from the cache, so the commit takes 24 ms instead of 248 ms or more.
 
 These are small numbers on a 2-core VM. Method and caveats are in [`benchmarks/`](benchmarks/README.md), and you can reproduce them with `python3 benchmarks/run.py`.
 

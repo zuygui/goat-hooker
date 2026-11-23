@@ -1,5 +1,6 @@
 # Goat Hooker documentation
 
+- [Quickstart](quickstart.md): from nothing to hooks on your next commit
 - [Installation](installation.md): the CLI, the desktop app, from the sources
 - [The `hooker` CLI](cli.md): every command, skipping hooks, `hooker watch`, `hooker doctor`, CI, cache
 - [Configuration](configuration.md): `hooker.config.json`, branches, timeout, local changes

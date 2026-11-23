@@ -1,0 +1,68 @@
+/* Theme of the documentation: the colors of the banner, a warm black and one accent */
+
+:root,
+:root[data-theme="dark"] {
+  --sl-color-accent-low: #3a1520;
+  --sl-color-accent: #f3678b;
+  --sl-color-accent-high: #ffd3de;
+
+  --sl-color-bg: #0f0d0e;
+  --sl-color-bg-nav: rgba(15, 13, 14, 0.82);
+  --sl-color-bg-sidebar: #0f0d0e;
+  --sl-color-bg-inline-code: rgba(255, 255, 255, 0.07);
+
+  --sl-color-hairline-light: rgba(255, 255, 255, 0.07);
+  --sl-color-hairline: rgba(255, 255, 255, 0.08);
+  --sl-color-border: rgba(255, 255, 255, 0.08);
+
+  --sl-color-white: #f7f2f3;
+  --sl-color-gray-1: #ece4e6;
+  --sl-color-gray-2: #c7bdbf;
+  --sl-color-gray-3: #988d90;
+  --sl-color-gray-4: #5f5658;
+  --sl-color-gray-5: #2a2526;
+  --sl-color-gray-6: #1a1718;
+
+  --sl-font: "Inter", system-ui, -apple-system, sans-serif;
+  --sl-font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #ffe1e8;
+  --sl-color-accent: #d6456b;
+  --sl-color-accent-high: #5c1427;
+
+  --sl-color-bg: #ffffff;
+  --sl-color-bg-nav: rgba(255, 255, 255, 0.85);
+  --sl-color-bg-sidebar: #ffffff;
+  --sl-color-bg-inline-code: rgba(15, 13, 14, 0.05);
+
+  --sl-color-white: #141112;
+  --sl-color-gray-1: #2a2526;
+  --sl-color-gray-2: #4a4244;
+  --sl-color-gray-3: #786e70;
+  --sl-color-gray-4: #b3aaac;
+  --sl-color-gray-5: #ebe5e6;
+  --sl-color-gray-6: #f7f3f4;
+}
+
+:root h1,
+:root h2,
+:root h3 {
+  letter-spacing: -0.02em;
+  font-weight: 800;
+}
+
+header.header {
+  backdrop-filter: blur(14px) saturate(140%);
+}
+
+.site-title img {
+  height: 2rem;
+  width: auto;
+}
+
+/* Code: a teal edge, like the wave of the banner */
+.expressive-code .frame {
+  --ec-brdCol: rgba(101, 221, 219, 0.18);
+}

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.astro/
+# Copied from the repository by scripts/sync-docs.mjs
+src/content/docs/docs/
+src/data/benchmarks.json
+public/goat.png
+public/favicon-32.png
+public/apple-touch-icon.png
+public/app-dark.png
+public/graph-dark.png

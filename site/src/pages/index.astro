@@ -1,0 +1,1320 @@
+---
+// Landing page. It doesn't use the layout of Starlight, to control the whole page; it shares
+// its theme key ("starlight-theme") so that the docs open in the same theme.
+
+import { readFileSync } from "node:fs";
+import bench from "../data/benchmarks.json";
+import {
+  compareTools,
+  compareCommon,
+  compareOnly,
+  tools,
+  features,
+  highlightJson,
+  YES,
+  PART,
+} from "../data/content";
+
+const base = "/goat-hooker/";
+const repository = "https://github.com/zuygui/goat-hooker";
+// The build runs from site/: the repository is its parent
+const root = new URL("../", `file://${process.cwd()}/`);
+
+// Version and release notes, read from the repository at build time
+const cargo = readFileSync(new URL("Cargo.toml", root), "utf8");
+const version = cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? "";
+const changelog = readFileSync(new URL("CHANGELOG.md", root), "utf8");
+const release = changelog.match(/^## \[(\d+\.\d+\.\d+)\][^\n]*?(\d{4}-\d{2}-\d{2})\n([\s\S]*?)(?=^## \[)/m);
+const releaseVersion = release?.[1] ?? version;
+const releaseDate = release
+  ? new Date(release[2]).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+  : "";
+const releaseNotes = (release?.[3] ?? "")
+  .split(/^### /m)
+  .filter((section) => /^(Added|Fixed|Changed)/.test(section))
+  .flatMap((section) => section.split("\n").filter((line) => line.startsWith("- ")))
+  .map((line) => {
+    const text = line.slice(2);
+    const app = text.startsWith("*(gui)* ");
+    return { app, text: app ? text.slice(8) : text };
+  })
+  .slice(0, 8);
+
+// Benchmark charts, from benchmarks/results.json
+const order = ["goat-hooker", "lefthook", "pre-commit", "husky + lint-staged"];
+const names: Record<string, string> = { "goat-hooker": "Goat Hooker" };
+const versionOf = (tool: string) => {
+  const v = bench.versions as Record<string, string>;
+  const raw = tool === "husky + lint-staged" ? v.husky : v[tool];
+  return raw?.match(/\d+\.\d+(\.\d+)?/)?.[0] ?? "";
+};
+const charts = [
+  {
+    id: "noop",
+    title: "One hook that does nothing",
+    caption: `The cost of the tool itself, on top of git commit (${(bench.scenarios as any).noop.none} ms alone).`,
+  },
+  { id: "five", title: "Five hooks of 200 ms", caption: "How the hooks are scheduled. pre-commit runs them one after the other." },
+  {
+    id: "retry",
+    title: "The same commit again",
+    caption: "After a rejected commit message: same staged files, hooks already passed.",
+  },
+].map((chart) => {
+  const values = (bench.scenarios as Record<string, Record<string, number>>)[chart.id];
+  const rows = order.filter((tool) => tool in values).map((tool) => ({ tool, ms: values[tool] }));
+  const top = Math.max(...rows.map((r) => r.ms));
+  return {
+    ...chart,
+    rows: rows.map((r) => ({
+      ...r,
+      name: names[r.tool] ?? r.tool,
+      version: versionOf(r.tool),
+      width: Math.max(1.5, (r.ms / top) * 100),
+      ours: r.tool === "goat-hooker",
+    })),
+  };
+});
+const retry = (bench.scenarios as any).retry;
+const retryFactor = Math.round(retry.lefthook / retry["goat-hooker"]);
+
+const install = [
+  { id: "curl", label: "macOS & Linux", command: "curl -fsSL https://raw.githubusercontent.com/zuygui/goat-hooker/main/install.sh | sh" },
+  { id: "brew", label: "Homebrew", command: "brew install zuygui/tap/goat-hooker" },
+  { id: "cargo", label: "Cargo", command: "cargo binstall goat-hooker" },
+];
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Goat Hooker · Git hooks that only run what changed</title>
+    <meta
+      name="description"
+      content="Goat Hooker is a fast Git hooks manager for mono-repos: it runs only what changed, caches the results, runs hooks in parallel and comes with a desktop app."
+    />
+    <meta property="og:title" content="Goat Hooker · Git hooks that only run what changed" />
+    <meta property="og:description" content="A fast Git hooks manager for mono-repos, with a cache and a desktop app." />
+    <link rel="icon" type="image/png" href={`${base}favicon-32.png`} />
+    <link rel="apple-touch-icon" href={`${base}apple-touch-icon.png`} />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="announce">
+      <a href={`${repository}/releases/tag/v${releaseVersion}`}>
+        <span class="pill">New</span> Goat Hooker v{releaseVersion}: watch, doctor, affected projects and a command palette <span aria-hidden="true">→</span>
+      </a>
+    </div>
+
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a href={base} class="brand">
+          <img src={`${base}goat.png`} alt="" width="34" height="34" />
+          <span>Goat Hooker</span>
+        </a>
+        <nav class="nav-links">
+          <a href={`${base}docs/`}>Docs</a>
+          <a href={`${base}docs/quickstart/`}>Quickstart</a>
+          <a href={`${base}docs/configuration/`}>Config</a>
+          <a href={`${base}docs/cli/`}>CLI</a>
+          <a href="#benchmarks">Benchmarks</a>
+        </nav>
+        <div class="nav-actions">
+          <a class="gh" href={repository} target="_blank" rel="noopener" aria-label="GitHub">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.2 11.39.6.1.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.74.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.49 1 .11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.62-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.69.83.57A12 12 0 0 0 24 12c0-6.63-5.37-12-12-12Z"/></svg>
+          </a>
+          <a class="btn btn-small" href="#install">Install</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <!-- Hero -->
+      <section class="hero">
+        <div class="wrap hero-inner">
+          <img class="hero-goat" src={`${base}goat.png`} alt="The goat of Goat Hooker" width="150" height="150" />
+          <h1>
+            Goat Hooker is a fast Git hooks manager.
+            <span class="accent">Built for mono-repos.</span>
+          </h1>
+          <p class="lede">
+            It runs only the hooks your changes need, takes the rest from its cache, runs them in
+            parallel, and comes with a desktop app. One native binary, nothing else to install.
+          </p>
+          <div class="cta">
+            <a class="btn" href="#install">Install Goat Hooker v{version}</a>
+            <a class="btn btn-ghost" href={`${base}docs/quickstart/`}>Quickstart</a>
+            <a class="btn btn-ghost" href={`${base}docs/`}>Read the docs</a>
+          </div>
+
+          <div class="install" id="install">
+            <div class="tabs" role="tablist">
+              {install.map((item, i) => (
+                <button class:list={["tab", { active: i === 0 }]} data-group="install" data-tab={item.id} role="tab">{item.label}</button>
+              ))}
+              <a class="tab tab-link" href={`${repository}/releases/latest`} target="_blank" rel="noopener">Desktop app ↗</a>
+            </div>
+            {install.map((item, i) => (
+              <div class:list={["install-line", { active: i === 0 }]} data-group="install" data-panel={item.id}>
+                <code><span class="prompt">$</span> {item.command}</code>
+                <button class="copy" data-copy={item.command} aria-label="Copy">Copy</button>
+              </div>
+            ))}
+            <a class="install-script" href={`${repository}/blob/main/install.sh`} target="_blank" rel="noopener">View install script ↗</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Benchmarks -->
+      <section class="section" id="benchmarks">
+        <div class="wrap">
+          <p class="eyebrow">Benchmarks</p>
+          <h2>Fast where it counts: the moment you commit.</h2>
+          <p class="section-lede">
+            Time of a <code>git commit</code>, median of {bench.runs} runs, lower is better. Goat Hooker
+            costs as little as lefthook, runs hooks in parallel, and a commit retried with the same
+            files is {retryFactor}× faster because the hooks come from the cache.
+          </p>
+          <div class="charts">
+            {charts.map((chart) => (
+              <figure class="chart">
+                <figcaption>
+                  <h3>{chart.title}</h3>
+                  <p>{chart.caption}</p>
+                </figcaption>
+                <div class="bars">
+                  {chart.rows.map((row) => (
+                    <div class:list={["bar-row", { ours: row.ours }]}>
+                      <span class="bar-name">{row.name} <span class="bar-version">{row.version}</span></span>
+                      <span class="bar-track">
+                        <span class="bar" style={`--w: ${row.width}%`}></span>
+                        <span class="bar-value">{row.ms} ms</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </figure>
+            ))}
+          </div>
+          <p class="footnote">
+            {bench.versions.git}, a 2-core Linux VM, with each tool installed as its docs show.
+            <a href={`${repository}/blob/main/benchmarks/README.md`}>Methodology and how to reproduce →</a>
+          </p>
+        </div>
+      </section>
+
+      <!-- Tools -->
+      <section class="section section-alt" id="tools">
+        <div class="wrap">
+          <p class="eyebrow">One binary</p>
+          <h2>Everything your hooks need, in <code>hooker</code>.</h2>
+          <nav class="jump">
+            {tools.map((tool) => <a href={`#${tool.id}`}>{tool.command}</a>)}
+          </nav>
+          <div class="tools">
+            {tools.map((tool) => (
+              <article class="tool" id={tool.id}>
+                <div class="tool-text">
+                  <code class="tool-command">{tool.command}</code>
+                  <h3>{tool.title}</h3>
+                  <p class="replaces">replaces <strong>{tool.replaces}</strong></p>
+                  <p>{tool.text}</p>
+                  <a class="more" href={tool.doc}>Docs →</a>
+                </div>
+                <pre class="term"><code>{tool.term.map(([mark, line]) => (
+                  <span class="term-line"><span class:list={["mark", {
+                    ok: mark.startsWith("✔"),
+                    ko: mark.startsWith("✘"),
+                    warn: mark.startsWith("!"),
+                    prompt: mark.startsWith("$"),
+                    hint: mark.startsWith("→"),
+                  }]}>{mark}</span>{line}{"\n"}</span>
+                ))}</code></pre>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <!-- Built in -->
+      <section class="section" id="features">
+        <div class="wrap">
+          <p class="eyebrow">Built in</p>
+          <h2>What other hooks managers leave to you.</h2>
+          <div class="tabs tabs-features" role="tablist">
+            {features.map((feature, i) => (
+              <button class:list={["tab", { active: i === 0 }]} data-group="feature" data-tab={feature.id} role="tab">{feature.label}</button>
+            ))}
+          </div>
+          {features.map((feature, i) => (
+            <div class:list={["feature", { active: i === 0 }]} data-group="feature" data-panel={feature.id}>
+              <div class="feature-text">
+                <h3>{feature.title}</h3>
+                <p>{feature.text}</p>
+              </div>
+              <div class="code-card">
+                <div class="code-file">{feature.file}</div>
+                <pre><code set:html={highlightJson(feature.code)} /></pre>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <!-- Compare -->
+      <section class="section section-alt" id="compare">
+        <div class="wrap">
+          <p class="eyebrow">Compare</p>
+          <h2>Goat Hooker, lefthook, pre-commit and husky.</h2>
+          <div class="table-wrap">
+            <table class="compare">
+              <thead>
+                <tr>
+                  <th></th>
+                  {compareTools.map((tool, i) => <th class:list={{ ours: i === 0 }}>{tool}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="group"><td colspan="5">Everyday hooks</td></tr>
+                {compareCommon.map(([label, marks]) => (
+                  <tr>
+                    <td>{label}</td>
+                    {marks.map((mark, i) => (
+                      <td class:list={["mark-cell", { ours: i === 0 }]}>
+                        <span class:list={["m", mark === YES ? "m-yes" : mark === PART ? "m-part" : "m-no"]} title={mark === YES ? "Built in" : mark === PART ? "Partly, or with another tool" : "No"}></span>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                <tr class="group"><td colspan="5">Only in Goat Hooker</td></tr>
+                {compareOnly.map((label) => (
+                  <tr>
+                    <td>{label}</td>
+                    {compareTools.map((_, i) => (
+                      <td class:list={["mark-cell", { ours: i === 0 }]}>
+                        <span class:list={["m", i === 0 ? "m-yes" : "m-no"]}></span>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p class="footnote">
+            <span class="m m-yes"></span> built in &nbsp; <span class="m m-part"></span> partly, or with another tool &nbsp; <span class="m m-no"></span> no.
+            Spotted a mistake? <a href={`${repository}/issues/new`}>Open an issue →</a>
+          </p>
+        </div>
+      </section>
+
+      <!-- App -->
+      <section class="section" id="app">
+        <div class="wrap">
+          <p class="eyebrow">Desktop app</p>
+          <h2>Prefer clicking? There's an app.</h2>
+          <p class="section-lede">
+            See what the next commit will run, run a hook and read its output live, edit hooks
+            without touching the JSON, and wire them together like nodes in Blender.
+            ⌘K reaches everything.
+          </p>
+          <div class="shots">
+            <img src={`${base}app-dark.png`} alt="The hooks of a mono-repo, with the files each one will check and its last run" />
+            <img src={`${base}graph-dark.png`} alt="The pre-commit hooks as a graph of nodes" />
+          </div>
+          <a class="more" href={`${repository}/releases/latest`}>Download for macOS, Windows and Linux →</a>
+        </div>
+      </section>
+
+      <!-- Release notes -->
+      <section class="section section-alt" id="release">
+        <div class="wrap release">
+          <div>
+            <p class="eyebrow">Release notes</p>
+            <h2>v{releaseVersion}</h2>
+            <p class="release-date">{releaseDate}</p>
+            <pre class="term term-small"><code><span class="mark prompt">$ </span>cargo binstall goat-hooker</code></pre>
+          </div>
+          <div>
+            <ul class="notes">
+              {releaseNotes.map((note) => (
+                <li>{note.app && <span class="note-tag">app</span>}{note.text}</li>
+              ))}
+            </ul>
+            <a class="more" href={`${repository}/blob/main/CHANGELOG.md`}>Full changelog →</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Closing -->
+      <section class="closing">
+        <div class="wrap">
+          <img src={`${base}goat.png`} alt="" width="96" height="96" />
+          <h2>Try it on the repository you have open right now.</h2>
+          <div class="install-line active closing-line">
+            <code><span class="prompt">$</span> {install[0].command}</code>
+            <button class="copy" data-copy={install[0].command} aria-label="Copy">Copy</button>
+          </div>
+          <p class="closing-sub">Then <code>hooker init</code> and <code>hooker install</code>. Already on husky, lefthook or pre-commit? <code>hooker import</code>.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <div class="footer-brand">
+          <a href={base} class="brand">
+            <img src={`${base}goat.png`} alt="" width="30" height="30" />
+            <span>Goat Hooker</span>
+          </a>
+          <p>Git hooks that only run what changed.</p>
+        </div>
+        <div class="footer-cols">
+          <div>
+            <h4>Product</h4>
+            <a href={`${base}docs/quickstart/`}>Quickstart</a>
+            <a href={`${base}docs/`}>Documentation</a>
+            <a href={`${repository}/releases/latest`}>Download the app</a>
+            <a href={`${repository}/blob/main/CHANGELOG.md`}>Changelog</a>
+          </div>
+          <div>
+            <h4>Toolkit</h4>
+            <a href={`${base}docs/cli/`}>hooker CLI</a>
+            <a href={`${base}docs/configuration/`}>Configuration</a>
+            <a href={`${base}docs/monorepos/`}>Mono-repos</a>
+            <a href={`${base}docs/shared-hooks/`}>Shared hooks</a>
+          </div>
+          <div>
+            <h4>Project</h4>
+            <a href={repository}>GitHub</a>
+            <a href={`${repository}/issues`}>Issues</a>
+            <a href={`${repository}/blob/main/benchmarks/README.md`}>Benchmarks</a>
+            <a href={`${repository}/blob/main/CONTRIBUTING.md`}>Contributing</a>
+          </div>
+        </div>
+      </div>
+      <p class="wrap legal">Made with 🐐 · MIT licensed</p>
+    </footer>
+
+    <script is:inline>
+      // Tabs: buttons and panels sharing data-group, matched by data-tab / data-panel
+      document.querySelectorAll("button.tab[data-group]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const group = button.dataset.group;
+          document.querySelectorAll(`[data-group="${group}"]`).forEach((el) => {
+            const id = el.dataset.tab ?? el.dataset.panel;
+            el.classList.toggle("active", id === button.dataset.tab);
+          });
+        });
+      });
+      document.querySelectorAll("button.copy").forEach((button) => {
+        button.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(button.dataset.copy);
+            button.textContent = "Copied";
+            setTimeout(() => (button.textContent = "Copy"), 1500);
+          } catch {}
+        });
+      });
+      // The docs open in the dark theme of this page
+      try {
+        if (!localStorage.getItem("starlight-theme")) localStorage.setItem("starlight-theme", "dark");
+      } catch {}
+    </script>
+  </body>
+</html>
+
+<style is:global>
+  :root {
+    --bg: #0f0d0e;
+    --bg-alt: #151213;
+    --card: #1a1718;
+    --card-2: #211d1e;
+    --line: rgba(255, 255, 255, 0.08);
+    --line-strong: rgba(255, 255, 255, 0.14);
+    --text: #f7f2f3;
+    --muted: #a39a9c;
+    --dim: #6f6567;
+    --pink: #f3678b;
+    --pink-soft: rgba(243, 103, 139, 0.14);
+    --teal: #65dddb;
+    --gray-bar: #3b3537;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    color-scheme: dark;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 "Inter", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.92em;
+  }
+
+  p code,
+  h2 code {
+    background: rgba(255, 255, 255, 0.06);
+    padding: 0.1em 0.35em;
+    border-radius: 6px;
+  }
+
+  .wrap {
+    width: min(1120px, 100% - 48px);
+    margin-inline: auto;
+  }
+
+  /* Announcement and navigation */
+  .announce {
+    text-align: center;
+    font-size: 14px;
+    padding: 9px 16px;
+    background: linear-gradient(90deg, rgba(243, 103, 139, 0.16), rgba(101, 221, 219, 0.12));
+    border-bottom: 1px solid var(--line);
+  }
+
+  .announce a:hover {
+    text-decoration: underline;
+  }
+
+  .pill {
+    display: inline-block;
+    background: var(--pink);
+    color: #1a0b10;
+    font-weight: 700;
+    font-size: 12px;
+    padding: 1px 8px;
+    border-radius: 99px;
+    margin-right: 6px;
+  }
+
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(15, 13, 14, 0.8);
+    backdrop-filter: blur(14px) saturate(150%);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+    height: 64px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 800;
+    font-size: 18px;
+    letter-spacing: -0.02em;
+  }
+
+  .nav-links {
+    display: flex;
+    gap: 24px;
+    font-size: 15px;
+    color: var(--muted);
+  }
+
+  .nav-links a:hover,
+  .gh:hover {
+    color: var(--text);
+  }
+
+  .nav-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .gh {
+    color: var(--muted);
+    display: flex;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--pink);
+    color: #1a0b10;
+    font-weight: 700;
+    padding: 12px 22px;
+    border-radius: 12px;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  .btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(243, 103, 139, 0.3);
+  }
+
+  .btn-small {
+    padding: 7px 14px;
+    font-size: 14px;
+    border-radius: 10px;
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--line-strong);
+  }
+
+  .btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.04);
+    box-shadow: none;
+  }
+
+  /* Hero */
+  .hero {
+    position: relative;
+    padding: 72px 0 88px;
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: "";
+    position: absolute;
+    inset: -40% -10% auto;
+    height: 640px;
+    background: radial-gradient(closest-side, rgba(243, 103, 139, 0.18), transparent 70%),
+      radial-gradient(closest-side at 70% 60%, rgba(101, 221, 219, 0.1), transparent 70%);
+    pointer-events: none;
+  }
+
+  .hero-inner {
+    position: relative;
+    text-align: center;
+  }
+
+  .hero-goat {
+    animation: hop 3.2s ease-in-out infinite;
+    filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.45));
+  }
+
+  @keyframes hop {
+    0%, 100% { transform: translateY(0) rotate(-2deg); }
+    50% { transform: translateY(-10px) rotate(2deg); }
+  }
+
+  h1 {
+    font-size: clamp(38px, 6vw, 68px);
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+    font-weight: 900;
+    margin: 18px auto 20px;
+    max-width: 16ch;
+  }
+
+  .accent {
+    display: block;
+    color: var(--pink);
+  }
+
+  .lede {
+    font-size: 19px;
+    color: var(--muted);
+    max-width: 640px;
+    margin: 0 auto 32px;
+  }
+
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  /* Install box */
+  .install {
+    max-width: 760px;
+    margin: 44px auto 0;
+    text-align: left;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 6px 6px 12px;
+  }
+
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .tab {
+    font: 500 14px "Inter", sans-serif;
+    color: var(--muted);
+    background: none;
+    border: 0;
+    padding: 7px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  .tab:hover {
+    color: var(--text);
+  }
+
+  .tab.active {
+    background: var(--card-2);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+  }
+
+  .tab-link {
+    margin-left: auto;
+  }
+
+  .install-line {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 6px 6px 0;
+    padding: 14px 14px 14px 18px;
+  }
+
+  .install-line.active {
+    display: flex;
+  }
+
+  .install-line code {
+    flex: 1;
+    overflow-x: auto;
+    white-space: nowrap;
+    font-size: 14.5px;
+  }
+
+  .prompt {
+    color: var(--pink);
+    margin-right: 6px;
+    user-select: none;
+  }
+
+  .copy {
+    font: 600 13px "Inter", sans-serif;
+    color: var(--text);
+    background: var(--card-2);
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+
+  .copy:hover {
+    border-color: var(--pink);
+  }
+
+  .install-script {
+    display: inline-block;
+    margin: 10px 0 0 12px;
+    font-size: 13px;
+    color: var(--dim);
+  }
+
+  .install-script:hover {
+    color: var(--muted);
+  }
+
+  /* Sections */
+  .section {
+    padding: 96px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .section-alt {
+    background: var(--bg-alt);
+  }
+
+  .eyebrow {
+    color: var(--pink);
+    font-weight: 700;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin: 0 0 10px;
+  }
+
+  h2 {
+    font-size: clamp(28px, 4vw, 44px);
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    font-weight: 800;
+    margin: 0 0 16px;
+  }
+
+  h3 {
+    margin: 0;
+    font-size: 20px;
+    letter-spacing: -0.01em;
+  }
+
+  .section-lede {
+    color: var(--muted);
+    font-size: 18px;
+    max-width: 760px;
+    margin: 0 0 40px;
+  }
+
+  .more {
+    display: inline-block;
+    color: var(--pink);
+    font-weight: 600;
+    margin-top: 16px;
+  }
+
+  .more:hover {
+    text-decoration: underline;
+  }
+
+  .footnote {
+    color: var(--dim);
+    font-size: 14px;
+    margin-top: 24px;
+  }
+
+  .footnote a {
+    color: var(--muted);
+  }
+
+  .footnote a:hover {
+    color: var(--text);
+  }
+
+  /* Benchmarks */
+  .charts {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .chart {
+    margin: 0;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 22px;
+  }
+
+  .chart h3 {
+    font-size: 17px;
+  }
+
+  .chart figcaption p {
+    color: var(--dim);
+    font-size: 13.5px;
+    margin: 4px 0 18px;
+    min-height: 3em;
+  }
+
+  .bars {
+    display: grid;
+    gap: 12px;
+  }
+
+  .bar-row {
+    display: grid;
+    gap: 5px;
+    font-size: 13.5px;
+  }
+
+  .bar-name {
+    color: var(--muted);
+  }
+
+  .bar-version {
+    color: var(--dim);
+    font-family: var(--mono);
+    font-size: 11.5px;
+  }
+
+  .ours .bar-name {
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  .bar-track {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .bar {
+    height: 12px;
+    width: var(--w);
+    border-radius: 6px;
+    background: var(--gray-bar);
+  }
+
+  .ours .bar {
+    background: var(--pink);
+    box-shadow: 0 0 18px rgba(243, 103, 139, 0.45);
+  }
+
+  .bar-value {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .ours .bar-value {
+    color: var(--pink);
+    font-weight: 700;
+  }
+
+  /* Tools */
+  .jump {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 32px;
+  }
+
+  .jump a {
+    font-family: var(--mono);
+    font-size: 13.5px;
+    color: var(--muted);
+    border: 1px solid var(--line-strong);
+    padding: 5px 12px;
+    border-radius: 99px;
+  }
+
+  .jump a:hover {
+    color: var(--text);
+    border-color: var(--pink);
+  }
+
+  .tools {
+    display: grid;
+    gap: 16px;
+  }
+
+  .tool {
+    display: grid;
+    grid-template-columns: 1fr 1.15fr;
+    gap: 32px;
+    align-items: center;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 28px;
+    scroll-margin-top: 90px;
+  }
+
+  .tool-command {
+    display: inline-block;
+    color: var(--pink);
+    background: var(--pink-soft);
+    padding: 3px 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 12px;
+  }
+
+  .tool p {
+    color: var(--muted);
+    margin: 8px 0 0;
+  }
+
+  .tool .replaces {
+    font-size: 14px;
+    color: var(--dim);
+    margin-top: 6px;
+  }
+
+  .tool .replaces strong {
+    color: var(--teal);
+    font-weight: 600;
+  }
+
+  .term {
+    margin: 0;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    font-size: 13.5px;
+    line-height: 1.75;
+  }
+
+  .term-line {
+    white-space: pre;
+  }
+
+  .mark.ok {
+    color: #4fd39b;
+  }
+
+  .mark.ko {
+    color: var(--pink);
+  }
+
+  .mark.warn {
+    color: #f5c45e;
+  }
+
+  .mark.prompt {
+    color: var(--pink);
+  }
+
+  .mark.hint {
+    color: var(--teal);
+  }
+
+  .term-small {
+    display: inline-block;
+    margin-top: 20px;
+  }
+
+  /* Features */
+  .tabs-features {
+    margin: 8px 0 24px;
+    padding: 0;
+  }
+
+  .tabs-features .tab {
+    border: 1px solid var(--line-strong);
+    border-radius: 99px;
+    padding: 7px 16px;
+  }
+
+  .tabs-features .tab.active {
+    background: var(--pink);
+    color: #1a0b10;
+    box-shadow: none;
+    border-color: var(--pink);
+    font-weight: 700;
+  }
+
+  .feature {
+    display: none;
+    grid-template-columns: 0.85fr 1.15fr;
+    gap: 40px;
+    align-items: center;
+  }
+
+  .feature.active {
+    display: grid;
+  }
+
+  .feature-text h3 {
+    font-size: 26px;
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+  }
+
+  .feature-text p {
+    color: var(--muted);
+    font-size: 17px;
+  }
+
+  .code-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .code-file {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--dim);
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .code-card pre {
+    margin: 0;
+    padding: 18px;
+    overflow-x: auto;
+    font-size: 13.5px;
+    line-height: 1.7;
+  }
+
+  .t-key {
+    color: var(--pink);
+  }
+
+  .t-str {
+    color: var(--teal);
+  }
+
+  .t-lit,
+  .t-num {
+    color: #f5c45e;
+  }
+
+  /* Compare */
+  .table-wrap {
+    overflow-x: auto;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+  }
+
+  .compare {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 15px;
+  }
+
+  .compare th,
+  .compare td {
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .compare th {
+    text-align: center;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .compare th.ours {
+    color: var(--pink);
+  }
+
+  .compare td:first-child {
+    color: var(--text);
+  }
+
+  .compare .ours {
+    background: var(--pink-soft);
+  }
+
+  .compare .group td {
+    color: var(--pink);
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding-top: 22px;
+  }
+
+  .mark-cell {
+    text-align: center;
+  }
+
+  .m {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    vertical-align: middle;
+  }
+
+  .m-yes {
+    background: var(--teal)
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='M5 9.2l2.6 2.6L13 6.4' fill='none' stroke='%230f0d0e' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+      center / 100% no-repeat;
+  }
+
+  .ours .m-yes {
+    background-color: var(--pink);
+  }
+
+  .m-part {
+    border: 2px solid var(--teal);
+    background: linear-gradient(90deg, transparent 50%, var(--teal) 50%);
+  }
+
+  .m-no {
+    width: 12px;
+    height: 2.5px;
+    border-radius: 2px;
+    background: var(--dim);
+  }
+
+  /* App */
+  .shots {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .shots img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 14px;
+  }
+
+  /* Release */
+  .release {
+    display: grid;
+    grid-template-columns: 0.8fr 1.2fr;
+    gap: 48px;
+  }
+
+  .release h2 {
+    font-family: var(--mono);
+    font-size: 48px;
+  }
+
+  .release-date {
+    color: var(--dim);
+    margin: 0;
+  }
+
+  .notes {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 10px;
+  }
+
+  .notes li {
+    position: relative;
+    padding-left: 24px;
+    color: var(--muted);
+  }
+
+  .note-tag {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--teal);
+    border: 1px solid rgba(101, 221, 219, 0.4);
+    border-radius: 6px;
+    padding: 0 6px;
+    margin-right: 8px;
+  }
+
+  .notes li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.65em;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--pink);
+  }
+
+  /* Closing */
+  .closing {
+    text-align: center;
+    padding: 110px 0;
+    border-top: 1px solid var(--line);
+    background: radial-gradient(closest-side at 50% 100%, rgba(101, 221, 219, 0.14), transparent),
+      var(--bg);
+  }
+
+  .closing h2 {
+    max-width: 18ch;
+    margin: 16px auto 28px;
+  }
+
+  .closing-line {
+    max-width: 760px;
+    margin: 0 auto;
+  }
+
+  .closing-sub {
+    color: var(--muted);
+    margin-top: 20px;
+  }
+
+  /* Footer */
+  .footer {
+    border-top: 1px solid var(--line);
+    padding: 56px 0 28px;
+  }
+
+  .footer-inner {
+    display: flex;
+    justify-content: space-between;
+    gap: 40px;
+    flex-wrap: wrap;
+  }
+
+  .footer-brand p {
+    color: var(--dim);
+    margin: 10px 0 0;
+  }
+
+  .footer-cols {
+    display: flex;
+    gap: 64px;
+    flex-wrap: wrap;
+  }
+
+  .footer-cols h4 {
+    margin: 0 0 12px;
+    font-size: 14px;
+  }
+
+  .footer-cols a {
+    display: block;
+    color: var(--muted);
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+
+  .footer-cols a:hover {
+    color: var(--text);
+  }
+
+  .legal {
+    color: var(--dim);
+    font-size: 13px;
+    margin-top: 40px;
+  }
+
+  /* Small screens */
+  @media (max-width: 900px) {
+    .nav-links {
+      display: none;
+    }
+    .charts,
+    .shots,
+    .release {
+      grid-template-columns: 1fr;
+    }
+    .tool,
+    .feature.active {
+      grid-template-columns: 1fr;
+    }
+    .tab-link {
+      margin-left: 0;
+    }
+  }
+</style>
