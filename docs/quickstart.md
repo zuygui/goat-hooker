@@ -18,7 +18,7 @@ In your repository:
 hooker init
 ```
 
-It offers the hooks of the catalogue, with the ones matching your project already picked (Rust, JavaScript, Python, common checks, conventional commits). `hooker init -t auto` picks them without asking. Already using husky, lefthook or pre-commit? `hooker import` converts their config instead.
+It offers the hooks of the catalogue, with the ones matching your project already picked (Rust, JavaScript, Python, common checks, conventional commits). `hooker init -t auto` picks them without asking. Already using husky, lefthook or pre-commit? Skip `hooker init`: Goat Hooker reads their config as it is (see [Coming from another tool](shared-hooks.md#coming-from-husky-lefthook-or-pre-commit)).
 
 You get a `hooker.toml`:
 

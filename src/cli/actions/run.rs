@@ -24,7 +24,9 @@ use crate::cli::ui::{self, KO, OK, PENDING};
 pub fn resolve_config(root: &Path, config_path: Option<PathBuf>) -> Option<PathBuf> {
     match config_path {
         Some(path) => Some(path),
-        None => Some(goat_hooker::config::config_path(root)).filter(|p| p.exists()),
+        None => {
+            goat_hooker::config::has_config(root).then(|| goat_hooker::config::config_path(root))
+        }
     }
 }
 

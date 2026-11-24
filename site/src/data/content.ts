@@ -26,7 +26,7 @@ export const compareOnly = [
   "Review of shared hooks before they run",
   "Runs hooks while you stage (hooker watch)",
   "Desktop app",
-  "Imports husky, lefthook and pre-commit configs",
+  "Runs lefthook, pre-commit and husky configs as they are",
 ];
 
 /** The commands, each with what it replaces and a terminal */
@@ -79,19 +79,19 @@ export const tools = [
   },
   {
     id: "import",
-    command: "hooker import",
-    title: "Switch in one command",
-    replaces: "your husky, lefthook or pre-commit config",
-    text: "Converts the config of husky and lint-staged, lefthook or pre-commit into a hooker.toml, then hooker install plugs it into Git.",
+    command: "hooker install --force",
+    title: "Keep your config, switch the tool",
+    replaces: "migrating from husky, lefthook or pre-commit",
+    text: "Goat Hooker runs your lefthook.yml, .pre-commit-config.yaml or husky + lint-staged as they are. Nothing to rewrite, and hooker import converts them to a hooker.toml when you want more.",
     term: [
-      ["$ ", "hooker import"],
-      ["  ", "pre-commit lint `eslint {files}`"],
-      ["  ", "pre-commit fmt `prettier --write {files}`"],
-      ["✔ ", "Written. Check the hooks with hooker list"],
-      ["$ ", "hooker install"],
+      ["$ ", "hooker install --force"],
       ["✔ ", "Git hooks installed in .git/hooks"],
+      ["$ ", "git commit -m \"feat: faster\""],
+      ["🐐 ", "pre-commit · 2 hooks"],
+      ["✔ ", "eslint  root  41ms"],
+      ["✔ ", "prettier  root  38ms"],
     ],
-    doc: "/goat-hooker/docs/shared-hooks/#import-from-husky-lefthook-and-pre-commit",
+    doc: "/goat-hooker/docs/shared-hooks/#coming-from-husky-lefthook-or-pre-commit",
   },
   {
     id: "doctor",

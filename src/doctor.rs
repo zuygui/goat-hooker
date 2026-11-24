@@ -81,6 +81,7 @@ pub fn diagnose(root: &Path, configs: &[Config]) -> Vec<Finding> {
     findings.extend(untrusted(root, configs));
     findings.extend(from_history(root, configs));
     findings.extend(committed_local(root));
+    findings.extend(foreign(root, configs));
     findings.sort_by_key(|f| f.level);
     findings
 }
@@ -98,6 +99,34 @@ fn label(root: &Path, config: &Config, hook: &Hook) -> String {
         .map(|dir| project_name(root, dir))
         .unwrap_or_else(|| "root".into());
     format!("`{}` ({project})", hook.name)
+}
+
+/// The config of another tool, read as it is: what couldn't be read exactly
+fn foreign(root: &Path, configs: &[Config]) -> Vec<Finding> {
+    let Some(file) = configs
+        .first()
+        .filter(|c| c.is_foreign())
+        .and_then(|c| c.file.as_ref())
+    else {
+        return vec![];
+    };
+    let shown = file
+        .strip_prefix(root)
+        .unwrap_or(file)
+        .display()
+        .to_string();
+    let notes = crate::import::detect(root)
+        .map(|i| i.notes)
+        .unwrap_or_default();
+    let mut findings = vec![
+        Finding::new(Level::Hint, format!("the hooks come from {shown}, read as it is"))
+            .detail("nothing to migrate; `hooker import` writes a hooker.toml to use Goat Hooker's own features")
+            .fix("hooker import"),
+    ];
+    findings.extend(notes.into_iter().map(|note| {
+        Finding::new(Level::Warning, note).detail(format!("{shown} is read as it is"))
+    }));
+    findings
 }
 
 /// Git hooks missing, overwritten, or bypassed by `core.hooksPath`

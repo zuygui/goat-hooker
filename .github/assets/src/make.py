@@ -96,7 +96,7 @@ ONLY = [
     "Review of shared hooks before they run",
     "Runs hooks while you stage (hooker watch)",
     "Desktop app",
-    "Imports husky, lefthook and pre-commit configs",
+    "Runs lefthook, pre-commit and husky configs as they are",
 ]
 
 

@@ -33,6 +33,11 @@ pub fn config_path(dir: &Path) -> PathBuf {
 }
 
 /// Is this file name the one of a config?
+/// `dir` has a config: a hooker one, or one of lefthook, pre-commit or husky (read as is)
+pub fn has_config(dir: &Path) -> bool {
+    find_config(dir).is_some() || !crate::import::foreign_files(dir).is_empty()
+}
+
 pub fn is_config_name(name: &str) -> bool {
     CONFIG_FILENAMES.contains(&name)
 }
@@ -152,6 +157,16 @@ pub struct Config {
     pub file: Option<PathBuf>,
 }
 
+impl Config {
+    /// Read from the config of another hooks manager (lefthook, pre-commit, husky), as it is
+    pub fn is_foreign(&self) -> bool {
+        self.file
+            .as_ref()
+            .and_then(|f| f.file_name())
+            .is_some_and(|n| !is_config_name(&n.to_string_lossy()))
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct Hook {
     #[schemars(description = "Hook name")]
@@ -171,6 +186,24 @@ pub struct Hook {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Glob patterns of files to ignore")]
     pub exclude: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Regex the path of a file (relative to the config folder, with /) must contain, like `files` in pre-commit. Combined with `include`"
+    )]
+    pub include_regex: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Regex of the paths of the files to ignore, like `exclude` in pre-commit"
+    )]
+    pub exclude_regex: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Runs even when none of the files it targets changed (`always_run` in pre-commit)"
+    )]
+    pub always_run: Option<bool>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -641,6 +674,16 @@ impl Hook {
         if self.from.is_some() && self.path.is_none() {
             return Err(invalid("`from` requires `path`"));
         }
+        for (key, regex) in [
+            ("include_regex", &self.include_regex),
+            ("exclude_regex", &self.exclude_regex),
+        ] {
+            if let Some(regex) = regex
+                && let Err(err) = regex_lite::Regex::new(regex)
+            {
+                return Err(invalid(&format!("invalid `{key}`: {err}")));
+            }
+        }
         if self.rev.is_some() && self.from.is_none() {
             return Err(invalid("`rev` requires `from`"));
         }
@@ -1013,6 +1056,16 @@ impl ConfigLoader {
 
     pub fn load_recursive(&mut self, path: &Path) -> Result<Vec<Config>, GoatHookerError> {
         if !path.exists() {
+            // No hooker config: the one of lefthook, pre-commit or husky is read as it is
+            let default_name = path
+                .file_name()
+                .is_some_and(|n| is_config_name(&n.to_string_lossy()));
+            if default_name
+                && let Some(dir) = path.parent()
+                && let Some(configs) = self.load_foreign(dir)?
+            {
+                return Ok(configs);
+            }
             return Err(GoatHookerError::ConfigNotFound(path.to_path_buf()));
         }
         let abs_path = fs::canonicalize(path)?;
@@ -1050,6 +1103,42 @@ impl ConfigLoader {
         }
 
         Ok(all_cfg)
+    }
+
+    /// The configs of another hooks manager in `dir`, converted in memory (nothing is written).
+    /// `None` when there is none.
+    fn load_foreign(&mut self, dir: &Path) -> Result<Option<Vec<Config>>, GoatHookerError> {
+        let Ok(root) = fs::canonicalize(dir) else {
+            return Ok(None);
+        };
+        if crate::import::foreign_files(&root).is_empty() {
+            return Ok(None);
+        }
+        let imported = crate::import::detect(&root)?;
+        let Some(source) = imported.sources.first().map(|s| root.join(s)) else {
+            return Ok(None);
+        };
+        if !self.visited.insert(source.clone()) {
+            return Ok(Some(vec![]));
+        }
+        let mut configs = Vec::new();
+        // The root first (the keys are folders relative to the root)
+        for (folder, mut config) in imported.configs {
+            let base_dir = root.join(&folder);
+            config.imports = None;
+            config.schema = None;
+            config.base_dir = Some(base_dir.clone());
+            config.file = Some(source.clone());
+            for hook in config.hooks.iter().flatten() {
+                hook.validate()?;
+            }
+            if let Some(hooks) = config.hooks.take() {
+                config.hooks = Some(self.expand_hooks(hooks, &base_dir, 0, None)?);
+            }
+            apply_local(&mut config, &local_path(&base_dir))?;
+            configs.push(config);
+        }
+        Ok(Some(configs))
     }
 
     /// Loads the hooks of the `path` files (local or from a `from` repository).
@@ -1765,5 +1854,51 @@ cmd = "cargo fmt -- {files}"
         set_locally_disabled(dir.path(), "a", true).unwrap();
         assert!(dir.path().join(LOCAL_CONFIG_FILENAME).is_file());
         assert!(locally_disabled(dir.path()).contains(&"a".to_string()));
+    }
+
+    #[test]
+    fn foreign_configs_are_read_as_they_are() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("lefthook.yml"),
+            "pre-commit:\n  commands:\n    lint:\n      glob: \"*.js\"\n      run: eslint {staged_files}\n",
+        )
+        .unwrap();
+        assert!(has_config(dir.path()));
+        let configs = ConfigLoader::new()
+            .load_recursive(&config_path(dir.path()))
+            .unwrap();
+        assert_eq!(configs.len(), 1);
+        assert!(configs[0].is_foreign());
+        assert_eq!(
+            configs[0].base_dir.as_deref(),
+            Some(fs::canonicalize(dir.path()).unwrap().as_path())
+        );
+        let hook = &configs[0].hooks.as_ref().unwrap()[0];
+        assert_eq!(hook.cmd.as_deref(), Some("eslint {files}"));
+        // Nothing was written
+        assert!(!dir.path().join(HOOK_CONFIG_FILENAME).exists());
+
+        // A hooker config wins
+        fs::write(
+            dir.path().join(HOOK_CONFIG_FILENAME),
+            "[[hooks]]\nname = \"mine\"\ntrigger = \"pre-commit\"\ncmd = \"true\"\n",
+        )
+        .unwrap();
+        let configs = ConfigLoader::new()
+            .load_recursive(&config_path(dir.path()))
+            .unwrap();
+        assert!(!configs[0].is_foreign());
+        assert_eq!(configs[0].hooks.as_ref().unwrap()[0].name, "mine");
+    }
+
+    #[test]
+    fn no_config_at_all() {
+        let dir = tempdir().unwrap();
+        assert!(!has_config(dir.path()));
+        assert!(matches!(
+            ConfigLoader::new().load_recursive(&config_path(dir.path())),
+            Err(GoatHookerError::ConfigNotFound(_))
+        ));
     }
 }

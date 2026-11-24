@@ -221,6 +221,27 @@
             "type": "string"
           }
         },
+        "include_regex": {
+          "description": "Regex the path of a file (relative to the config folder, with /) must contain, like `files` in pre-commit. Combined with `include`",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exclude_regex": {
+          "description": "Regex of the paths of the files to ignore, like `exclude` in pre-commit",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "always_run": {
+          "description": "Runs even when none of the files it targets changed (`always_run` in pre-commit)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "cmd": {
           "description": "Shell command, run from the config folder. {files} is replaced by the targeted files",
           "type": [

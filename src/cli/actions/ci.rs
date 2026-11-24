@@ -86,7 +86,7 @@ pub fn run_ci(
 ) -> Result<(), GoatHookerError> {
     let root = ui::current_repo()?;
     let config_path = goat_hooker::config::config_path(&root);
-    if !config_path.exists() {
+    if !goat_hooker::config::has_config(&root) {
         return Err(GoatHookerError::ConfigNotFound(config_path));
     }
     // The CI runs the code of the repository anyway: hooks of other repositories are trusted
