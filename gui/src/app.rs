@@ -797,7 +797,7 @@ impl HookerApp {
         .detach();
     }
 
-    /// Turns a hook off (or on) on this computer: `hooker.local.json`, used by Git too
+    /// Turns a hook off (or on) on this computer: `hooker.local.toml`, used by Git too
     fn toggle_local(&mut self, hook_ref: HookRef, disabled: bool, cx: &mut Context<Self>) {
         let Some(name) = self.hook(hook_ref).map(|(_, h)| h.name.clone()) else {
             return;
@@ -1815,7 +1815,7 @@ impl HookerApp {
                                 .tooltip(if off_here {
                                     "Turn it on again on this computer"
                                 } else {
-                                    "Turn it off on this computer only (hooker.local.json)"
+                                    "Turn it off on this computer only (hooker.local.toml)"
                                 })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.toggle_local(hook_ref, !off_here, cx)
@@ -2214,9 +2214,7 @@ impl HookerApp {
 
         let mut recent = v_flex().gap_0p5();
         for (i, path) in self.recents.iter().enumerate() {
-            let configured = path
-                .join(goat_hooker::config::HOOK_CONFIG_FILENAME)
-                .exists();
+            let configured = goat_hooker::config::find_config(path).is_some();
             recent = recent.child(self.repo_row(("recent", i), path, configured, true, cx));
         }
         if self.recents.is_empty() {
@@ -2549,7 +2547,7 @@ impl Render for HookerApp {
             None => self.render_welcome(cx),
             Some(repo) if repo.projects.is_empty() => {
                 let create = Button::new("init")
-                    .label("Create hooker.config.json")
+                    .label("Create hooker.toml")
                     .on_click(cx.listener(|this, _, _, cx| this.init_config(cx)));
                 let action = match self.import_action(cx) {
                     Some(import) => v_flex()

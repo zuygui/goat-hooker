@@ -2,7 +2,7 @@
 
 ```sh
 hooker             # status: Git hooks, projects, hooks of the next commit
-hooker init        # create hooker.config.json (pick hooks to start with)
+hooker init        # create hooker.toml (pick hooks to start with)
 hooker init -t auto   # with the hooks found for the project (rust, javascript, python...)
 hooker fix         # run the hooks fixing files on the changed files, without staging
 hooker add         # add a hook (an assistant asks what's missing)
@@ -22,7 +22,7 @@ hooker outdated    # hooks of other repositories with a newer version
 hooker pin         # pin them to the commit in use
 hooker vars        # variables shared between hooks: value, writers, readers
 hooker import      # convert a husky / lint-staged, lefthook or pre-commit config
-hooker schema      # print the JSON schema of the configuration
+hooker schema      # print the JSON schema of the configuration (TOML editors use it too)
 hooker completion zsh > ~/.zfunc/_hooker   # shell completion
 ```
 

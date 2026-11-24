@@ -82,7 +82,7 @@ export const tools = [
     command: "hooker import",
     title: "Switch in one command",
     replaces: "your husky, lefthook or pre-commit config",
-    text: "Converts the config of husky and lint-staged, lefthook or pre-commit into a hooker.config.json, then hooker install plugs it into Git.",
+    text: "Converts the config of husky and lint-staged, lefthook or pre-commit into a hooker.toml, then hooker install plugs it into Git.",
     term: [
       ["$ ", "hooker import"],
       ["  ", "pre-commit lint `eslint {files}`"],
@@ -131,146 +131,132 @@ export const features = [
     id: "monorepo",
     label: "Mono-repos",
     title: "A config per project",
-    text: "Each project of the mono-repo has its own hooker.config.json and its hooks run from its folder, on its files. Dependencies are read from Cargo, package.json, go.mod and pyproject: change core, and the tests of api run too.",
-    file: "packages/api/hooker.config.json",
-    code: `{
-  "depends_on": ["../core"],
-  "hooks": [
-    {
-      "name": "lint",
-      "trigger": "pre-commit",
-      "include": ["src/**/*.ts"],
-      "cmd": "eslint {files}"
-    },
-    {
-      "name": "test",
-      "trigger": "pre-push",
-      "include": ["src/**"],
-      "cmd": "npm test",
-      "affected": true
-    }
-  ]
-}`,
+    text: "Each project of the mono-repo has its own hooker.toml and its hooks run from its folder, on its files. Dependencies are read from Cargo, package.json, go.mod and pyproject: change core, and the tests of api run too.",
+    file: "packages/api/hooker.toml",
+    code: `depends_on = ["../core"]
+
+[[hooks]]
+name = "lint"
+trigger = "pre-commit"
+include = ["src/**/*.ts"]
+cmd = "eslint {files}"
+
+[[hooks]]
+name = "test"
+trigger = "pre-push"
+include = ["src/**"]
+cmd = "npm test"
+affected = true`,
   },
   {
     id: "cache",
     label: "Cache",
     title: "Hooks that already passed don't run again",
     text: "A hook whose files, command and inputs didn't change since it passed is taken from the cache. A commit retried after a rejected message takes milliseconds.",
-    file: "hooker.config.json",
-    code: `{
-  "hooks": [
-    {
-      "name": "clippy",
-      "trigger": "pre-commit",
-      "include": ["**/*.rs"],
-      "cmd": "cargo clippy -- -D warnings",
-      "cache": true
-    }
-  ]
-}`,
+    file: "hooker.toml",
+    code: `[[hooks]]
+name = "clippy"
+trigger = "pre-commit"
+include = ["**/*.rs"]
+cmd = "cargo clippy -- -D warnings"
+cache = true`,
   },
   {
     id: "graph",
     label: "Graph",
     title: "Hooks that work together",
     text: "Hooks wait for each other and pass values: codegen writes its schema, types receives it. Steps of one hook run as separate nodes, in parallel when they can.",
-    file: "hooker.config.json",
-    code: `{
-  "hooks": [
-    {
-      "name": "codegen",
-      "trigger": "pre-commit",
-      "outputs": ["schema"],
-      "cmd": "npm run codegen && echo schema=gen/schema.ts >> $HOOKER_OUTPUT"
-    },
-    {
-      "name": "lint",
-      "trigger": "pre-commit",
-      "steps": [
-        { "id": "eslint", "cmd": "eslint {files}" },
-        {
-          "id": "types",
-          "needs": ["eslint"],
-          "inputs": { "schema": "codegen.schema" },
-          "cmd": "tsc --noEmit {schema}"
-        }
-      ]
-    }
-  ]
-}`,
+    file: "hooker.toml",
+    code: `[[hooks]]
+name = "codegen"
+trigger = "pre-commit"
+outputs = ["schema"]
+cmd = "npm run codegen && echo schema=gen/schema.ts >> $HOOKER_OUTPUT"
+
+[[hooks]]
+name = "lint"
+trigger = "pre-commit"
+
+[[hooks.steps]]
+id = "eslint"
+cmd = "eslint {files}"
+
+[[hooks.steps]]
+id = "types"
+needs = ["eslint"]
+inputs = { schema = "codegen.schema" }
+cmd = "tsc --noEmit {schema}"`,
   },
   {
     id: "shared",
     label: "Shared hooks",
     title: "Hooks from other repositories",
     text: "Load a hooks file from a Git repository, at a tag or a commit, with parameters. hooker search finds the shared ones on GitHub, and the catalogue covers Rust, JavaScript and Python.",
-    file: "hooker.config.json",
-    code: `{
-  "hooks": [
-    {
-      "name": "rust",
-      "from": "https://github.com/zuygui/goat-hooker",
-      "path": "hooks/rust.json",
-      "with": { "clippy_args": "--all-targets" }
-    },
-    {
-      "name": "team rules",
-      "from": "https://github.com/acme/hooks",
-      "rev": "v1",
-      "path": "rust.json"
-    }
-  ]
-}`,
+    file: "hooker.toml",
+    code: `[[hooks]]
+name = "rust"
+from = "https://github.com/zuygui/goat-hooker"
+path = "hooks/rust.json"
+with = { clippy_args = "--all-targets" }
+
+[[hooks]]
+name = "team rules"
+from = "https://github.com/acme/hooks"
+rev = "v1"
+path = "rust.json"`,
   },
   {
     id: "permissions",
     label: "Permissions",
     title: "Safe with other people's hooks",
     text: "Shared hooks run once you reviewed them, and again only after you review what changed. They read files without changing them, have no network and a filtered environment, unless they're allowed more.",
-    file: "hooker.config.json",
-    code: `{
-  "hooks": [
-    {
-      "name": "license check",
-      "trigger": "pre-commit",
-      "cmd": "./check-licenses",
-      "permissions": {
-        "files": "read",
-        "network": false,
-        "env": ["LICENSE_KEY"]
-      }
-    }
-  ]
-}`,
+    file: "hooker.toml",
+    code: `[[hooks]]
+name = "license check"
+trigger = "pre-commit"
+cmd = "./check-licenses"
+permissions = { files = "read", network = false, env = ["LICENSE_KEY"] }`,
   },
   {
     id: "local",
     label: "Local changes",
     title: "Your computer, your rules",
-    text: "hooker.local.json changes the config on your computer only: turn a slow hook off, give one a timeout, add your own, without touching what the team shares.",
-    file: "hooker.local.json",
-    code: `{
-  "hooks": [
-    { "name": "e2e", "disabled": true },
-    { "name": "clippy", "timeout": "2m" },
-    { "name": "notes", "trigger": "post-commit", "cmd": "./my-notes.sh" }
-  ]
-}`,
+    text: "hooker.local.toml changes the config on your computer only: turn a slow hook off, give one a timeout, add your own, without touching what the team shares.",
+    file: "hooker.local.toml",
+    code: `[[hooks]]
+name = "e2e"
+disabled = true
+
+[[hooks]]
+name = "clippy"
+timeout = "2m"
+
+[[hooks]]
+name = "notes"
+trigger = "post-commit"
+cmd = "./my-notes.sh"`,
   },
 ];
 
-/** Colors JSON for the code blocks of the page (no runtime highlighter) */
-export function highlightJson(code: string): string {
+/** Colors TOML for the code blocks of the page (no runtime highlighter) */
+export function highlightToml(code: string): string {
   const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return escape(code).replace(
-    /("(?:[^"\\]|\\.)*")(\s*:)?|\b(true|false|null)\b|\b(\d+)\b/g,
-    (match, string, colon, literal, number) => {
-      if (string && colon) return `<span class="t-key">${string}</span>${colon}`;
-      if (string) return `<span class="t-str">${string}</span>`;
-      if (literal) return `<span class="t-lit">${literal}</span>`;
-      if (number) return `<span class="t-num">${number}</span>`;
-      return match;
-    },
-  );
+  return code
+    .split("\n")
+    .map((line) => {
+      if (/^\s*#/.test(line)) return `<span class="t-com">${escape(line)}</span>`;
+      if (/^\s*\[/.test(line) && !line.includes("=")) return `<span class="t-key">${escape(line)}</span>`;
+      return escape(line).replace(
+        /("(?:[^"\\]|\\.)*"|'[^']*')|^(\s*)([\w.-]+)(\s*=)|([{,]\s*)([\w-]+)(\s*=)|\b(true|false)\b|\b(\d+)\b/g,
+        (match, string, indent, key, eq, before, inlineKey, inlineEq, literal, number) => {
+          if (string) return `<span class="t-str">${string}</span>`;
+          if (key) return `${indent}<span class="t-key">${key}</span>${eq}`;
+          if (inlineKey) return `${before}<span class="t-key">${inlineKey}</span>${inlineEq}`;
+          if (literal) return `<span class="t-lit">${literal}</span>`;
+          if (number) return `<span class="t-num">${number}</span>`;
+          return match;
+        },
+      );
+    })
+    .join("\n");
 }

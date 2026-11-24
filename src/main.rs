@@ -29,7 +29,11 @@ fn main() {
 fn hint(err: &GoatHookerError) -> Option<String> {
     let cmd = |c: &str| format!("`{c}`").bold().to_string();
     match err {
-        GoatHookerError::ConfigNotFound(path) if path.ends_with("hooker.config.json") => {
+        GoatHookerError::ConfigNotFound(path)
+            if path
+                .file_name()
+                .is_some_and(|n| goat_hooker::config::is_config_name(&n.to_string_lossy())) =>
+        {
             Some(format!("create one with {}", cmd("hooker init")))
         }
         GoatHookerError::ConfigNotFound(_) => {
@@ -40,6 +44,10 @@ fn hint(err: &GoatHookerError) -> Option<String> {
             cmd(
                 "\"$schema\": \"https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json\""
             )
+        )),
+        GoatHookerError::TomlError { .. } => Some(format!(
+            "add {} at the top of the file to get autocompletion and errors in your editor",
+            cmd("#:schema https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json")
         )),
         GoatHookerError::InvalidHook { reason, .. } if !reason.contains("hooker add") => {
             Some(format!("see every field with {}", cmd("hooker schema")))

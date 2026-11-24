@@ -4,7 +4,7 @@ use colored::Colorize;
 use inquire::{Confirm, Select, Text};
 
 use goat_hooker::{
-    config::{ConfigLoader, HOOK_CONFIG_FILENAME},
+    config::ConfigLoader,
     errors::GoatHookerError,
     hub::{self, SharedFile, SharedRepo},
 };
@@ -116,8 +116,8 @@ pub fn search_hooks(query: &str, project: Option<PathBuf>) -> Result<(), GoatHoo
 
     let root = ui::current_repo()?;
     let config_file = match project {
-        Some(dir) => dir.canonicalize()?.join(HOOK_CONFIG_FILENAME),
-        None => root.join(HOOK_CONFIG_FILENAME),
+        Some(dir) => goat_hooker::config::config_path(&dir.canonicalize()?),
+        None => goat_hooker::config::config_path(&root),
     };
     if !config_file.exists() {
         return Err(GoatHookerError::ConfigNotFound(config_file));
@@ -138,7 +138,7 @@ pub fn search_hooks(query: &str, project: Option<PathBuf>) -> Result<(), GoatHoo
 
     hub::add(&root, &config_file, &name, repo, file, with)?;
     // Checks the whole config still loads
-    ConfigLoader::new().load_recursive(&root.join(HOOK_CONFIG_FILENAME))?;
+    ConfigLoader::new().load_recursive(&goat_hooker::config::config_path(&root))?;
     println!(
         "{} Added {} ({} hooks from {})",
         ui::OK.green(),

@@ -30,7 +30,7 @@ pub fn import_configs(force: bool, dry_run: bool) -> Result<(), GoatHookerError>
         sources.join(", ").cyan()
     );
     for (dir, config) in &imported.configs {
-        let file = dir.join(goat_hooker::config::HOOK_CONFIG_FILENAME);
+        let file = goat_hooker::config::config_path(dir);
         println!("\n{}", file.display().to_string().bold());
         for hook in config.hooks.iter().flatten() {
             println!(

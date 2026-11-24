@@ -10,7 +10,7 @@ import {
   compareOnly,
   tools,
   features,
-  highlightJson,
+  highlightToml,
   YES,
   PART,
 } from "../data/content";
@@ -261,7 +261,7 @@ const install = [
               </div>
               <div class="code-card">
                 <div class="code-file">{feature.file}</div>
-                <pre><code set:html={highlightJson(feature.code)} /></pre>
+                <pre><code set:html={highlightToml(feature.code)} /></pre>
               </div>
             </div>
           ))}
@@ -321,7 +321,7 @@ const install = [
           <h2>Prefer clicking? There's an app.</h2>
           <p class="section-lede">
             See what the next commit will run, run a hook and read its output live, edit hooks
-            without touching the JSON, and wire them together like nodes in Blender.
+            without touching the config file, and wire them together like nodes in Blender.
             ⌘K reaches everything.
           </p>
           <div class="shots">
@@ -1078,6 +1078,11 @@ const install = [
   .t-lit,
   .t-num {
     color: #f5c45e;
+  }
+
+  .t-com {
+    color: var(--muted);
+    font-style: italic;
   }
 
   /* Compare */

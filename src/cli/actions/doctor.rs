@@ -1,7 +1,7 @@
 use colored::Colorize;
 
 use goat_hooker::{
-    config::{ConfigLoader, HOOK_CONFIG_FILENAME},
+    config::ConfigLoader,
     doctor::{self, Level},
     errors::GoatHookerError,
 };
@@ -11,10 +11,10 @@ use crate::cli::ui;
 /// `hooker doctor`: what could go wrong, and how to fix it
 pub fn check() -> Result<(), GoatHookerError> {
     let root = ui::current_repo()?;
-    let config_path = root.join(HOOK_CONFIG_FILENAME);
+    let config_path = goat_hooker::config::config_path(&root);
     if !config_path.exists() {
         println!(
-            "{} no {HOOK_CONFIG_FILENAME}  {} {}",
+            "{} no hooker.toml  {} {}",
             "○".yellow(),
             "→ run".dimmed(),
             ui::command("hooker init")

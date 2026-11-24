@@ -20,16 +20,24 @@ hooker init
 
 It offers the hooks of the catalogue, with the ones matching your project already picked (Rust, JavaScript, Python, common checks, conventional commits). `hooker init -t auto` picks them without asking. Already using husky, lefthook or pre-commit? `hooker import` converts their config instead.
 
-You get a `hooker.config.json`:
+You get a `hooker.toml`:
 
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json",
-  "hooks": [
-    { "name": "fmt", "trigger": "pre-commit", "include": ["**/*.rs"], "cmd": "rustfmt {files}", "stage_fixed": true },
-    { "name": "clippy", "trigger": "pre-commit", "include": ["**/*.rs"], "cmd": "cargo clippy -- -D warnings", "cache": true }
-  ]
-}
+```toml
+#:schema https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json
+
+[[hooks]]
+name = "fmt"
+trigger = "pre-commit"
+include = ["**/*.rs"]
+cmd = "rustfmt {files}"
+stage_fixed = true
+
+[[hooks]]
+name = "clippy"
+trigger = "pre-commit"
+include = ["**/*.rs"]
+cmd = "cargo clippy -- -D warnings"
+cache = true
 ```
 
 Each hook runs on the staged files matching `include`, `{files}` is replaced with them, and `stage_fixed` stages again what a formatter changed.
@@ -59,7 +67,7 @@ $ git commit -m "feat: add numbers"
 goat-hooker-gui .
 ```
 
-The app shows the hooks of the next commit, runs them with their output live, and edits them without touching the JSON.
+The app shows the hooks of the next commit, runs them with their output live, and edits them without touching the config file.
 
 ## Next
 

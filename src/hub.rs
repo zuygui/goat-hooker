@@ -1,4 +1,5 @@
-//! Finds hooks shared on GitHub: repositories whose root `hooker.config.json` has `share`.
+//! Finds hooks shared on GitHub: repositories whose root config (`hooker.toml` or
+//! `hooker.config.json`) has `share`.
 //!
 //! GitHub's code search needs a token: `$GITHUB_TOKEN`, `$GH_TOKEN` or the one of the GitHub
 //! CLI (`gh auth token`). Without it, only the hooks of goat-hooker itself are listed.
@@ -189,18 +190,20 @@ pub fn search(query: &str) -> Result<(Vec<SharedRepo>, Option<String>), GoatHook
 
     match token.as_deref() {
         Some(token) => {
-            let url = format!(
-                "{API}/search/code?per_page=100&q={}",
-                encode("share filename:hooker.config.json path:/")
-            );
-            let found = get_json(&url, Some(token))?;
-            for item in found["items"].as_array().into_iter().flatten() {
-                let path = item["path"].as_str().unwrap_or_default();
-                let Some(name) = item["repository"]["full_name"].as_str() else {
-                    continue;
-                };
-                if path == crate::config::HOOK_CONFIG_FILENAME && !names.iter().any(|n| n == name) {
-                    names.push(name.to_string());
+            for file in crate::config::CONFIG_FILENAMES {
+                let url = format!(
+                    "{API}/search/code?per_page=100&q={}",
+                    encode(&format!("share filename:{file} path:/"))
+                );
+                let found = get_json(&url, Some(token))?;
+                for item in found["items"].as_array().into_iter().flatten() {
+                    let path = item["path"].as_str().unwrap_or_default();
+                    let Some(name) = item["repository"]["full_name"].as_str() else {
+                        continue;
+                    };
+                    if path == file && !names.iter().any(|n| n == name) {
+                        names.push(name.to_string());
+                    }
                 }
             }
         }
@@ -289,15 +292,18 @@ pub fn read_repo(name: &str, token: Option<&str>) -> Result<Option<SharedRepo>, 
     let query = rev
         .map(|r| format!("?ref={}", encode(r)))
         .unwrap_or_default();
-    let root = get(
-        &format!(
-            "{API}/repos/{name}/contents/{}{query}",
-            crate::config::HOOK_CONFIG_FILENAME
-        ),
-        token,
-        true,
-    )?;
-    let Ok(root) = serde_json::from_str::<Value>(&root) else {
+    // `hooker.toml` first, then `hooker.config.json`
+    let mut root = None;
+    for file in crate::config::CONFIG_FILENAMES {
+        let url = format!("{API}/repos/{name}/contents/{file}{query}");
+        if let Ok(content) = get(&url, token, true)
+            && let Ok(value) = crate::config::read_value(std::path::Path::new(file), &content)
+        {
+            root = Some(value);
+            break;
+        }
+    }
+    let Some(root) = root else {
         return Ok(None);
     };
     let Some(share) = root
@@ -341,7 +347,10 @@ pub fn read_repo(name: &str, token: Option<&str>) -> Result<Option<SharedRepo>, 
             continue;
         };
         // Read as written: the `{{params}}` stay in the commands
-        let Ok(config) = serde_json::from_str::<Config>(&content) else {
+        let Some(config) = crate::config::read_value(std::path::Path::new(&path), &content)
+            .ok()
+            .and_then(|value| serde_json::from_value::<Config>(value).ok())
+        else {
             continue;
         };
         files.push(SharedFile {
@@ -413,8 +422,8 @@ pub fn add(
     config.write_to_file(config_file)?;
 
     // Fetches it, and trusts the version that was reviewed
-    let configs = crate::config::ConfigLoader::new()
-        .load_recursive(&root.join(crate::config::HOOK_CONFIG_FILENAME))?;
+    let configs =
+        crate::config::ConfigLoader::new().load_recursive(&crate::config::config_path(root))?;
     let origins: Vec<crate::config::Origin> =
         crate::trust::untrusted(root, configs.iter().flat_map(|c| c.hooks.iter().flatten()))
             .into_iter()

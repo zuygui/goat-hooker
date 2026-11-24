@@ -9,7 +9,7 @@ use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
 use goat_hooker::{
-    config::{ConfigLoader, HOOK_CONFIG_FILENAME, Trigger},
+    config::{ConfigLoader, Trigger},
     errors::GoatHookerError,
     git,
     graph::{self, Graph},
@@ -24,7 +24,7 @@ use crate::cli::ui::{self, KO, OK, PENDING};
 pub fn resolve_config(root: &Path, config_path: Option<PathBuf>) -> Option<PathBuf> {
     match config_path {
         Some(path) => Some(path),
-        None => Some(root.join(HOOK_CONFIG_FILENAME)).filter(|p| p.exists()),
+        None => Some(goat_hooker::config::config_path(root)).filter(|p| p.exists()),
     }
 }
 
@@ -62,7 +62,7 @@ pub fn run_hooks(
         eprintln!(
             "{}",
             format!(
-                "⚠️ No {HOOK_CONFIG_FILENAME} found at {}, skipping {} hooks",
+                "⚠️ No hooker.toml found at {}, skipping {} hooks",
                 root.display(),
                 trigger.as_str()
             )

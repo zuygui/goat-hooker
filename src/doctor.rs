@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    config::{Config, Hook, LOCAL_CONFIG_FILENAME, Trigger},
+    config::{Config, Hook, LOCAL_CONFIG_FILENAMES, Trigger},
     git,
     graph::project_name,
     history::{self, Status},
@@ -312,11 +312,14 @@ fn untrusted(root: &Path, configs: &[Config]) -> Vec<Finding> {
         .collect()
 }
 
-/// `hooker.local.json` holds the changes of one computer: it must not be committed
+/// `hooker.local.toml` (or `.json`) holds the changes of one computer: it must not be committed
 fn committed_local(root: &Path) -> Vec<Finding> {
     tracked(root)
         .into_iter()
-        .filter(|f| f.file_name().is_some_and(|n| n == LOCAL_CONFIG_FILENAME))
+        .filter(|f| {
+            f.file_name()
+                .is_some_and(|n| LOCAL_CONFIG_FILENAMES.iter().any(|l| n == *l))
+        })
         .map(|file| {
             let file = file
                 .strip_prefix(root)
@@ -326,7 +329,7 @@ fn committed_local(root: &Path) -> Vec<Finding> {
             Finding::new(Level::Warning, format!("{file} is committed"))
                 .detail("it holds the changes of one computer: everyone gets them")
                 .fix(format!(
-                    "git rm --cached {file} && echo {LOCAL_CONFIG_FILENAME} >> .gitignore"
+                    "git rm --cached {file} && echo 'hooker.local.*' >> .gitignore"
                 ))
         })
         .collect()

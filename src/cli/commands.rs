@@ -55,7 +55,7 @@ pub enum AppCommands {
         #[arg(value_enum)]
         hook_type: Trigger,
 
-        /// Config file (default: `hooker.config.json` at the repository root)
+        /// Config file (default: `hooker.toml` at the repository root)
         #[arg(short = 'c', value_parser, value_hint = clap::ValueHint::FilePath)]
         config_path: Option<PathBuf>,
 
@@ -119,7 +119,7 @@ pub enum AppCommands {
     /// List the configurations and their hooks
     #[command()]
     List {
-        /// Config file (default: `hooker.config.json` at the repository root)
+        /// Config file (default: `hooker.toml` at the repository root)
         #[arg(short = 'c', value_parser, value_hint = clap::ValueHint::FilePath)]
         config_path: Option<PathBuf>,
     },
@@ -127,15 +127,15 @@ pub enum AppCommands {
     /// Update the hooks loaded from git repositories (`from`)
     #[command()]
     Update {
-        /// Config file (default: `hooker.config.json` at the repository root)
+        /// Config file (default: `hooker.toml` at the repository root)
         #[arg(short = 'c', value_parser, value_hint = clap::ValueHint::FilePath)]
         config_path: Option<PathBuf>,
     },
 
-    /// Convert the configs of husky / lint-staged, lefthook and pre-commit to hooker.config.json
+    /// Convert the configs of husky / lint-staged, lefthook and pre-commit to hooker.toml
     #[command()]
     Import {
-        /// Replace the existing hooker.config.json files
+        /// Replace the existing hooker configs
         #[arg(short, long)]
         force: bool,
 

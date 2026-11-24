@@ -1,7 +1,11 @@
-//! Editor of a `hooker.config.json`: JSON colors, autocompletion of the keys and of the
-//! values (triggers, hooks, variables, outputs...) and validation while typing.
+//! Editor of a config (`hooker.toml` or `hooker.config.json`): colors, validation while
+//! typing and, for JSON, autocompletion of the keys and of the values (triggers, hooks,
+//! variables, outputs...).
 
-use std::{path::PathBuf, rc::Rc};
+use std::{
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use anyhow::Result;
 use gpui_kit::component::{
@@ -95,10 +99,21 @@ pub struct JsonEditor {
 impl EventEmitter<JsonEditorEvent> for JsonEditor {}
 
 /// Error of the config, with its line
-fn validate(text: &str) -> Option<String> {
-    let config: Config = match serde_json::from_str(text) {
+fn validate(file: &Path, text: &str) -> Option<String> {
+    let value = if is_toml(file) {
+        match toml::from_str::<toml::Value>(text) {
+            Ok(value) => serde_json::to_value(value).unwrap_or_default(),
+            Err(err) => return Some(err.to_string()),
+        }
+    } else {
+        match serde_json::from_str(text) {
+            Ok(value) => value,
+            Err(err) => return Some(format!("Line {}: {err}", err.line())),
+        }
+    };
+    let config: Config = match serde_json::from_value(value) {
         Ok(config) => config,
-        Err(err) => return Some(format!("Line {}: {err}", err.line())),
+        Err(err) => return Some(err.to_string()),
     };
     for hook in config.hooks.iter().flatten() {
         if let Err(err) = hook.validate() {
@@ -106,6 +121,10 @@ fn validate(text: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn is_toml(file: &Path) -> bool {
+    file.extension().is_some_and(|e| e == "toml")
 }
 
 impl JsonEditor {
@@ -119,23 +138,26 @@ impl JsonEditor {
         let content = std::fs::read_to_string(&file).unwrap_or_default();
         let state = cx.new(|cx| {
             EditorState::new(window, cx)
-                .language("json")
+                .language(if is_toml(&file) { "toml" } else { "json" })
                 .line_number(true)
                 .default_value(content.clone())
         });
-        state.update(cx, |state, cx| {
-            state.lsp_mut().completion_provider = Some(Rc::new(Completions { known }));
-            cx.notify();
-        });
+        // The completion reads JSON, TOML only gets colors and validation
+        if !is_toml(&file) {
+            state.update(cx, |state, cx| {
+                state.lsp_mut().completion_provider = Some(Rc::new(Completions { known }));
+                cx.notify();
+            });
+        }
         let subscription =
             cx.subscribe(&state, |this: &mut Self, state, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
-                    this.error = validate(&state.read(cx).value());
+                    this.error = validate(&this.file, &state.read(cx).value());
                     cx.notify();
                 }
             });
         Self {
-            error: validate(&content),
+            error: validate(&file, &content),
             file,
             label,
             state,
@@ -146,7 +168,7 @@ impl JsonEditor {
 
     fn save(&mut self, cx: &mut Context<Self>) {
         let text = self.state.read(cx).value().to_string();
-        if let Some(error) = validate(&text) {
+        if let Some(error) = validate(&self.file, &text) {
             self.error = Some(error);
             cx.notify();
             return;
