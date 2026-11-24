@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/zuygui/goat-hooker/compare/v0.4.1...v0.5.0) - 2026-11-24
+
+### Added
+
+- *(config)* hooker.toml, with hooker.config.json still read
+- a website on GitHub Pages
+
+### Fixed
+
+- timeout and hooker fix on Windows
+
+### Other
+
+- Merge pull request #21 from zuygui/feat/site
+- benchmark with Goat Hooker 0.4.0
+- a quickstart page
+
 ## [0.4.1](https://github.com/zuygui/goat-hooker/compare/v0.4.0...v0.4.1) - 2026-11-23
 
 ### Other
