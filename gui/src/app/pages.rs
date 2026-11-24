@@ -27,7 +27,7 @@ pub struct PagesState {
     pub untrusted: Vec<Untrusted>,
     /// Findings of the doctor
     pub findings: Vec<goat_hooker::doctor::Finding>,
-    /// Configs of other hooks managers found in a repository without hooker.config.json
+    /// Configs of other hooks managers found in a repository without a hooker config
     pub import: Option<Imported>,
     /// The source card of the hook detail is expanded
     pub show_source: bool,
@@ -357,7 +357,7 @@ impl HookerApp {
                 "Variables",
                 subtitle,
                 card(cx)
-                    .child(div().text_sm().child("No variables yet. Declare them in hooker.config.json:"))
+                    .child(div().text_sm().child("No variables yet. Declare them in hooker.toml:"))
                     .child(code_line(example, cx))
                     .child(code_line(
                         r#"{ "name": "bump", "writes": ["version"], "cmd": "echo version=0.2.0 >> $HOOKER_VARS" }"#,
@@ -774,7 +774,7 @@ impl HookerApp {
                     div()
                         .text_sm()
                         .text_color(theme.muted_foreground)
-                        .child("Repositories share hooks with `share` in their root hooker.config.json. Search them, then pick a hooks file to add it to a project."),
+                        .child("Repositories share hooks with `share` in their root hooker.toml. Search them, then pick a hooks file to add it to a project."),
                 );
             }
             Some(Err(err)) => {

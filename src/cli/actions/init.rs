@@ -3,14 +3,14 @@ use std::{io, path::Path};
 use colored::Colorize;
 
 use goat_hooker::{
-    config::HOOK_CONFIG_FILENAME,
+    config::{HOOK_CONFIG_FILENAME, find_config},
     errors::GoatHookerError,
     templates::{self, TEMPLATES, Template},
 };
 
 use crate::cli::{actions::add::prompt_error, ui};
 
-/// Creates `hooker.config.json` in the given folder, with the hooks of templates
+/// Creates `hooker.toml` in the given folder, with the hooks of templates
 pub fn init_configuration(dir: &Path, template: &[String]) -> Result<(), GoatHookerError> {
     if !dir.is_dir() {
         return Err(GoatHookerError::ReadError(io::Error::new(
@@ -22,12 +22,9 @@ pub fn init_configuration(dir: &Path, template: &[String]) -> Result<(), GoatHoo
         )));
     }
 
-    if dir.join(HOOK_CONFIG_FILENAME).exists() {
-        println!(
-            "{} {} already exists",
-            "·".dimmed(),
-            HOOK_CONFIG_FILENAME.bold()
-        );
+    if let Some(existing) = find_config(dir) {
+        let name = existing.file_name().unwrap_or_default().to_string_lossy();
+        println!("{} {} already exists", "·".dimmed(), name.bold());
         return Ok(());
     }
 
@@ -131,7 +128,7 @@ mod tests {
 
         let mut loader = ConfigLoader::new();
         let cfgs = loader
-            .load_recursive(&dir.path().join(HOOK_CONFIG_FILENAME))
+            .load_recursive(&goat_hooker::config::config_path(dir.path()))
             .unwrap();
         assert_eq!(cfgs.len(), 1);
     }
@@ -141,7 +138,7 @@ mod tests {
         let dir = tempdir().unwrap();
         init_configuration(dir.path(), &["rust".into(), "commits".into()]).unwrap();
         let cfgs = ConfigLoader::new()
-            .load_recursive(&dir.path().join(HOOK_CONFIG_FILENAME))
+            .load_recursive(&goat_hooker::config::config_path(dir.path()))
             .unwrap();
         let names: Vec<&str> = cfgs[0]
             .hooks
@@ -158,7 +155,7 @@ mod tests {
     #[test]
     fn existing_config_is_kept() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join(HOOK_CONFIG_FILENAME);
+        let path = goat_hooker::config::config_path(dir.path());
         std::fs::write(&path, "custom").unwrap();
 
         init_configuration(dir.path(), &[]).unwrap();

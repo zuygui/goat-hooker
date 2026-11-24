@@ -12,7 +12,71 @@ use crate::{errors::GoatHookerError, git, remote};
 
 mod template;
 
-pub const HOOK_CONFIG_FILENAME: &str = "hooker.config.json";
+/// Name of a new config
+pub const HOOK_CONFIG_FILENAME: &str = "hooker.toml";
+/// Name of the configs written in JSON, still read
+pub const JSON_CONFIG_FILENAME: &str = "hooker.config.json";
+/// Names of a config, the first one wins when a folder has both
+pub const CONFIG_FILENAMES: [&str; 2] = [HOOK_CONFIG_FILENAME, JSON_CONFIG_FILENAME];
+
+/// Config of a folder: `hooker.toml`, else `hooker.config.json`
+pub fn find_config(dir: &Path) -> Option<PathBuf> {
+    CONFIG_FILENAMES
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.is_file())
+}
+
+/// Config of a folder, or where a new one goes (`hooker.toml`)
+pub fn config_path(dir: &Path) -> PathBuf {
+    find_config(dir).unwrap_or_else(|| dir.join(HOOK_CONFIG_FILENAME))
+}
+
+/// Is this file name the one of a config?
+pub fn is_config_name(name: &str) -> bool {
+    CONFIG_FILENAMES.contains(&name)
+}
+
+fn is_toml(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "toml")
+}
+
+/// Reads a JSON or TOML file (by its extension) as a JSON value
+pub fn read_value(path: &Path, content: &str) -> Result<serde_json::Value, GoatHookerError> {
+    if is_toml(path) {
+        let value: toml::Value =
+            toml::from_str(content).map_err(|source| GoatHookerError::TomlError {
+                path: path.to_path_buf(),
+                source: Box::new(source),
+            })?;
+        serde_json::to_value(value).map_err(|source| GoatHookerError::ParseError {
+            path: path.to_path_buf(),
+            source,
+        })
+    } else {
+        serde_json::from_str(content).map_err(|source| GoatHookerError::ParseError {
+            path: path.to_path_buf(),
+            source,
+        })
+    }
+}
+
+/// Writes a value as JSON or TOML (by the extension of `path`)
+pub fn write_value<T: Serialize>(path: &Path, value: &T) -> Result<(), GoatHookerError> {
+    let content = if is_toml(path) {
+        toml::to_string_pretty(value).map_err(|source| GoatHookerError::TomlWriteError {
+            path: path.to_path_buf(),
+            source,
+        })?
+    } else {
+        serde_json::to_string_pretty(value).map_err(|source| GoatHookerError::ParseError {
+            path: path.to_path_buf(),
+            source,
+        })? + "\n"
+    };
+    fs::write(path, content)?;
+    Ok(())
+}
 
 /// URL of the schema, added by `hooker init` (autocompletion in editors)
 pub const SCHEMA_URL: &str =
@@ -47,14 +111,14 @@ pub struct Config {
     /// Folders of the sub-projects (globs accepted, e.g. `packages/*`)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
-        description = "Sub-projects folders, each one with its own hooker.config.json. Globs are supported (packages/*)"
+        description = "Sub-projects folders, each one with its own hooker.toml. Globs are supported (packages/*)"
     )]
     pub imports: Option<Vec<String>>,
 
-    /// Loads every `hooker.config.json` of the repository automatically
+    /// Loads every config (`hooker.toml`, `hooker.config.json`) of the repository automatically
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
-        description = "Load every hooker.config.json of the repository (files ignored by git are skipped)"
+        description = "Load every hooker config of the repository (files ignored by git are skipped)"
     )]
     pub discover: Option<bool>,
 
@@ -659,7 +723,7 @@ impl Hook {
     }
 }
 
-/// JSON Schema of `hooker.config.json`
+/// JSON Schema of the config (`hooker.toml` and `hooker.config.json`)
 pub fn json_schema() -> String {
     let schema = schemars::schema_for!(Config);
     serde_json::to_string_pretty(&schema).unwrap() + "\n"
@@ -691,7 +755,7 @@ impl Config {
             path: path.to_path_buf(),
             source,
         };
-        let mut value: serde_json::Value = serde_json::from_str(content).map_err(parse_error)?;
+        let mut value = read_value(path, content)?;
 
         // Parameters: replaced in the hooks before reading them
         if let Some(params) = value.get("params").cloned() {
@@ -734,24 +798,44 @@ impl Config {
         Ok(cfg)
     }
 
+    /// Writes the config of a folder: in its file if it has one, else in a new `hooker.toml`
     pub fn write_to_dir(&self, dir: &Path) -> Result<PathBuf, GoatHookerError> {
-        let path = dir.join(HOOK_CONFIG_FILENAME);
+        let path = config_path(dir);
         self.write_to_file(&path)?;
         Ok(path)
     }
 
+    /// Writes the config as JSON or TOML (by the extension of `path`)
     pub fn write_to_file(&self, path: &Path) -> Result<(), GoatHookerError> {
-        let content =
-            serde_json::to_string_pretty(self).map_err(|source| GoatHookerError::ParseError {
+        if !is_toml(path) {
+            return write_value(path, self);
+        }
+        // In TOML, the schema is a comment that TOML editors read (Taplo, Even Better TOML)
+        let schema = self.schema.clone();
+        let mut config = self.clone();
+        config.schema = None;
+        let body =
+            toml::to_string_pretty(&config).map_err(|source| GoatHookerError::TomlWriteError {
                 path: path.to_path_buf(),
                 source,
             })?;
-        fs::write(path, content + "\n")?;
+        // Keeps the `#:schema` line of the file when the config has none
+        let schema = schema.or_else(|| {
+            fs::read_to_string(path).ok().and_then(|old| {
+                old.lines()
+                    .find_map(|l| l.strip_prefix("#:schema "))
+                    .map(|url| url.trim().to_string())
+            })
+        });
+        let header = schema
+            .map(|url| format!("#:schema {url}\n\n"))
+            .unwrap_or_default();
+        fs::write(path, header + &body)?;
         Ok(())
     }
 }
 
-/// Changes of a config on this computer only, next to `hooker.config.json` (not committed):
+/// Changes of a config on this computer only, next to `hooker.toml` (not committed):
 /// ```json
 /// { "parallel": true,
 ///   "hooks": [
@@ -761,9 +845,20 @@ impl Config {
 /// ```
 /// A hook with the name of an existing one changes its fields (or removes it with
 /// `"disabled": true`); another name adds a hook. The other keys replace the ones of the config.
-pub const LOCAL_CONFIG_FILENAME: &str = "hooker.local.json";
+pub const LOCAL_CONFIG_FILENAME: &str = "hooker.local.toml";
+/// Names of the local changes, the first one wins when a folder has both
+pub const LOCAL_CONFIG_FILENAMES: [&str; 2] = [LOCAL_CONFIG_FILENAME, "hooker.local.json"];
 
-/// Applies `hooker.local.json` (see `LOCAL_CONFIG_FILENAME`) to a loaded config
+/// Local changes of a folder, or where new ones go (`hooker.local.toml`)
+pub fn local_path(dir: &Path) -> PathBuf {
+    LOCAL_CONFIG_FILENAMES
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| dir.join(LOCAL_CONFIG_FILENAME))
+}
+
+/// Applies `hooker.local.toml` (see `LOCAL_CONFIG_FILENAME`) to a loaded config
 pub fn apply_local(config: &mut Config, local_file: &Path) -> Result<(), GoatHookerError> {
     let Ok(content) = fs::read_to_string(local_file) else {
         return Ok(());
@@ -772,7 +867,7 @@ pub fn apply_local(config: &mut Config, local_file: &Path) -> Result<(), GoatHoo
         path: local_file.to_path_buf(),
         source,
     };
-    let local: serde_json::Value = serde_json::from_str(&content).map_err(parse_error)?;
+    let local = read_value(local_file, &content)?;
     let serde_json::Value::Object(local) = local else {
         return Ok(());
     };
@@ -833,11 +928,12 @@ pub fn apply_local(config: &mut Config, local_file: &Path) -> Result<(), GoatHoo
     Ok(())
 }
 
-/// Hooks turned off in the `hooker.local.json` of a project folder
+/// Hooks turned off in the `hooker.local.toml` of a project folder
 pub fn locally_disabled(dir: &Path) -> Vec<String> {
-    fs::read_to_string(dir.join(LOCAL_CONFIG_FILENAME))
+    let file = local_path(dir);
+    fs::read_to_string(&file)
         .ok()
-        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        .and_then(|c| read_value(&file, &c).ok())
         .and_then(|v| v.get("hooks")?.as_array().cloned())
         .unwrap_or_default()
         .iter()
@@ -846,12 +942,12 @@ pub fn locally_disabled(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Turns a hook off (or on again) on this computer, in the `hooker.local.json` of `dir`
+/// Turns a hook off (or on again) on this computer, in the `hooker.local.toml` of `dir`
 pub fn set_locally_disabled(dir: &Path, name: &str, disabled: bool) -> Result<(), GoatHookerError> {
-    let file = dir.join(LOCAL_CONFIG_FILENAME);
+    let file = local_path(dir);
     let mut local: serde_json::Value = fs::read_to_string(&file)
         .ok()
-        .and_then(|c| serde_json::from_str(&c).ok())
+        .and_then(|c| read_value(&file, &c).ok())
         .unwrap_or_else(|| serde_json::json!({}));
     if !local.is_object() {
         local = serde_json::json!({});
@@ -890,11 +986,7 @@ pub fn set_locally_disabled(dir: &Path, name: &str, disabled: bool) -> Result<()
         }
         return Ok(());
     }
-    fs::write(
-        &file,
-        serde_json::to_string_pretty(&local).unwrap_or_default() + "\n",
-    )?;
-    Ok(())
+    write_value(&file, &local)
 }
 
 /// Max number of nested hooks files (`path` loading a `path`...)
@@ -937,8 +1029,8 @@ impl ConfigLoader {
         if let Some(hooks) = root.hooks.take() {
             root.hooks = Some(self.expand_hooks(hooks, &base_dir, 0, None)?);
         }
-        // Then the changes of this computer (`hooker.local.json`)
-        apply_local(&mut root, &base_dir.join(LOCAL_CONFIG_FILENAME))?;
+        // Then the changes of this computer (`hooker.local.toml`)
+        apply_local(&mut root, &local_path(&base_dir))?;
 
         let mut all_cfg = vec![root.clone()];
 
@@ -951,7 +1043,7 @@ impl ConfigLoader {
 
         // The configs already loaded (this one included) are ignored thanks to `visited`
         if root.discover.unwrap_or(false) {
-            for sub_path in git::find_files(&base_dir, HOOK_CONFIG_FILENAME)? {
+            for sub_path in find_configs(&base_dir)? {
                 let sub_cfgs = self.load_recursive(&sub_path)?;
                 all_cfg.extend(sub_cfgs);
             }
@@ -1072,20 +1164,35 @@ fn hash_file(hasher: &mut sha2::Sha256, file: &Path, depth: usize) -> Result<(),
     Ok(())
 }
 
+/// Configs under `dir` that are tracked or not ignored by git (one per folder)
+fn find_configs(dir: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
+    let mut found: Vec<PathBuf> = Vec::new();
+    for name in CONFIG_FILENAMES {
+        for path in git::find_files(dir, name)? {
+            // `hooker.toml` wins over `hooker.config.json` in the same folder
+            if !found.iter().any(|f| f.parent() == path.parent()) {
+                found.push(path);
+            }
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
 /// Resolves an import into paths of configs.
 /// An import can be a folder (`api`) or a glob (`packages/*`).
 fn resolve_import(base_dir: &Path, inc: &str) -> Result<Vec<PathBuf>, GoatHookerError> {
     let is_glob = inc.contains(['*', '?', '[']);
 
     if !is_glob {
-        let sub_path = base_dir.join(inc).join(HOOK_CONFIG_FILENAME);
-        if !sub_path.exists() {
+        let dir = base_dir.join(inc);
+        let Some(sub_path) = find_config(&dir) else {
             eprintln!(
-                "⚠️ Warning: included path {:?} does not contain {}",
-                sub_path, HOOK_CONFIG_FILENAME
+                "⚠️ Warning: included path {:?} has no {} or {}",
+                dir, HOOK_CONFIG_FILENAME, JSON_CONFIG_FILENAME
             );
             return Ok(vec![]);
-        }
+        };
         return Ok(vec![sub_path]);
     }
 
@@ -1093,24 +1200,27 @@ fn resolve_import(base_dir: &Path, inc: &str) -> Result<Vec<PathBuf>, GoatHooker
     // Without the `\\?\` prefix of canonical paths on Windows, glob doesn't support it
     let base = crate::git::plain(base_dir).to_string_lossy().to_string();
     let pattern = format!(
-        "{}/{}/{}",
+        "{}/{}",
         glob::Pattern::escape(&base),
         inc.trim_start_matches("./").trim_end_matches('/'),
-        HOOK_CONFIG_FILENAME
     );
-    let paths = glob::glob(&pattern).map_err(|source| GoatHookerError::InvalidImport {
+    let dirs = glob::glob(&pattern).map_err(|source| GoatHookerError::InvalidImport {
         import: inc.to_string(),
         source,
     })?;
 
     // Folders without config are ignored silently (e.g. `packages/*` with an empty folder)
-    let mut sub_paths: Vec<PathBuf> = paths.filter_map(Result::ok).collect();
+    let mut sub_paths: Vec<PathBuf> = dirs
+        .filter_map(Result::ok)
+        .filter(|dir| dir.is_dir())
+        .filter_map(|dir| find_config(&dir))
+        .collect();
     sub_paths.sort();
 
     if sub_paths.is_empty() {
         eprintln!(
-            "⚠️ Warning: no {} found for import `{}`",
-            HOOK_CONFIG_FILENAME, inc
+            "⚠️ Warning: no {} or {} found for import `{}`",
+            HOOK_CONFIG_FILENAME, JSON_CONFIG_FILENAME, inc
         );
     }
     Ok(sub_paths)
@@ -1210,7 +1320,7 @@ mod tests {
     fn missing_config() {
         let dir = tempdir().unwrap();
         let mut loader = ConfigLoader::new();
-        let res = loader.load_recursive(&dir.path().join(HOOK_CONFIG_FILENAME));
+        let res = loader.load_recursive(&dir.path().join(JSON_CONFIG_FILENAME));
 
         assert!(matches!(res, Err(GoatHookerError::ConfigNotFound(_))));
     }
@@ -1218,7 +1328,7 @@ mod tests {
     #[test]
     fn parse_error_keeps_position() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join(HOOK_CONFIG_FILENAME);
+        let config_path = dir.path().join(JSON_CONFIG_FILENAME);
         write_json(&config_path, "{ \"hooks\": [ }");
 
         let mut loader = ConfigLoader::new();
@@ -1231,7 +1341,7 @@ mod tests {
     #[test]
     fn reject_invalid_hooks() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join(HOOK_CONFIG_FILENAME);
+        let config_path = dir.path().join(JSON_CONFIG_FILENAME);
 
         // neither cmd nor cmds
         write_json(
@@ -1272,7 +1382,7 @@ mod tests {
     fn write_sub_config(dir: &Path, hook_name: &str) {
         fs::create_dir_all(dir).unwrap();
         write_json(
-            &dir.join(HOOK_CONFIG_FILENAME),
+            &dir.join(JSON_CONFIG_FILENAME),
             &format!(
                 r#"{{ "hooks": [ {{ "name": "{hook_name}", "trigger": "pre-commit", "cmd": "true" }} ] }}"#
             ),
@@ -1282,7 +1392,7 @@ mod tests {
     #[test]
     fn load_glob_imports() {
         let dir = tempdir().unwrap();
-        let root_path = dir.path().join(HOOK_CONFIG_FILENAME);
+        let root_path = dir.path().join(JSON_CONFIG_FILENAME);
         write_json(&root_path, r#"{ "imports": ["packages/*"], "hooks": [] }"#);
 
         write_sub_config(&dir.path().join("packages/a"), "a");
@@ -1306,7 +1416,7 @@ mod tests {
         fs::write(root.join(".gitignore"), "ignored/\n").unwrap();
 
         write_json(
-            &root.join(HOOK_CONFIG_FILENAME),
+            &root.join(JSON_CONFIG_FILENAME),
             r#"{ "discover": true, "imports": ["api"], "hooks": [ { "name": "root", "trigger": "pre-commit", "cmd": "true" } ] }"#,
         );
         write_sub_config(&root.join("api"), "api");
@@ -1315,7 +1425,7 @@ mod tests {
         write_sub_config(&root.join("ignored/lib"), "ignored");
 
         let cfgs = ConfigLoader::new()
-            .load_recursive(&root.join(HOOK_CONFIG_FILENAME))
+            .load_recursive(&root.join(JSON_CONFIG_FILENAME))
             .unwrap();
 
         // `api` imported AND discovered → loaded once; `ignored/` is ignored by git
@@ -1325,7 +1435,7 @@ mod tests {
     #[test]
     fn load_hooks_from_local_file() {
         let dir = tempdir().unwrap();
-        let root_path = dir.path().join(HOOK_CONFIG_FILENAME);
+        let root_path = dir.path().join(JSON_CONFIG_FILENAME);
         write_json(
             &root_path,
             r#"{ "hooks": [
@@ -1356,7 +1466,7 @@ mod tests {
     #[test]
     fn hooks_file_cycle_is_an_error() {
         let dir = tempdir().unwrap();
-        let root_path = dir.path().join(HOOK_CONFIG_FILENAME);
+        let root_path = dir.path().join(JSON_CONFIG_FILENAME);
         write_json(
             &root_path,
             r#"{ "hooks": [ { "name": "loop", "path": "a.json" } ] }"#,
@@ -1373,7 +1483,7 @@ mod tests {
     #[test]
     fn validate_from_and_path() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join(HOOK_CONFIG_FILENAME);
+        let config_path = dir.path().join(JSON_CONFIG_FILENAME);
 
         for (json, valid) in [
             (r#"{ "name": "a", "from": "https://x/y.git" }"#, false),
@@ -1425,7 +1535,7 @@ mod tests {
         let url = shared.display().to_string().replace('\\', "/");
         let project = dir.path().join("project");
         fs::create_dir_all(&project).unwrap();
-        let root_path = project.join(HOOK_CONFIG_FILENAME);
+        let root_path = project.join(JSON_CONFIG_FILENAME);
         write_json(
             &root_path,
             &format!(
@@ -1471,7 +1581,7 @@ mod tests {
     #[test]
     fn load_reusable_hooks_with_params() {
         let dir = tempdir().unwrap();
-        let root_path = dir.path().join(HOOK_CONFIG_FILENAME);
+        let root_path = dir.path().join(JSON_CONFIG_FILENAME);
         write_json(
             &root_path,
             r#"{ "hooks": [
@@ -1517,7 +1627,7 @@ mod tests {
         assert_eq!(locally_disabled(dir.path()), ["test"]);
         set_locally_disabled(dir.path(), "test", false).unwrap();
         assert!(locally_disabled(dir.path()).is_empty());
-        assert!(!dir.path().join(LOCAL_CONFIG_FILENAME).exists());
+        assert!(!dir.path().join("hooker.local.json").exists());
     }
 
     #[test]
@@ -1544,7 +1654,7 @@ mod tests {
     fn local_config_changes_removes_and_adds_hooks() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(
-            dir.path().join(HOOK_CONFIG_FILENAME),
+            dir.path().join(JSON_CONFIG_FILENAME),
             r#"{ "hooks": [
                 { "name": "lint", "trigger": "pre-commit", "cmd": "lint" },
                 { "name": "test", "trigger": "pre-commit", "cmd": "test" }
@@ -1552,7 +1662,7 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            dir.path().join(LOCAL_CONFIG_FILENAME),
+            dir.path().join("hooker.local.json"),
             r#"{ "parallel": true, "hooks": [
                 { "name": "test", "disabled": true },
                 { "name": "lint", "timeout": "1m" },
@@ -1561,7 +1671,7 @@ mod tests {
         )
         .unwrap();
         let configs = ConfigLoader::new()
-            .load_recursive(&dir.path().join(HOOK_CONFIG_FILENAME))
+            .load_recursive(&dir.path().join(JSON_CONFIG_FILENAME))
             .unwrap();
         let hooks = configs[0].hooks.as_ref().unwrap();
         let names: Vec<&str> = hooks.iter().map(|h| h.name.as_str()).collect();
@@ -1570,7 +1680,90 @@ mod tests {
         assert_eq!(hooks[0].cmd.as_deref(), Some("lint"));
         assert_eq!(configs[0].parallel, Some(true));
         // the shared file is untouched
-        let raw = Config::load_from_file(&dir.path().join(HOOK_CONFIG_FILENAME)).unwrap();
+        let raw = Config::load_from_file(&dir.path().join(JSON_CONFIG_FILENAME)).unwrap();
         assert_eq!(raw.hooks.unwrap().len(), 2);
+    }
+
+    #[test]
+    fn toml_config_is_read_and_written() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join(HOOK_CONFIG_FILENAME);
+        fs::write(
+            &file,
+            r#"#:schema https://example.com/schema.json
+parallel = true
+
+[[hooks]]
+name = "fmt"
+trigger = "pre-commit"
+include = ["*.rs"]
+cmd = "cargo fmt -- {files}"
+"#,
+        )
+        .unwrap();
+        let config = Config::load_from_file(&file).unwrap();
+        assert_eq!(config.parallel, Some(true));
+        assert_eq!(config.hooks.as_ref().unwrap()[0].name, "fmt");
+
+        // Written back as TOML, with the schema as a comment
+        config.write_to_file(&file).unwrap();
+        let written = fs::read_to_string(&file).unwrap();
+        assert!(written.starts_with("#:schema "), "{written}");
+        assert!(written.contains("[[hooks]]"), "{written}");
+        let again = Config::load_from_file(&file).unwrap();
+        assert_eq!(again.hooks.unwrap()[0].name, "fmt");
+    }
+
+    #[test]
+    fn every_template_round_trips_through_toml() {
+        let dir = tempdir().unwrap();
+        let all: Vec<_> = crate::templates::TEMPLATES.iter().collect();
+        let config = crate::templates::config_with(&all).unwrap();
+        config.write_to_dir(dir.path()).unwrap();
+        let file = dir.path().join(HOOK_CONFIG_FILENAME);
+        assert!(file.is_file());
+        let back = Config::load_from_file(&file).unwrap();
+        assert_eq!(back.hooks.map(|h| h.len()), config.hooks.map(|h| h.len()));
+    }
+
+    #[test]
+    fn toml_wins_over_json_in_a_folder() {
+        let dir = tempdir().unwrap();
+        assert_eq!(
+            config_path(dir.path()),
+            dir.path().join(HOOK_CONFIG_FILENAME)
+        );
+        fs::write(dir.path().join(JSON_CONFIG_FILENAME), "{}").unwrap();
+        assert_eq!(
+            config_path(dir.path()),
+            dir.path().join(JSON_CONFIG_FILENAME)
+        );
+        fs::write(dir.path().join(HOOK_CONFIG_FILENAME), "").unwrap();
+        assert_eq!(
+            config_path(dir.path()),
+            dir.path().join(HOOK_CONFIG_FILENAME)
+        );
+    }
+
+    #[test]
+    fn toml_parse_error_names_the_file() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join(HOOK_CONFIG_FILENAME);
+        fs::write(&file, "hooks = [\n").unwrap();
+        let err = Config::load_from_file(&file).unwrap_err().to_string();
+        assert!(err.contains("TOML") && err.contains("hooker.toml"), "{err}");
+    }
+
+    #[test]
+    fn local_changes_in_toml() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join(JSON_CONFIG_FILENAME),
+            r#"{ "hooks": [ { "name": "a", "trigger": "pre-commit", "cmd": "true" } ] }"#,
+        )
+        .unwrap();
+        set_locally_disabled(dir.path(), "a", true).unwrap();
+        assert!(dir.path().join(LOCAL_CONFIG_FILENAME).is_file());
+        assert!(locally_disabled(dir.path()).contains(&"a".to_string()));
     }
 }

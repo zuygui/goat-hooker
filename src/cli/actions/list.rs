@@ -12,7 +12,7 @@ pub fn list_hooks(config_path: Option<PathBuf>) -> Result<(), GoatHookerError> {
     let root = git::repo_root(&cwd)?;
     let Some(config_path) = resolve_config(&root, config_path) else {
         return Err(GoatHookerError::ConfigNotFound(
-            root.join(goat_hooker::config::HOOK_CONFIG_FILENAME),
+            goat_hooker::config::config_path(&root),
         ));
     };
 

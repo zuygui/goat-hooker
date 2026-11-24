@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use colored::Colorize;
 
 use goat_hooker::{
-    config::{ConfigLoader, HOOK_CONFIG_FILENAME, Trigger},
+    config::{ConfigLoader, Trigger},
     errors::GoatHookerError,
     git, install,
     matcher::Matcher,
@@ -48,10 +48,10 @@ pub fn show_status() -> Result<(), GoatHookerError> {
     }
 
     // Config
-    let config_path = root.join(HOOK_CONFIG_FILENAME);
+    let config_path = goat_hooker::config::config_path(&root);
     if !config_path.exists() {
         println!(
-            "  {:<11} {} no {HOOK_CONFIG_FILENAME}  {} {}",
+            "  {:<11} {} no hooker.toml  {} {}",
             "Config",
             "○".yellow(),
             "→ run".dimmed(),
@@ -67,8 +67,12 @@ pub fn show_status() -> Result<(), GoatHookerError> {
         .sum();
     let parallel = configs.first().and_then(|c| c.parallel).unwrap_or(false);
     println!(
-        "  {:<11} {HOOK_CONFIG_FILENAME} {}",
+        "  {:<11} {} {}",
         "Config",
+        config_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy(),
         format!(
             "· {} · {}{}",
             ui::plural(configs.len(), "project"),

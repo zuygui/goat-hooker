@@ -2,26 +2,32 @@
 
 Hooks can wait for each other, and pass values to each other, like nodes connected by wires:
 
-```json
-{
-  "hooks": [
-    {
-      "name": "codegen",
-      "trigger": "pre-commit",
-      "outputs": ["schema"],
-      "cmd": "npm run codegen && echo \"schema=gen/schema.ts\" >> $HOOKER_OUTPUT"
-    },
-    {
-      "name": "lint",
-      "trigger": "pre-commit",
-      "steps": [
-        { "id": "eslint", "cmd": "eslint {files}" },
-        { "id": "types", "needs": ["eslint"], "inputs": { "schema": "codegen.schema" }, "cmd": "tsc --noEmit {schema}" }
-      ]
-    },
-    { "name": "e2e", "trigger": "pre-commit", "needs": ["lint", "packages/api:build"], "cmd": "npm run e2e" }
-  ]
-}
+```toml
+[[hooks]]
+name = "codegen"
+trigger = "pre-commit"
+outputs = ["schema"]
+cmd = 'npm run codegen && echo "schema=gen/schema.ts" >> $HOOKER_OUTPUT'
+
+[[hooks]]
+name = "lint"
+trigger = "pre-commit"
+
+[[hooks.steps]]
+id = "eslint"
+cmd = "eslint {files}"
+
+[[hooks.steps]]
+id = "types"
+needs = ["eslint"]
+inputs = { schema = "codegen.schema" }
+cmd = "tsc --noEmit {schema}"
+
+[[hooks]]
+name = "e2e"
+trigger = "pre-commit"
+needs = ["lint", "packages/api:build"]
+cmd = "npm run e2e"
 ```
 
 | Field | Description |
@@ -40,16 +46,21 @@ Hooks can wait for each other, and pass values to each other, like nodes connect
 
 Variables are values shared between hooks, kept between commits (in `.git/goat-hooker`):
 
-```json
-{
-  "variables": {
-    "version": { "description": "Next version", "default": "0.1.0", "writers": ["bump"], "readers": ["*"] }
-  },
-  "hooks": [
-    { "name": "bump", "trigger": "pre-commit", "writes": ["version"], "cmd": "echo version=0.2.0 >> $HOOKER_VARS" },
-    { "name": "changelog", "trigger": "pre-commit", "reads": ["version"], "cmd": "echo \"## $version\" >> CHANGELOG.md" }
-  ]
-}
+```toml
+[variables]
+version = { description = "Next version", default = "0.1.0", writers = ["bump"], readers = ["*"] }
+
+[[hooks]]
+name = "bump"
+trigger = "pre-commit"
+writes = ["version"]
+cmd = "echo version=0.2.0 >> $HOOKER_VARS"
+
+[[hooks]]
+name = "changelog"
+trigger = "pre-commit"
+reads = ["version"]
+cmd = 'echo "## $version" >> CHANGELOG.md'
 ```
 
 - a hook declares what it `writes` (`echo "name=value" >> $HOOKER_VARS`) and `reads` (`$name`)

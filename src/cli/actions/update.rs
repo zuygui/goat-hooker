@@ -2,11 +2,7 @@ use std::path::PathBuf;
 
 use colored::Colorize;
 
-use goat_hooker::{
-    config::{ConfigLoader, HOOK_CONFIG_FILENAME},
-    errors::GoatHookerError,
-    git,
-};
+use goat_hooker::{config::ConfigLoader, errors::GoatHookerError, git};
 
 use super::run::resolve_config;
 
@@ -16,7 +12,7 @@ pub fn update_remotes(config_path: Option<PathBuf>) -> Result<(), GoatHookerErro
     let root = git::repo_root(&cwd)?;
     let Some(config_path) = resolve_config(&root, config_path) else {
         return Err(GoatHookerError::ConfigNotFound(
-            root.join(HOOK_CONFIG_FILENAME),
+            goat_hooker::config::config_path(&root),
         ));
     };
 

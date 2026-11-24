@@ -3,14 +3,14 @@
 use std::path::{Path, PathBuf};
 
 use goat_hooker::{
-    config::{Config, ConfigLoader, HOOK_CONFIG_FILENAME, Hook, Trigger},
+    config::{Config, ConfigLoader, Hook, Trigger, config_path},
     errors::GoatHookerError,
     git, install,
     matcher::{MatchedHook, Matcher},
     runner::{self, HookInput, HookResult, Output},
 };
 
-/// A project of the monorepo (a `hooker.config.json`)
+/// A project of the monorepo (a `hooker.toml` or `hooker.config.json`)
 #[derive(Clone)]
 pub struct Project {
     pub file: PathBuf,
@@ -67,7 +67,7 @@ pub struct Repo {
 
 impl Repo {
     pub fn config_file(&self) -> PathBuf {
-        self.root.join(HOOK_CONFIG_FILENAME)
+        config_path(&self.root)
     }
 
     /// Opens the git repository containing `dir`
@@ -109,7 +109,7 @@ impl Repo {
         Ok(())
     }
 
-    /// Creates `hooker.config.json` at the root, with the hooks found for the project
+    /// Creates `hooker.toml` at the root, with the hooks found for the project
     /// (like `hooker init --template auto`)
     pub fn init_config(&mut self) -> Result<(), GoatHookerError> {
         if !self.config_file().exists() {
@@ -250,13 +250,20 @@ mod tests {
         let root = dir.path().canonicalize().unwrap();
         git(&root, &["init", "-q"]);
         fs::write(
-            root.join(HOOK_CONFIG_FILENAME),
-            r#"{ "imports": ["api"], "hooks": [ { "name": "root", "trigger": "pre-commit", "include": ["*.md"], "cmd": "echo root {files}" } ] }"#,
+            config_path(&root),
+            r#"imports = ["api"]
+
+[[hooks]]
+name = "root"
+trigger = "pre-commit"
+include = ["*.md"]
+cmd = "echo root {files}"
+"#,
         )
         .unwrap();
         fs::create_dir_all(root.join("api")).unwrap();
         fs::write(
-            root.join("api").join(HOOK_CONFIG_FILENAME),
+            root.join("api").join(goat_hooker::config::JSON_CONFIG_FILENAME),
             r#"{ "hooks": [ { "name": "api", "trigger": "pre-commit", "include": ["*.rs"], "cmd": "echo api {files}" } ] }"#,
         )
         .unwrap();
@@ -351,7 +358,7 @@ impl Repo {
             .unwrap_or_default()
     }
 
-    /// Hooks of a project turned off on this computer (`hooker.local.json`)
+    /// Hooks of a project turned off on this computer (`hooker.local.toml`)
     pub fn locally_disabled(&self, project: &Project) -> Vec<String> {
         goat_hooker::config::locally_disabled(&project.dir())
     }

@@ -3,7 +3,7 @@ use std::{path::PathBuf, time::Instant};
 use colored::Colorize;
 
 use goat_hooker::{
-    config::{ConfigLoader, HOOK_CONFIG_FILENAME, Trigger},
+    config::{ConfigLoader, Trigger},
     errors::GoatHookerError,
     fix,
     runner::Progress,
@@ -17,7 +17,7 @@ use crate::cli::{
 /// `hooker fix`: runs the fixers on the changed files (or the given ones), without staging
 pub fn fix_files(files: Vec<PathBuf>, verbose: bool) -> Result<(), GoatHookerError> {
     let root = ui::current_repo()?;
-    let configs = ConfigLoader::new().load_recursive(&root.join(HOOK_CONFIG_FILENAME))?;
+    let configs = ConfigLoader::new().load_recursive(&goat_hooker::config::config_path(&root))?;
     let cwd = std::env::current_dir()?;
     let files = (!files.is_empty()).then(|| files.into_iter().map(|f| cwd.join(f)).collect());
 

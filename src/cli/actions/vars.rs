@@ -1,10 +1,6 @@
 use colored::Colorize;
 
-use goat_hooker::{
-    config::{ConfigLoader, HOOK_CONFIG_FILENAME},
-    errors::GoatHookerError,
-    variables,
-};
+use goat_hooker::{config::ConfigLoader, errors::GoatHookerError, variables};
 
 use super::run::resolve_config;
 use crate::cli::ui;
@@ -19,14 +15,14 @@ pub fn variables(reset: Option<String>) -> Result<(), GoatHookerError> {
     }
     let Some(config_path) = resolve_config(&root, None) else {
         return Err(GoatHookerError::ConfigNotFound(
-            root.join(HOOK_CONFIG_FILENAME),
+            goat_hooker::config::config_path(&root),
         ));
     };
     let configs = ConfigLoader::new().load_recursive(&config_path)?;
     let usages = variables::usage(&root, &configs)?;
     if usages.is_empty() {
         println!(
-            "{} No variables, declare them in {} of hooker.config.json",
+            "{} No variables, declare them in {} of hooker.toml",
             ui::PENDING.dimmed(),
             "variables".bold()
         );

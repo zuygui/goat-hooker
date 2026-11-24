@@ -6,8 +6,6 @@ use std::{
     time::SystemTime,
 };
 
-use goat_hooker::config::HOOK_CONFIG_FILENAME;
-
 /// Max depth under a scanned folder (`~/dev/org/repo` = 3)
 const MAX_DEPTH: usize = 4;
 /// Max number of folders visited by a scan (avoids walking the whole disk)
@@ -37,7 +35,7 @@ const SKIPPED: &[&str] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundRepo {
     pub path: PathBuf,
-    /// Already has a `hooker.config.json`
+    /// Already has a hooker config
     pub configured: bool,
     /// Last git activity (to sort)
     pub modified: SystemTime,
@@ -86,7 +84,7 @@ fn scan(dir: &Path, depth: usize, found: &mut Vec<FoundRepo>, visited: &mut usiz
             .unwrap_or(SystemTime::UNIX_EPOCH);
         found.push(FoundRepo {
             path: dir.to_path_buf(),
-            configured: dir.join(HOOK_CONFIG_FILENAME).exists(),
+            configured: goat_hooker::config::find_config(dir).is_some(),
             modified,
         });
         return;

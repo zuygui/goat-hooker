@@ -1,4 +1,4 @@
-//! Source of a hook in its detail: its JSON in the config file, the scripts its commands run,
+//! Source of a hook in its detail: its definition in the config file, the scripts its commands run,
 //! and the hooks file it loads (from the repository or another one).
 
 use std::path::{Path, PathBuf};
@@ -41,13 +41,59 @@ fn scripts(dir: &Path, hook: &Hook) -> Vec<PathBuf> {
     scripts
 }
 
+/// Language of a file shown in the source, for its colors
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Lang {
+    Json,
+    Toml,
+    Shell,
+}
+
+impl Lang {
+    fn of(path: &Path) -> Self {
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("json") => Lang::Json,
+            Some("toml") => Lang::Toml,
+            _ => Lang::Shell,
+        }
+    }
+}
+
 /// Line (from 1) where a hook is written in its file
 fn line_of(content: &str, name: &str) -> Option<usize> {
     let needle = serde_json::to_string(name).ok()?;
     content
         .lines()
-        .position(|l| l.contains("\"name\"") && l.contains(&needle))
+        .position(|l| {
+            let toml_key = l
+                .trim_start()
+                .strip_prefix("name")
+                .is_some_and(|rest| rest.trim_start().starts_with('='));
+            (l.contains("\"name\"") || toml_key) && l.contains(&needle)
+        })
         .map(|l| l + 1)
+}
+
+/// Text of the `[[hooks]]` table containing the line `line` (from 1): (first line, text)
+fn raw_table(content: &str, line: usize) -> Option<(usize, String)> {
+    let lines: Vec<&str> = content.lines().collect();
+    let is_hook = |l: &str| l.trim() == "[[hooks]]";
+    let start = (0..line)
+        .rev()
+        .find(|&i| lines.get(i).is_some_and(|l| is_hook(l)))?;
+    // Until the next hook, or a table that isn't part of this hook
+    let end = (start + 1..lines.len())
+        .find(|&i| {
+            let l = lines[i].trim();
+            is_hook(l)
+                || (l.starts_with('[') && !l.starts_with("[hooks.") && !l.starts_with("[[hooks."))
+        })
+        .unwrap_or(lines.len());
+    let mut block = &lines[start..end];
+    while block.last().is_some_and(|l| l.trim().is_empty()) {
+        block = &block[..block.len() - 1];
+    }
+    Some((start + 1, block.join("\n")))
 }
 
 /// Text of the JSON object containing the line `line` (from 1): (first line, text)
@@ -172,6 +218,96 @@ fn json_tokens(line: &str) -> Vec<(std::ops::Range<usize>, Token)> {
     tokens
 }
 
+/// Tokens of a line of TOML
+fn toml_tokens(line: &str) -> Vec<(std::ops::Range<usize>, Token)> {
+    let bytes = line.as_bytes();
+    let trimmed = line.trim_start();
+    let indent = line.len() - trimmed.len();
+    if trimmed.starts_with('#') {
+        return vec![(0..line.len(), Token::Comment)];
+    }
+    if trimmed.starts_with('[') && !line.contains('=') {
+        return vec![(indent..line.len(), Token::Key)];
+    }
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    // The key, before `=`
+    if let Some(eq) = line.find('=')
+        && !line[..eq].contains(['"', '\'', '[', '{'])
+    {
+        tokens.push((indent..line[..eq].trim_end().len(), Token::Key));
+        tokens.push((eq..eq + 1, Token::Punctuation));
+        i = eq + 1;
+    }
+    while i < bytes.len() {
+        match bytes[i] {
+            b'#' => {
+                tokens.push((i..bytes.len(), Token::Comment));
+                break;
+            }
+            quote @ (b'"' | b'\'') => {
+                let start = i;
+                let triple = line[i..].starts_with(if quote == b'"' { "\"\"\"" } else { "\'\'\'" });
+                i += if triple { 3 } else { 1 };
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' && quote == b'"' {
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i] == quote
+                        && (!triple || line[i..].starts_with(&line[start..start + 3]))
+                    {
+                        i += if triple { 3 } else { 1 };
+                        break;
+                    }
+                    i += 1;
+                }
+                tokens.push((start..i.min(bytes.len()), Token::String));
+                i = i.min(bytes.len());
+            }
+            b'0'..=b'9' | b'-' => {
+                let start = i;
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_alphanumeric() || b".-_:+".contains(&bytes[i]))
+                {
+                    i += 1;
+                }
+                tokens.push((start..i, Token::Number));
+            }
+            b't' | b'f' => {
+                let word = ["true", "false"]
+                    .into_iter()
+                    .find(|w| line[i..].starts_with(w));
+                match word {
+                    Some(w) => {
+                        tokens.push((i..i + w.len(), Token::Keyword));
+                        i += w.len();
+                    }
+                    None => i += 1,
+                }
+            }
+            b'{' | b'}' | b'[' | b']' | b',' | b'=' => {
+                tokens.push((i..i + 1, Token::Punctuation));
+                i += 1;
+            }
+            c if c.is_ascii_alphabetic() => {
+                // Key of an inline table: `{ files = "read" }`
+                let start = i;
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_alphanumeric() || b"_-".contains(&bytes[i]))
+                {
+                    i += 1;
+                }
+                if line[i..].trim_start().starts_with('=') {
+                    tokens.push((start..i, Token::Key));
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    tokens
+}
+
 /// Tokens of a line of shell
 fn shell_tokens(line: &str) -> Vec<(std::ops::Range<usize>, Token)> {
     const KEYWORDS: [&str; 16] = [
@@ -228,12 +364,12 @@ fn shell_tokens(line: &str) -> Vec<(std::ops::Range<usize>, Token)> {
 
 impl HookerApp {
     /// A line with colors
-    fn colored_line(line: &str, json: bool, cx: &App) -> StyledText {
+    fn colored_line(line: &str, lang: Lang, cx: &App) -> StyledText {
         let theme = cx.theme();
-        let tokens = if json {
-            json_tokens(line)
-        } else {
-            shell_tokens(line)
+        let tokens = match lang {
+            Lang::Json => json_tokens(line),
+            Lang::Toml => toml_tokens(line),
+            Lang::Shell => shell_tokens(line),
         };
         let highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = tokens
             .into_iter()
@@ -258,8 +394,7 @@ impl HookerApp {
         StyledText::new(line.to_string()).with_highlights(highlights)
     }
 
-    fn code_view(&self, content: &str, first_line: usize, cx: &App) -> Div {
-        let json = content.trim_start().starts_with(['{', '[']);
+    fn code_view(&self, content: &str, first_line: usize, lang: Lang, cx: &App) -> Div {
         let theme = cx.theme();
         let mut code = v_flex()
             .p_3()
@@ -283,7 +418,7 @@ impl HookerApp {
                     )
                     .child(div().whitespace_nowrap().child(Self::colored_line(
                         &line.replace('\t', "    "),
-                        json,
+                        lang,
                         cx,
                     ))),
             );
@@ -362,7 +497,7 @@ impl HookerApp {
                             .ghost()
                             .xsmall()
                             .icon(lucide("pencil"))
-                            .label("Edit the JSON")
+                            .label("Edit the config")
                             .on_click({
                                 let file = project.file.clone();
                                 cx.listener(move |this, _, window, cx| {
@@ -417,12 +552,17 @@ impl HookerApp {
             cx,
         ));
         if expanded {
-            match line.and_then(|l| raw_object(&content, l)) {
+            let lang = Lang::of(&project.file);
+            let raw = line.and_then(|l| match lang {
+                Lang::Toml => raw_table(&content, l),
+                _ => raw_object(&content, l),
+            });
+            match raw {
                 // As written in the file
-                Some((first, text)) => card = card.child(self.code_view(&text, first, cx)),
+                Some((first, text)) => card = card.child(self.code_view(&text, first, lang, cx)),
                 None => {
                     let json = serde_json::to_string_pretty(hook).unwrap_or_default();
-                    card = card.child(self.code_view(&json, 1, cx));
+                    card = card.child(self.code_view(&json, 1, Lang::Json, cx));
                 }
             }
         }
@@ -437,7 +577,7 @@ impl HookerApp {
             card = card.child(self.file_header("open-script", 10 + i, script, label, cx));
             if expanded {
                 let content = std::fs::read_to_string(script).unwrap_or_else(|e| e.to_string());
-                card = card.child(self.code_view(&content, 1, cx));
+                card = card.child(self.code_view(&content, 1, Lang::Shell, cx));
             }
         }
 
@@ -471,7 +611,7 @@ impl HookerApp {
             if expanded {
                 let content = std::fs::read_to_string(&file)
                     .unwrap_or_else(|_| "Not fetched yet: run the hooks or `hooker update`".into());
-                card = card.child(self.code_view(&content, 1, cx));
+                card = card.child(self.code_view(&content, 1, Lang::of(&file), cx));
             }
         }
         card
@@ -480,7 +620,10 @@ impl HookerApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{github_url, json_tokens, line_of, raw_object, scripts, shell_tokens};
+    use super::{
+        Token, github_url, json_tokens, line_of, raw_object, raw_table, scripts, shell_tokens,
+        toml_tokens,
+    };
     use goat_hooker::config::Hook;
 
     #[test]
@@ -543,5 +686,30 @@ mod tests {
             github_url("https://github.com/a/b.git", None, "./hooks/r.json").as_deref(),
             Some("https://github.com/a/b/blob/HEAD/hooks/r.json")
         );
+    }
+
+    #[test]
+    fn toml_hook_is_found_with_its_tables() {
+        let content = "parallel = true\n\n[[hooks]]\nname = \"fmt\"\ncmd = \"rustfmt\"\n\n[hooks.permissions]\nfiles = \"write\"\n\n[[hooks]]\nname = \"test\"\ncmd = \"cargo test\"\n";
+        let line = line_of(content, "fmt").unwrap();
+        assert_eq!(line, 4);
+        let (first, text) = raw_table(content, line).unwrap();
+        assert_eq!(first, 3);
+        assert_eq!(
+            text,
+            "[[hooks]]\nname = \"fmt\"\ncmd = \"rustfmt\"\n\n[hooks.permissions]\nfiles = \"write\""
+        );
+        let (_, last) = raw_table(content, line_of(content, "test").unwrap()).unwrap();
+        assert!(last.ends_with("cmd = \"cargo test\""));
+    }
+
+    #[test]
+    fn toml_colors() {
+        let line = r#"env = ["HOME", 'raw\path'] # why"#;
+        let kinds: Vec<Token> = toml_tokens(line).into_iter().map(|(_, t)| t).collect();
+        assert_eq!(kinds[0], Token::Key);
+        assert!(kinds.contains(&Token::String));
+        assert_eq!(*kinds.last().unwrap(), Token::Comment);
+        assert_eq!(toml_tokens("[[hooks]]")[0].1, Token::Key);
     }
 }

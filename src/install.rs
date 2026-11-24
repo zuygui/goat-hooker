@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    config::{Config, ConfigLoader, HOOK_CONFIG_FILENAME, Trigger},
+    config::{Config, ConfigLoader, Trigger, config_path},
     errors::GoatHookerError,
     git,
 };
@@ -31,7 +31,7 @@ pub fn used_triggers(configs: &[Config]) -> Vec<Trigger> {
 /// Triggers to install for the repository (every trigger when its config can't be read)
 fn triggers_of(root: &Path) -> Vec<Trigger> {
     ConfigLoader::new()
-        .load_recursive(&root.join(HOOK_CONFIG_FILENAME))
+        .load_recursive(&config_path(root))
         .map(|configs| used_triggers(&configs))
         .unwrap_or_else(|_| Trigger::ALL.to_vec())
 }
@@ -173,7 +173,7 @@ mod tests {
             .status()
             .unwrap();
         fs::write(
-            root.join(HOOK_CONFIG_FILENAME),
+            root.join(crate::config::JSON_CONFIG_FILENAME),
             r#"{ "hooks": [ { "name": "msg", "trigger": "commit-msg", "cmd": "true" } ] }"#,
         )
         .unwrap();

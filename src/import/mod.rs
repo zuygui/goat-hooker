@@ -1,4 +1,4 @@
-//! `hooker import`: converts the configs of other Git hooks managers to `hooker.config.json`.
+//! `hooker import`: converts the configs of other Git hooks managers to `hooker.toml`.
 //!
 //! - husky (`.husky/*` scripts, or `husky.hooks` in package.json) and lint-staged
 //! - lefthook (`lefthook.yml`)
@@ -15,7 +15,7 @@ use std::{
 use serde_json::Value;
 
 use crate::{
-    config::{Config, HOOK_CONFIG_FILENAME, Hook, SCHEMA_URL, Trigger},
+    config::{Config, Hook, SCHEMA_URL, Trigger, config_path},
     errors::GoatHookerError,
 };
 
@@ -109,7 +109,7 @@ pub fn write(
     let files: Vec<PathBuf> = imported
         .configs
         .keys()
-        .map(|dir| root.join(dir).join(HOOK_CONFIG_FILENAME))
+        .map(|dir| config_path(&root.join(dir)))
         .collect();
     if !force && let Some(existing) = files.iter().find(|f| f.exists()) {
         return Err(GoatHookerError::InvalidHook {
@@ -123,7 +123,7 @@ pub fn write(
     for (dir, config) in &imported.configs {
         let dir = root.join(dir);
         fs::create_dir_all(&dir)?;
-        config.write_to_file(&dir.join(HOOK_CONFIG_FILENAME))?;
+        config.write_to_file(&config_path(&dir))?;
     }
     Ok(files)
 }

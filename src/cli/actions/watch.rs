@@ -3,7 +3,7 @@ use std::{thread, time::Duration};
 use colored::Colorize;
 
 use goat_hooker::{
-    config::{ConfigLoader, HOOK_CONFIG_FILENAME},
+    config::ConfigLoader,
     errors::GoatHookerError,
     watch::{self, Round},
 };
@@ -20,7 +20,7 @@ const OUTPUT_LINES: usize = 30;
 /// `hooker watch`: runs the cached pre-commit hooks each time files are staged
 pub fn watch() -> Result<(), GoatHookerError> {
     let root = ui::current_repo()?;
-    let config_path = root.join(HOOK_CONFIG_FILENAME);
+    let config_path = goat_hooker::config::config_path(&root);
     let load = || -> Result<_, GoatHookerError> {
         let configs = ConfigLoader::new().load_recursive(&config_path)?;
         Ok(watch::prepare(&configs))

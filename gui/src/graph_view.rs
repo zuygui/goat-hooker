@@ -1,5 +1,5 @@
 //! Graph shown in the node editor: the nodes of a trigger, placed automatically,
-//! and the changes of the links (`needs`, `inputs`) written to the `hooker.config.json` files.
+//! and the changes of the links (`needs`, `inputs`) written to the config files.
 
 use std::path::{Path, PathBuf};
 
@@ -34,7 +34,7 @@ pub struct ViewNode {
     pub after: Vec<usize>,
     /// Why it isn't allowed to run (its lineage is cut)
     pub denied: Option<String>,
-    /// Hook written in a `hooker.config.json` of the repository (not loaded from a shared file)
+    /// Hook written in a config of the repository (not loaded from a shared file)
     pub editable: bool,
     /// Column (dependency level) and row in the column
     pub column: usize,

@@ -2,7 +2,7 @@ use colored::Colorize;
 use inquire::Confirm;
 
 use goat_hooker::{
-    config::{ConfigLoader, FileAccess, HOOK_CONFIG_FILENAME, Hook, Origin},
+    config::{ConfigLoader, FileAccess, Hook, Origin},
     errors::GoatHookerError,
     trust,
 };
@@ -15,7 +15,7 @@ pub fn trust_hooks(all: bool) -> Result<(), GoatHookerError> {
     let root = ui::current_repo()?;
     let Some(config_path) = resolve_config(&root, None) else {
         return Err(GoatHookerError::ConfigNotFound(
-            root.join(HOOK_CONFIG_FILENAME),
+            goat_hooker::config::config_path(&root),
         ));
     };
     let configs = ConfigLoader::new().load_recursive(&config_path)?;

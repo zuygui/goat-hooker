@@ -4,7 +4,7 @@ use colored::Colorize;
 use inquire::{Confirm, Select, Text, validator::Validation};
 
 use goat_hooker::{
-    config::{Config, ConfigLoader, HOOK_CONFIG_FILENAME, Hook, Trigger},
+    config::{Config, ConfigLoader, Hook, Trigger},
     errors::GoatHookerError,
     install,
 };
@@ -63,7 +63,7 @@ fn split_patterns(values: &[String]) -> Vec<String> {
 
 pub fn add_hook(args: AddArgs) -> Result<(), GoatHookerError> {
     let root = ui::current_repo()?;
-    let config_path = root.join(HOOK_CONFIG_FILENAME);
+    let config_path = goat_hooker::config::config_path(&root);
     if !config_path.exists() {
         return Err(GoatHookerError::ConfigNotFound(config_path));
     }
@@ -80,7 +80,9 @@ pub fn add_hook(args: AddArgs) -> Result<(), GoatHookerError> {
                 .iter()
                 .find(|f| f.parent() == Some(dir.as_path()))
                 .cloned()
-                .ok_or_else(|| GoatHookerError::ConfigNotFound(dir.join(HOOK_CONFIG_FILENAME)))?
+                .ok_or_else(|| {
+                    GoatHookerError::ConfigNotFound(goat_hooker::config::config_path(&dir))
+                })?
         }
         None => {
             let current = project_of_cwd(&files).unwrap_or_else(|| files[0].clone());

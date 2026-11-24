@@ -16,6 +16,18 @@ pub enum GoatHookerError {
         source: serde_json::Error,
     },
 
+    #[error("Failed to parse TOML config file {path:?}: {source}")]
+    TomlError {
+        path: PathBuf,
+        source: Box<toml::de::Error>,
+    },
+
+    #[error("Failed to write the TOML config file {path:?}: {source}")]
+    TomlWriteError {
+        path: PathBuf,
+        source: toml::ser::Error,
+    },
+
     #[error("Invalid hook `{name}`: {reason}")]
     InvalidHook { name: String, reason: String },
 

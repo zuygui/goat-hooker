@@ -1,7 +1,7 @@
 use colored::Colorize;
 
 use goat_hooker::{
-    config::{Config, ConfigLoader, HOOK_CONFIG_FILENAME},
+    config::{Config, ConfigLoader},
     errors::GoatHookerError,
     remote,
 };
@@ -12,7 +12,7 @@ use crate::cli::ui;
 fn raw_configs(
     root: &std::path::Path,
 ) -> Result<Vec<(std::path::PathBuf, Config)>, GoatHookerError> {
-    let config_path = root.join(HOOK_CONFIG_FILENAME);
+    let config_path = goat_hooker::config::config_path(root);
     if !config_path.exists() {
         return Err(GoatHookerError::ConfigNotFound(config_path));
     }

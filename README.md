@@ -28,18 +28,36 @@ hooker init -t auto   # start from the hooks found for your project
 hooker install        # plug them into Git
 ```
 
-`hooker.config.json`:
+`hooker.toml`:
 
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json",
-  "hooks": [
-    { "name": "fmt", "trigger": "pre-commit", "include": ["**/*.rs"], "cmd": "rustfmt {files}", "stage_fixed": true },
-    { "name": "clippy", "trigger": "pre-commit", "include": ["**/*.rs"], "cmd": "cargo clippy -- -D warnings", "needs": ["fmt"], "cache": true },
-    { "name": "test", "trigger": "pre-push", "include": ["**/*.rs"], "cmd": "cargo test" },
-    { "name": "message", "trigger": "commit-msg", "cmd": "grep -qE '^(feat|fix|docs|chore)(\\(.+\\))?: ' \"$1\"" }
-  ]
-}
+```toml
+#:schema https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json
+
+[[hooks]]
+name = "fmt"
+trigger = "pre-commit"
+include = ["**/*.rs"]
+cmd = "rustfmt {files}"
+stage_fixed = true
+
+[[hooks]]
+name = "clippy"
+trigger = "pre-commit"
+include = ["**/*.rs"]
+cmd = "cargo clippy -- -D warnings"
+needs = ["fmt"]
+cache = true
+
+[[hooks]]
+name = "test"
+trigger = "pre-push"
+include = ["**/*.rs"]
+cmd = "cargo test"
+
+[[hooks]]
+name = "message"
+trigger = "commit-msg"
+cmd = '''grep -qE '^(feat|fix|docs|chore)(\(.+\))?: ' "$1"'''
 ```
 
 <p align="center">
@@ -58,7 +76,7 @@ Goats keep their footing on the steepest cliffs. Goat Hooker keeps your commits 
 - **Fast.** One native binary, hooks in parallel and a cache. `hooker watch` runs the hooks while you stage, so the commit itself is instant.
 - **Hooks that work together.** Hooks wait for each other and pass values: `codegen` hands its schema to `client`. Shared variables record who may read and write them.
 - **Safe with other people's hooks.** Hooks from other repositories run only once you reviewed them, and again only after you review their changes. They get read-only files, no network and a filtered environment unless they are allowed more.
-- **A desktop app.** See what the next commit will run, edit hooks without touching the JSON, wire them like nodes in Blender, and read their output live.
+- **A desktop app.** See what the next commit will run, edit hooks without touching the config file, wire them like nodes in Blender, and read their output live.
 - **Easy to adopt.**
   - `hooker import` converts husky / lint-staged, lefthook and pre-commit configs.
   - `hooker init` starts from ready-made hooks for Rust, JavaScript and Python.
@@ -140,7 +158,7 @@ cargo test --workspace
 cargo run -p goat-hooker-gui    # the app
 ```
 
-On Linux, the app needs the development packages of `libxkbcommon`, `wayland`, `vulkan`, `fontconfig` and `xcb`. Goat Hooker checks itself with its own hooks (`hooker.config.json`). See [CONTRIBUTING.md](CONTRIBUTING.md) and [how releases work](docs/releasing.md).
+On Linux, the app needs the development packages of `libxkbcommon`, `wayland`, `vulkan`, `fontconfig` and `xcb`. Goat Hooker checks itself with its own hooks (`hooker.toml`). See [CONTRIBUTING.md](CONTRIBUTING.md) and [how releases work](docs/releasing.md).
 
 ## Contributors
 

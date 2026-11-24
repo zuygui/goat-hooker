@@ -39,7 +39,7 @@
       }
     },
     "imports": {
-      "description": "Sub-projects folders, each one with its own hooker.config.json. Globs are supported (packages/*)",
+      "description": "Sub-projects folders, each one with its own hooker.toml. Globs are supported (packages/*)",
       "type": [
         "array",
         "null"
@@ -49,7 +49,7 @@
       }
     },
     "discover": {
-      "description": "Load every hooker.config.json of the repository (files ignored by git are skipped)",
+      "description": "Load every hooker config of the repository (files ignored by git are skipped)",
       "type": [
         "boolean",
         "null"

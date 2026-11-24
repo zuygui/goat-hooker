@@ -1,4 +1,4 @@
-//! Autocompletion of `hooker.config.json`: where the cursor is (which key of which object),
+//! Autocompletion of a JSON config (`hooker.config.json`): where the cursor is (which key of which object),
 //! and what can be written there (keys of the schema, triggers, hooks, variables, outputs...).
 
 use goat_hooker::config::{BUILTIN_OUTPUTS, SCHEMA_URL, Trigger};
@@ -202,7 +202,7 @@ fn keys(path: &[Segment]) -> Vec<(&'static str, &'static str, &'static str)> {
             ),
             (
                 "discover",
-                "Load every hooker.config.json of the repository",
+                "Load every hooker config of the repository",
                 "true",
             ),
             (
