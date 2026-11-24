@@ -18,7 +18,7 @@ In your repository:
 hooker init
 ```
 
-It offers the hooks of the catalogue, with the ones matching your project already picked (Rust, JavaScript, Python, common checks, conventional commits). `hooker init -t auto` picks them without asking. Already using husky, lefthook or pre-commit? Skip `hooker init`: Goat Hooker reads their config as it is (see [Coming from another tool](shared-hooks.md#coming-from-husky-lefthook-or-pre-commit)).
+It offers the hooks of the catalogue, with the ones matching your project already picked (Rust, JavaScript, Python, common checks, conventional commits). `hooker init -t auto` picks them without asking. Already using husky, lefthook or pre-commit? Skip `hooker init`: Goat Hooker reads their config as it is (see [Coming from another tool](migrating.md)).
 
 You get a `hooker.toml`:
 
@@ -71,6 +71,7 @@ The app shows the hooks of the next commit, runs them with their output live, an
 
 ## Next
 
-- [Configuration](configuration.md): every field of a hook
+- [Configuration](configuration.md): how a config is organized
+- [Choosing the files](files.md) and [Writing commands](commands.md)
 - [Mono-repos](monorepos.md): a config per project
-- [The `hooker` CLI](cli.md): `watch`, `fix`, `doctor`, CI
+- [Running hooks](running.md): skipping hooks, `watch`, `fix`, `doctor`

@@ -29,24 +29,53 @@ export default defineConfig({
         {
           label: "Getting started",
           items: [
+            { label: "Introduction", link: "/docs/" },
             { label: "Quickstart", link: "/docs/quickstart/" },
             { label: "Installation", link: "/docs/installation/" },
+            { label: "Coming from another tool", link: "/docs/migrating/" },
           ],
         },
         {
-          label: "Guides",
+          label: "Writing hooks",
           items: [
             { label: "Configuration", link: "/docs/configuration/" },
-            { label: "Mono-repos", link: "/docs/monorepos/" },
+            { label: "Choosing the files", link: "/docs/files/" },
+            { label: "Writing commands", link: "/docs/commands/" },
             { label: "Hooks graph and variables", link: "/docs/graph/" },
-            { label: "Shared hooks", link: "/docs/shared-hooks/" },
+            { label: "Local changes", link: "/docs/local-changes/" },
+          ],
+        },
+        {
+          label: "Using hooks",
+          items: [
+            { label: "Running hooks", link: "/docs/running/" },
+            { label: "Cache", link: "/docs/cache/" },
+            { label: "Mono-repos", link: "/docs/monorepos/" },
+            { label: "Continuous integration", link: "/docs/ci/" },
             { label: "Desktop app", link: "/docs/desktop-app/" },
+          ],
+        },
+        {
+          label: "Sharing hooks",
+          items: [
+            { label: "Shared hooks", link: "/docs/shared-hooks/" },
+            { label: "Hooks of the pre-commit ecosystem", link: "/docs/precommit-hooks/" },
+            { label: "Security", link: "/docs/security/" },
           ],
         },
         {
           label: "Reference",
           items: [
-            { label: "The hooker CLI", link: "/docs/cli/" },
+            { label: "Configuration reference", link: "/docs/config-reference/" },
+            { label: "CLI reference", link: "/docs/cli/" },
+            { label: "Environment and files", link: "/docs/environment/" },
+            { label: "FAQ and troubleshooting", link: "/docs/faq/" },
+          ],
+        },
+        {
+          label: "Project",
+          items: [
+            { label: "Benchmarks", link: "https://github.com/zuygui/goat-hooker/tree/main/benchmarks" },
             { label: "Releasing", link: "/docs/releasing/" },
           ],
         },

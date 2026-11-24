@@ -37,7 +37,7 @@ cmd = "npm run e2e"
 | `outputs` | Values a hook writes with `echo "name=value" >> $HOOKER_OUTPUT` |
 | `inputs` | Values from other hooks: `{ "name": "hook.output" }`, available as `{name}` (shell-escaped) and `$name` in the commands. Every hook also has the `files`, `stdout` and `status` outputs |
 
-- every hook starts as soon as the hooks it waits for have passed (in parallel with `"parallel": true`)
+- every hook starts as soon as the hooks it waits for have passed (in parallel with `parallel = true`)
 - when a hook fails, the hooks waiting for it are skipped
 - a hook a matching hook waits for runs too, even if none of the staged files match it
 - `hooker run pre-commit --dry-run` shows the graph: order, dependencies, inputs and files

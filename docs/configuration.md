@@ -1,69 +1,99 @@
 # Configuration
 
-`hooker.toml` at the root of the repository (`hooker.config.json` is still read, and `hooker.toml` wins when a folder has both):
+The hooks of a repository live in `hooker.toml`, at its root, committed with the code.
 
 ```toml
 #:schema https://raw.githubusercontent.com/zuygui/goat-hooker/main/schema.json
 
-imports = ["api", "front"]
+parallel = true
 
 [[hooks]]
 name = "fmt"
 trigger = "pre-commit"
 include = ["src/**/*.rs"]
-exclude = ["src/generated/*.rs"]
-cmd = "rustfmt --check {files}"
+exclude = ["src/generated/**"]
+cmd = "rustfmt {files}"
+stage_fixed = true
+
+[[hooks]]
+name = "clippy"
+trigger = "pre-commit"
+include = ["**/*.rs", "Cargo.toml"]
+cmd = "cargo clippy -- -D warnings"
 
 [[hooks]]
 name = "commit message"
 trigger = "commit-msg"
-cmds = ["grep -qE '^(feat|fix|chore|docs|refactor|test|ci)' \"$1\""]
+cmd = "grep -qE '^(feat|fix|docs|chore)(\\(.+\\))?: ' \"$1\""
 ```
 
-| Field     | Description |
-|-----------|-------------|
-| `imports` | Sub-projects folders, each one with its own `hooker.toml`. Globs are supported (`packages/*`) |
-| `discover` | `true` to load every `hooker.toml` (or `hooker.config.json`) of the repository (files ignored by git are skipped) |
-| `name`    | Hook name |
-| `trigger` | Git hook: `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit`, `pre-rebase`, `post-rewrite`, `pre-push`, `applypatch-msg`, `pre-applypatch`, `post-applypatch`, `pre-auto-gc`, `post-checkout`, `post-merge` |
-| `include` | Glob patterns, relative to the config folder. Without it, the hook targets all files |
-| `exclude` | Glob patterns of files to ignore |
-| `include_regex` / `exclude_regex` | Regexes on the path of a file (relative to the config folder, with `/`), like `files` / `exclude` in pre-commit. `include_regex` must match as well as `include` |
-| `always_run` | Runs even when none of its files changed |
-| `types` | Kinds of files it targets, all of them must match: `text`, `binary`, `executable`, `non-executable`, `symlink`, `file` |
-| `id` | With `from`: a hook of the repository's `.pre-commit-hooks.yaml` (see [Hooks of the pre-commit ecosystem](shared-hooks.md#hooks-of-the-pre-commit-ecosystem)) |
-| `args` / `additional_dependencies` / `isolate` | Arguments, extra packages and environment of an `id` hook |
-| `cmd` / `cmds` | Shell command(s) to run, from the config folder. Git arguments are available as `$1`, `$2`... A command made of plain words and placeholders (`cargo fmt -- {files}`) starts without a shell, which is faster; anything else runs with `sh -c`. |
-| `stage_fixed` | `true` to re-stage the targeted files after the hook (formatters) |
-| `path` | Hooks file to load (`{ "hooks": [...] }`), relative to the config folder |
-| `from` / `rev` | Git repository (and branch or tag) to load `path` from, cloned once in `~/.cache/goat-hooker` |
-| `parallel` | Root config only: `true` to run hooks in parallel |
-| `branches` / `skip_branches` | Run the hook only on these branches, or not on these ones (globs: `main`, `release/*`) |
-| `timeout` | Stop the hook (and what it started) after this time and fail it: `30s`, `2m`, `500ms` |
+## The files
 
-`*` doesn't cross folders, use `**` for that.
+| File | What it is |
+|------|------------|
+| `hooker.toml` | The config, committed. `hooker init` creates it |
+| `hooker.config.json` | The same in JSON: still read, `hooker.toml` wins when a folder has both |
+| `hooker.local.toml` | Changes for your computer only, not committed (see [Local changes](local-changes.md)) |
+| `lefthook.yml`, `.pre-commit-config.yaml`, `.husky/` | Without a hooker config, read as they are (see [Coming from another tool](migrating.md)) |
 
-The `#:schema` line gives autocompletion and errors in TOML editors (Taplo, Even Better TOML for VS Code, Zed). In a `hooker.config.json`, the same URL goes in `"$schema"`. `hooker schema` prints the schema.
+In a mono-repo, each project can have its own `hooker.toml`, loaded by the root one with `imports` (see [Mono-repos](monorepos.md)).
 
-## Local changes
+## A hook
 
-`hooker.local.toml` (or `hooker.local.json`), next to a `hooker.toml`, holds the changes of your computer only (add it to `.gitignore`; `hooker doctor` warns when it is committed). A hook with the name of an existing one changes its fields, `disabled = true` turns it off, another name adds a hook, and the other keys replace the ones of the config:
+A hook is a `[[hooks]]` table. Three fields make a working hook:
 
-```toml
-parallel = true
+- `name`: how it is shown, and how other hooks and `HOOKER_SKIP` refer to it
+- `trigger`: the Git hook that runs it (`pre-commit`, `commit-msg`, `pre-push`...; see [Triggers](#triggers))
+- `cmd` (or `cmds`, several commands in order): what it runs, from the folder of the config (see [Writing commands](commands.md))
 
-[[hooks]]
-name = "test"
-disabled = true
+Then, optionally:
 
-[[hooks]]
-name = "clippy"
-timeout = "2m"
+- **which files**: `include`, `exclude`, regexes, file kinds (see [Choosing the files](files.md))
+- **what it changes**: `stage_fixed` stages again the files a formatter fixed
+- **when**: `branches`, `skip_branches`, `timeout`, `cache` (see [Running hooks](running.md) and [Cache](cache.md))
+- **with other hooks**: `needs`, `inputs`, `outputs`, `steps`, variables (see [Hooks graph and variables](graph.md))
+- **from elsewhere**: `path`, `from`, `id` (see [Shared hooks](shared-hooks.md) and [Hooks of the pre-commit ecosystem](precommit-hooks.md))
+- **what it may do**: `permissions` (see [Security](security.md))
 
-[[hooks]]
-name = "notes"
-trigger = "post-commit"
-cmd = "./my-notes.sh"
+Every field is in the [configuration reference](config-reference.md).
+
+## The root keys
+
+| Key | What it does |
+|-----|--------------|
+| `parallel` | `true` runs the hooks of a trigger in parallel (root config only). Hooks still wait for the ones they `needs` |
+| `imports` | Folders of the sub-projects, each with its own `hooker.toml`. Globs work: `packages/*` |
+| `discover` | `true` loads every `hooker.toml` of the repository (ignored files skipped) |
+| `depends_on` | Projects this one depends on, besides the ones read from the manifests (see [Affected projects](monorepos.md#affected-projects)) |
+| `variables` | Values shared between hooks (see [Variables](graph.md#variables)) |
+| `share` | Shares the hooks files of the repository (see [Share your hooks](shared-hooks.md#share-your-hooks)) |
+
+## Triggers
+
+| Trigger | When | Files | Arguments (`$1`...) |
+|---------|------|-------|---------------------|
+| `pre-commit` | Before a commit is created | Staged files | — |
+| `prepare-commit-msg` | Before the message editor opens | — | Message file, source, commit |
+| `commit-msg` | To check the message | — | Message file |
+| `post-commit` | After a commit | — | — |
+| `pre-push` | Before a push | Files of the pushed commits | Remote name, URL (refs on stdin) |
+| `pre-rebase` | Before a rebase | — | Upstream, branch |
+| `post-rewrite` | After an amend or a rebase | — | `amend` or `rebase` (rewritten commits on stdin) |
+| `post-checkout` | After a checkout or a switch | — | Previous HEAD, new HEAD, branch flag |
+| `post-merge` | After a merge (and `git pull`) | — | Squash flag |
+| `applypatch-msg`, `pre-applypatch`, `post-applypatch` | During `git am` | — | Message file (`applypatch-msg`) |
+| `pre-auto-gc` | Before `git gc --auto` | — | — |
+
+Only `pre-commit` and `pre-push` have files: their hooks run when one of their files changed. The hooks of the other triggers always run.
+
+## Editor support
+
+The `#:schema` line gives autocompletion, documentation on hover and errors in TOML editors: Taplo, Even Better TOML for VS Code, Zed, JetBrains IDEs. In a `hooker.config.json`, the same URL goes in `"$schema"`. `hooker schema` prints the schema.
+
+## Checking a config
+
+```sh
+hooker list                      # every hook, as it is read (shared ones included)
+hooker run pre-commit --dry-run  # what the next commit would run, on which files, and why
+hooker doctor                    # what could go wrong, and how to fix it
 ```
-
-It also applies to the hooks loaded from a hooks file (`path`).

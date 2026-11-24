@@ -46,7 +46,7 @@ export const tools = [
       ["", ""],
       ["✔ ", "2 hooks passed in 1.10s"],
     ],
-    doc: "/goat-hooker/docs/cli/",
+    doc: "/goat-hooker/docs/running/",
   },
   {
     id: "watch",
@@ -61,7 +61,7 @@ export const tools = [
       ["$ ", 'git commit -m "fix: overflow"'],
       ["✔ ", "2 hooks passed in 21ms"],
     ],
-    doc: "/goat-hooker/docs/cli/#watch",
+    doc: "/goat-hooker/docs/running/#ahead-of-the-commit-watch",
   },
   {
     id: "fix",
@@ -76,7 +76,7 @@ export const tools = [
       ["", ""],
       ["   ", "Fixed 3 files: web/src/app.tsx, web/src/api.ts, core/src/lib.rs"],
     ],
-    doc: "/goat-hooker/docs/cli/",
+    doc: "/goat-hooker/docs/running/#fixing-files-fix",
   },
   {
     id: "import",
@@ -92,7 +92,7 @@ export const tools = [
       ["✔ ", "eslint  root  41ms"],
       ["✔ ", "prettier  root  38ms"],
     ],
-    doc: "/goat-hooker/docs/shared-hooks/#coming-from-husky-lefthook-or-pre-commit",
+    doc: "/goat-hooker/docs/migrating/",
   },
   {
     id: "doctor",
@@ -107,7 +107,7 @@ export const tools = [
       ["! ", "`docs` (core) matches no file"],
       ["→ ", "`clippy` (root) takes 5.6s on each commit"],
     ],
-    doc: "/goat-hooker/docs/cli/#doctor",
+    doc: "/goat-hooker/docs/running/#doctor",
   },
   {
     id: "ci",
@@ -122,7 +122,7 @@ export const tools = [
       ["", "  with:"],
       ["", "    trigger: pre-commit"],
     ],
-    doc: "/goat-hooker/docs/cli/#ci",
+    doc: "/goat-hooker/docs/ci/",
   },
 ];
 
@@ -205,6 +205,30 @@ name = "team rules"
 from = "https://github.com/acme/hooks"
 rev = "v1"
 path = "rust.json"`,
+  },
+  {
+    id: "ecosystem",
+    label: "pre-commit hooks",
+    title: "The whole pre-commit ecosystem",
+    text: "Any hook with a .pre-commit-hooks.yaml works with from + id: ruff, prettier, shellcheck, codespell... Your installed tools first; otherwise Goat Hooker builds them once with the toolchains of your computer (venv or uv, npm, cargo, go), and never downloads a runtime.",
+    file: "hooker.toml",
+    code: `[[hooks]]
+from = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.8.0"
+id = "ruff"
+args = ["--fix"]
+
+[[hooks]]
+from = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v5.0.0"
+id = "trailing-whitespace"
+
+[[hooks]]
+from = "https://github.com/pre-commit/mirrors-prettier"
+rev = "v3.1.0"
+id = "prettier"
+# its own npm install, at this rev
+isolate = true`,
   },
   {
     id: "permissions",

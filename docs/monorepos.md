@@ -10,7 +10,7 @@ my-repo/
     └── front/hooker.toml
 ```
 
-Or let goat-hooker find them all with `{ "discover": true }`.
+Or let Goat Hooker find them all with `discover = true`.
 
 For each sub-project:
 
@@ -18,6 +18,8 @@ For each sub-project:
 - commands run from its folder
 - `pre-commit` hooks only run if a staged file belongs to it, `pre-push` hooks only if a pushed commit changed one of its files
 - `{files}` in a command is replaced by the targeted files (relative to its folder, shell-escaped), also available in `$HOOKER_FILES` (one per line)
+- `parallel` is set by the root config, for every project
+- other hooks refer to its hooks as `project:name` (`packages/api:build`), in `needs` and in `HOOKER_SKIP`
 
 ```toml
 [[hooks]]
@@ -42,4 +44,4 @@ include = ["**/*.rs"]
 affected = true
 ```
 
-The dependencies are read from the manifests (Cargo `path` dependencies, packages of the repository in `package.json`, `replace` in `go.mod`, `path` dependencies in `pyproject.toml`), plus `depends_on` in a config (`"depends_on": ["../core"]`). `hooker run --dry-run` says why each hook runs.
+The dependencies are read from the manifests (Cargo `path` dependencies, packages of the repository in `package.json`, `replace` in `go.mod`, `path` dependencies in `pyproject.toml`), plus `depends_on` in a config (`depends_on = ["../core"]`). `hooker run --dry-run` says why each hook runs, and the app draws the projects and their dependencies on its **Project graph** page.

@@ -278,7 +278,7 @@
           ]
         },
         "from": {
-          "description": "Git repository URL to load the hooks file from (requires `path`)",
+          "description": "Git repository to load a hooks file (`path`) or a hook of its .pre-commit-hooks.yaml (`id`) from",
           "type": [
             "string",
             "null"

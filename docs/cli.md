@@ -1,90 +1,176 @@
-# The `hooker` CLI
+# CLI reference
 
 ```sh
-hooker             # status: Git hooks, projects, hooks of the next commit
-hooker init        # create hooker.toml (pick hooks to start with)
-hooker init -t auto   # with the hooks found for the project (rust, javascript, python...)
-hooker fix         # run the hooks fixing files on the changed files, without staging
-hooker add         # add a hook (an assistant asks what's missing)
-hooker install     # install the Git hooks in .git/hooks (or core.hooksPath)
-hooker run pre-commit   # run manually the hooks of a trigger
-hooker run pre-commit -v   # also show the output of the hooks that passed
-hooker run pre-commit --dry-run   # show the hooks that would run, and on which files
-hooker list        # list the configurations and their hooks
-hooker update      # update the hooks loaded from git repositories
-hooker search rust # find hooks shared on GitHub and add them
-hooker ci          # run the hooks on the files changed by a pull request (CI)
-hooker cache-clear # forget the results of the hooks that passed
-hooker history     # last runs and slowest hooks
-hooker history --export csv -o hooks.csv   # totals by hook, for the team
-hooker trust       # review and trust the hooks loaded from other repositories
-hooker outdated    # hooks of other repositories with a newer version
-hooker pin         # pin them to the commit in use
-hooker vars        # variables shared between hooks: value, writers, readers
-hooker import      # convert a husky / lint-staged, lefthook or pre-commit config
-hooker schema      # print the JSON schema of the configuration (TOML editors use it too)
-hooker completion zsh > ~/.zfunc/_hooker   # shell completion
+hooker [COMMAND]
 ```
 
-`hooker add` also works without a terminal:
+Without a command, `hooker` shows the status of the repository (like `hooker status`). Every command works from any folder of the repository.
+
+## Setting up
+
+### `hooker init`
+
+Creates `hooker.toml`, starting from hooks of the [catalogue](shared-hooks.md#the-catalogue).
+
+| Option | |
+|--------|-|
+| `-t, --template <NAMES>` | `rust`, `javascript`, `python`, `checks`, `commits`, separated by commas, or `auto` (picked from the files of the project). Asked in a terminal when missing |
+| `-w <DIR>` | Folder of the config (default: the current one) |
+
+### `hooker install`
+
+Installs the Git hooks of the triggers the configs use, plus `pre-commit` (which adds or removes the others when the configs change), in `.git/hooks` or the folder of `core.hooksPath`.
+
+| Option | |
+|--------|-|
+| `-f, --force` | Also replace the hooks Goat Hooker didn't install (another tool's, hand-written ones) |
+
+### `hooker import`
+
+Converts the configs of husky + lint-staged, lefthook and pre-commit to `hooker.toml` (see [Coming from another tool](migrating.md)).
+
+| Option | |
+|--------|-|
+| `--dry-run` | Show the converted hooks without writing them |
+| `-f, --force` | Replace the existing hooker configs |
+
+### `hooker add`
+
+Adds a hook. In a terminal, asks what's missing; without one, takes everything from the options:
 
 ```sh
 hooker add -n "ESLint" -t pre-commit -i "src/**/*.ts" -c "eslint {files}" -p packages/web
 ```
 
-Hooks show a spinner while running, then a summary. Only the output of the failed hooks is shown (all of them with `-v`).
+| Option | |
+|--------|-|
+| `-n, --name <NAME>` | Hook name |
+| `-t, --trigger <TRIGGER>` | Git hook that runs it |
+| `-c, --cmd <CMD>` | Command (repeat for several) |
+| `-i, --include <GLOB>` | Files (repeat, or separate with commas) |
+| `-e, --exclude <GLOB>` | Ignored files |
+| `--stage-fixed` | Stage the files again after the hook |
+| `-p, --project <DIR>` | Project of the mono-repo (default: the one of the current folder) |
 
-`hooker install` installs the Git hooks of the triggers your configs use, plus pre-commit, which adds or removes the others when the configs change. It doesn't overwrite hooks it didn't install, use `--force` for that.
+## Running
 
-`HOOKER_SKIP=1 git commit` skips the hooks, `HOOKER_SKIP=lint,test git commit` only these ones (by name, `project:name` or `hook/step`); what waits for them still runs.
+### `hooker run <TRIGGER> [-- ARGS...]`
 
-A run started by Git that takes 10 seconds or more ends with a desktop notification (a long pre-push, say). `HOOKER_NOTIFY=0` turns it off, `HOOKER_NOTIFY=60` only notifies after a minute.
+Runs the hooks of a trigger, like Git does. `ARGS` are the arguments Git would give (`$1`, `$2`...).
 
-## Watch
+| Option | |
+|--------|-|
+| `--dry-run` | Show the hooks that would run, their files, their order and why, without running them |
+| `-v, --verbose` | Show the output of every hook, not only the failed ones |
+| `--no-cache` | Run every hook, even those that already passed with the same files |
+| `-c <FILE>` | Another config file |
 
-`hooker watch` runs the pre-commit hooks each time files are staged, so `git commit` takes their results from the cache and finishes at once (and you know a hook fails before you commit):
+### `hooker watch`
 
-```
-$ hooker watch
-👀 Watching the staged files · 2 hooks: clippy, test
-✔ clippy 5.61s  ✔ test 8.02s  ready to commit
-```
+Runs the cached pre-commit hooks each time files are staged, so the commit takes their results at once. See [Running hooks](running.md#ahead-of-the-commit-watch).
 
-Only the hooks that the commit would take from the cache run ahead: cached, with `include`, not fixing files (`stage_fixed`), without `needs`, `inputs` or variables. They run on the files as they are, so a staged file that also has unstaged changes is waited for. Nothing is staged or put aside.
+### `hooker fix [FILES...]`
 
-## Doctor
+Runs the hooks fixing files (`stage_fixed`) on the files changed since the last commit, or on `FILES`, without staging them.
 
-`hooker doctor` checks the setup and says how to fix what it finds:
+| Option | |
+|--------|-|
+| `-v, --verbose` | Show the output of every hook |
 
-- Git hooks not installed, overwritten by hand, or bypassed by `core.hooksPath`
-- tools the commands use that aren't installed
-- `include` patterns that match no file (the hook never runs)
-- variables nobody reads or writes, and denied accesses
-- hooks of other repositories that aren't trusted
-- from the history: slow pre-commit hooks (cache them or move them to pre-push) and hooks that fail most of the time
+### `hooker ci`
 
-It exits with an error when it finds one, so it can run in CI. The app shows the same checks on its **Doctor** page.
+Runs the hooks on the files changed by a pull request or a push. See [Continuous integration](ci.md).
 
-## CI
+| Option | |
+|--------|-|
+| `-t, --trigger <TRIGGER>` | Trigger whose hooks run (default: `pre-commit`) |
+| `--base <REF>` | Commit or branch to compare with (default: the base of the pull request, or `origin/HEAD`) |
+| `-v, --verbose` | Show the output of every hook |
 
-`hooker ci` runs the hooks of a trigger (`--trigger`, `pre-commit` by default) on the files changed since a base commit (`--base`, by default the base of the pull request or `origin/HEAD`). Nothing is staged: a formatter that changes a file fails, the file should have been fixed before the commit. Hooks of other repositories are trusted, since the CI runs the code of the repository anyway.
+## Looking
 
-On GitHub, use the action (it installs `hooker` from the releases and annotates the failed hooks):
+### `hooker status`
 
-```yaml
-on: [pull_request, push]
-jobs:
-  hooks:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: zuygui/goat-hooker@main
-        with:
-          trigger: pre-commit # default
-```
+The Git hooks, the config in use, the projects and their hooks, and what the next commit will run.
 
-## Cache
+### `hooker list`
 
-A hook that already passed with the same files (their content), commands, inputs and variables isn't run again: its output, outputs and variables are replayed. Hooks with `include` are cached by default, `"cache": true` / `false` chooses for a hook. Formatters are cached on the fixed files, so unformatted files always go through them. `hooker run --no-cache` runs everything, `hooker cache-clear` forgets the results.
+Every config and its hooks, as they are read: shared hooks and other tools' configs included.
+
+| Option | |
+|--------|-|
+| `-c <FILE>` | Another config file |
+
+### `hooker doctor`
+
+Checks the setup and says how to fix what it finds; exits with an error when something is wrong. See [Running hooks](running.md#doctor).
+
+### `hooker history`
+
+The last runs and the slowest hooks.
+
+| Option | |
+|--------|-|
+| `-n, --limit <N>` | Number of runs (default: 20) |
+| `--export <csv\|json>` | Totals by hook, for the team (every run) |
+| `-o, --output <FILE>` | File to write the export to (default: the standard output) |
+
+### `hooker vars`
+
+The variables shared between hooks: value, writers, readers.
+
+| Option | |
+|--------|-|
+| `--reset <NAME>` | Forget the value of a variable (back to its default) |
+
+## Shared hooks
+
+### `hooker search [WORDS...]`
+
+Searches the hooks shared on GitHub and adds the one you pick. See [Finding hooks](shared-hooks.md#finding-hooks).
+
+| Option | |
+|--------|-|
+| `-p, --project <DIR>` | Project to add them to (default: the root) |
+
+### `hooker trust`
+
+Shows the hooks of other repositories that aren't trusted yet (or changed), their commands and permissions, and asks. See [Trust](security.md#trust).
+
+| Option | |
+|--------|-|
+| `--all` | Trust them all without asking |
+
+### `hooker outdated`
+
+The hooks of other repositories that have a newer version.
+
+### `hooker update`
+
+Fetches the last version of the repositories of the shared hooks (`from` + `rev`). Review the changes with `hooker trust`.
+
+| Option | |
+|--------|-|
+| `-c <FILE>` | Another config file |
+
+### `hooker pin [NAME]`
+
+Sets `rev` to the commit in use, for every hook loading another repository, or only `NAME`.
+
+## Other commands
+
+### `hooker cache-clear`
+
+Forgets the results of the hooks that passed: they all run again. See [Cache](cache.md).
+
+### `hooker schema`
+
+Prints the JSON schema of the configuration, used by editors for autocompletion.
+
+### `hooker completion [SHELL]`
+
+Prints the shell completion: `bash` (default), `zsh`, `fish`, `elvish`, `powershell`. See [Installation](installation.md#shell-completion).
+
+## Exit status
+
+`0` when every hook passed (or there was nothing to run), `1` when a hook failed or was denied, or on an error (an invalid config, a missing repository), `130` when a question was cancelled. Git stops the commit or the push on anything else than `0`.
