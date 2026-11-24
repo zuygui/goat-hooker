@@ -218,3 +218,16 @@ jobs:
           git add -A
           git commit -m "goat-hooker $version" || exit 0
           git push
+
+  # The site shows the version and the release notes: built again from main once released
+  site:
+    name: Site
+    needs: release
+    if: needs.release.outputs.releases_created == 'true'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/site.yml
+    with:
+      ref: main

@@ -39,6 +39,11 @@ const releaseNotes = (release?.[3] ?? "")
     return { app, text: app ? text.slice(8) : text };
   })
   .slice(0, 8);
+// Banner: the first two additions of the last release (`*(config)* x` → `x`, no backticks)
+const headline = releaseNotes
+  .filter((note) => !note.app)
+  .slice(0, 2)
+  .map((note) => note.text.replace(/^\*\([^)]*\)\* /, "").replace(/`/g, ""));
 
 // Benchmark charts, from benchmarks/results.json
 const order = ["goat-hooker", "lefthook", "prek", "pre-commit", "husky + lint-staged"];
@@ -114,7 +119,9 @@ const install = [
   <body>
     <div class="announce">
       <a href={`${repository}/releases/tag/v${releaseVersion}`}>
-        <span class="pill">New</span> Goat Hooker v{releaseVersion}: watch, doctor, affected projects and a command palette <span aria-hidden="true">→</span>
+        <span class="pill">New</span> Goat Hooker v{releaseVersion}{headline.length > 0 && ": "}{headline.map((item, i) => (
+          <span class:list={{ "announce-more": i > 0 }}>{i > 0 && " · "}{item}</span>
+        ))} <span aria-hidden="true">→</span>
       </a>
     </div>
 
@@ -493,6 +500,13 @@ const install = [
   }
 
   /* Announcement and navigation */
+  /* One addition only on small screens */
+  @media (max-width: 720px) {
+    .announce-more {
+      display: none;
+    }
+  }
+
   .announce {
     text-align: center;
     font-size: 14px;
