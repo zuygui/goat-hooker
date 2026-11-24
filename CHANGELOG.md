@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0](https://github.com/zuygui/goat-hooker/compare/v0.4.1...v1.0.0) - 2026-11-24
+
+### Added
+
+- hooks of the pre-commit ecosystem with `from` + `id`
+- run lefthook, pre-commit and husky configs as they are
+- *(config)* hooker.toml, with hooker.config.json still read
+- a website on GitHub Pages
+
+### Fixed
+
+- read the index on Windows (core.filemode = false)
+- timeout and hooker fix on Windows
+
+### Other
+
+- a full documentation
+- real files in the matcher regex test (Windows paths)
+- benchmark with prek and 1,000 staged files
+- read the repository instead of starting git, and skip the shell
+- Merge pull request #21 from zuygui/feat/site
+- benchmark with Goat Hooker 0.4.0
+- a quickstart page
+
 ## [0.4.1](https://github.com/zuygui/goat-hooker/compare/v0.4.0...v0.4.1) - 2026-11-23
 
 ### Other
