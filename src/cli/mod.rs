@@ -92,6 +92,20 @@ pub fn parse_commands(commands: AppCli) -> Result<(), GoatHookerError> {
             print!("{}", goat_hooker::config::json_schema());
             Ok(())
         }
+        AppCommands::Pygrep {
+            ignore_case,
+            multiline,
+            negate,
+            pattern,
+            files,
+        } => match goat_hooker::tools::pygrep(&pattern, &files, ignore_case, multiline, negate) {
+            Ok(true) => Ok(()),
+            Ok(false) => std::process::exit(1),
+            Err(reason) => {
+                eprintln!("{reason}");
+                std::process::exit(2)
+            }
+        },
     }
 }
 

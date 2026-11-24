@@ -12,10 +12,11 @@ export const compareCommon: [string, string[]][] = [
   ["Stages again the files formatters fixed", [YES, YES, NO, NO, PART]],
   ["Runs hooks in parallel", [YES, YES, PART, PART, PART]],
   ["Shared hooks from Git repositories", [YES, YES, YES, YES, NO]],
+  ["Hooks of the pre-commit ecosystem", [YES, NO, YES, YES, NO]],
   ["Local changes for one computer", [YES, YES, NO, NO, NO]],
   ["Skips one hook by name", [YES, YES, YES, YES, NO]],
   ["A config per project of a mono-repo", [YES, PART, YES, NO, NO]],
-  ["Installs the tools the hooks need", [NO, NO, YES, YES, NO]],
+  ["Installs the tools the hooks need", [PART, NO, YES, YES, NO]],
 ];
 
 export const compareOnly = [
@@ -26,7 +27,7 @@ export const compareOnly = [
   "Review of shared hooks before they run",
   "Runs hooks while you stage (hooker watch)",
   "Desktop app",
-  "Runs lefthook, pre-commit and husky configs as they are",
+  "Runs lefthook and husky configs as they are",
 ];
 
 /** The commands, each with what it replaces and a terminal */

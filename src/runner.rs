@@ -731,6 +731,38 @@ fn run_node(
         ..Default::default()
     };
 
+    // The tool of a hook of the pre-commit ecosystem: the installed one, or its environment
+    if let Some(tool) = node.hook.tool.as_ref() {
+        match crate::tools::prepare(tool) {
+            Ok(prepared) => {
+                if !prepared.path.is_empty() {
+                    let mut path = prepared.path.clone();
+                    path.extend(std::env::split_paths(
+                        &std::env::var_os("PATH").unwrap_or_default(),
+                    ));
+                    if let Ok(joined) = std::env::join_paths(path) {
+                        sandbox
+                            .extra_env
+                            .push(("PATH".to_string(), joined.to_string_lossy().to_string()));
+                    }
+                }
+                sandbox.extra_env.extend(prepared.env);
+            }
+            Err(reason) => {
+                let _ = std::fs::remove_file(&output_file);
+                let _ = std::fs::remove_file(&vars_file);
+                result.success = false;
+                result.duration = start.elapsed();
+                result.commands.push(CommandResult {
+                    cmd: tool.program.clone(),
+                    success: false,
+                    output: format!("{reason}\n"),
+                });
+                return Ok(result);
+            }
+        }
+    }
+
     for cmd in node.commands() {
         let cmd_result = execute_in(
             cmd,
@@ -2072,5 +2104,130 @@ mod tests {
             "{:?}",
             start.elapsed()
         );
+    }
+
+    /// Hooks of a repository of the pre-commit ecosystem, from its .pre-commit-hooks.yaml
+    #[cfg(unix)]
+    #[test]
+    fn precommit_repository_hooks() {
+        use std::os::unix::fs::PermissionsExt;
+        let git = |dir: &Path, args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .env("HOOKER_SKIP", "1")
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        // The repository of the hooks
+        let remote = tempdir().unwrap();
+        let remote = remote.path().canonicalize().unwrap();
+        git(&remote, &["init", "-q"]);
+        git(&remote, &["config", "user.name", "t"]);
+        git(&remote, &["config", "user.email", "t@t"]);
+        std::fs::write(
+            remote.join(".pre-commit-hooks.yaml"),
+            r#"
+- id: upper
+  name: upper
+  entry: upper.sh
+  language: script
+  types: [text]
+  files: \.txt$
+- id: no-orig
+  name: no orig
+  entry: "Remove the .orig files"
+  language: fail
+  files: \.orig$
+- id: version
+  name: version
+  entry: git --version
+  language: python
+  pass_filenames: false
+  always_run: true
+"#,
+        )
+        .unwrap();
+        let script = remote.join("upper.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nfor f in \"$@\"; do tr a-z A-Z < \"$f\" > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"; done\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        git(&remote, &["add", "."]);
+        git(&remote, &["commit", "-qm", "hooks"]);
+
+        // A repository using them
+        let dir = tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        git(&root, &["init", "-q"]);
+        git(&root, &["config", "core.autocrlf", "false"]);
+        let from = remote.to_string_lossy().to_string();
+        std::fs::write(
+            root.join("hooker.toml"),
+            format!(
+                "[[hooks]]\nfrom = {from:?}\nid = \"upper\"\n\n[[hooks]]\nfrom = {from:?}\nid = \"no-orig\"\n\n[[hooks]]\nfrom = {from:?}\nid = \"version\"\n"
+            ),
+        )
+        .unwrap();
+        let configs = crate::config::ConfigLoader::new()
+            .load_recursive(&root.join("hooker.toml"))
+            .unwrap();
+        let hooks: Vec<&Hook> = configs
+            .iter()
+            .flat_map(|c| c.hooks.iter().flatten())
+            .collect();
+        assert_eq!(hooks.len(), 3);
+        // They come from another repository: reviewed first
+        let origins = crate::trust::untrusted(&root, hooks.iter().copied());
+        assert_eq!(origins.len(), 3);
+        crate::trust::trust(&root, &origins).unwrap();
+
+        std::fs::write(root.join("a.txt"), "hello\n").unwrap();
+        std::fs::write(root.join("b.orig"), "old\n").unwrap();
+        std::fs::write(root.join("c.bin"), b"\0binary").unwrap();
+        git(&root, &["add", "."]);
+        let results = run_trigger(
+            &root,
+            &configs,
+            Trigger::PreCommit,
+            &input(&[], None),
+            Output::Capture,
+            None,
+        )
+        .unwrap();
+        let names: Vec<&str> = results.iter().map(|r| r.name.as_str()).collect();
+        let result = |name: &str| {
+            results
+                .iter()
+                .find(|r| r.name == name)
+                .unwrap_or_else(|| panic!("no `{name}` in {names:?}"))
+        };
+
+        // The fixer ran on the text file, and its fix is staged
+        assert!(result("upper").success, "{:?}", result("upper"));
+        assert_eq!(read(&root, "a.txt"), "HELLO\n");
+        let staged = std::process::Command::new("git")
+            .args(["show", ":a.txt"])
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&staged.stdout), "HELLO\n");
+        // `language: fail` fails on its files
+        assert!(!result("no-orig").success);
+        assert!(
+            result("no-orig").commands[0]
+                .output
+                .contains("Remove the .orig files"),
+            "{:?}",
+            result("no-orig")
+        );
+        // A tool already installed (git) is used as it is, without files
+        assert!(result("version").success, "{:?}", result("version"));
+        assert!(result("version").commands[0].output.contains("git version"));
     }
 }

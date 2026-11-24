@@ -46,6 +46,7 @@ pub fn import(root: &Path, imported: &mut Imported) -> Result<(), GoatHookerErro
         .flatten()
     {
         let url = repo.get("repo").and_then(Value::as_str).unwrap_or_default();
+        let rev = repo.get("rev").and_then(Value::as_str);
         for hook in repo
             .get("hooks")
             .and_then(Value::as_array)
@@ -69,7 +70,11 @@ pub fn import(root: &Path, imported: &mut Imported) -> Result<(), GoatHookerErro
                 stages.iter().filter_map(|s| stage(s)).collect()
             };
             for t in triggers {
-                if let Some(converted) = convert(imported, url, id, hook, t, &global) {
+                if let Some(mut converted) = convert(imported, url, rev, id, hook, t, &global) {
+                    // Without stages, a hook of a repository runs on the ones of its definition
+                    if stages.is_empty() && converted.id.is_some() {
+                        converted.trigger = None;
+                    }
                     imported.add(Path::new(""), converted);
                 }
             }
@@ -79,7 +84,7 @@ pub fn import(root: &Path, imported: &mut Imported) -> Result<(), GoatHookerErro
 }
 
 /// `commit` / `pre-commit` → pre-commit...
-fn stage(name: &str) -> Option<Trigger> {
+pub(crate) fn stage(name: &str) -> Option<Trigger> {
     match name {
         "commit" => Some(Trigger::PreCommit),
         "push" => Some(Trigger::PrePush),
@@ -96,10 +101,33 @@ fn known_stage(url: &str, id: &str) -> Option<Trigger> {
 }
 
 /// Extensions of the pre-commit file types
-fn types_globs(types: &[String]) -> Vec<String> {
+/// File kinds of pre-commit, checked on the files themselves (`types` of a hook)
+pub(crate) const KINDS: [&str; 7] = [
+    "text",
+    "binary",
+    "executable",
+    "non-executable",
+    "symlink",
+    "file",
+    "directory",
+];
+
+/// The `types` that are kinds of files, not languages
+pub(crate) fn kinds(types: &[String]) -> Vec<String> {
+    types
+        .iter()
+        .filter(|t| KINDS.contains(&t.as_str()))
+        .cloned()
+        .collect()
+}
+
+pub(crate) fn types_globs(types: &[String]) -> Vec<String> {
     let extensions: &[&str] = &[];
     let mut globs = Vec::new();
     for t in types {
+        if KINDS.contains(&t.as_str()) {
+            continue;
+        }
         let exts: &[&str] = match t.as_str() {
             "python" | "pyi" => &["py", "pyi"],
             "rust" => &["rs"],
@@ -123,13 +151,58 @@ fn types_globs(types: &[String]) -> Vec<String> {
             "ruby" => &["rb"],
             "php" => &["php"],
             "sql" => &["sql"],
+            "proto" => &["proto"],
+            "terraform" => &["tf", "tfvars"],
+            "xml" => &["xml"],
+            "svg" => &["svg"],
+            "csv" => &["csv"],
+            "perl" => &["pl", "pm"],
+            "swift" => &["swift"],
+            "dart" => &["dart"],
+            "scala" => &["scala", "sc"],
+            "elixir" => &["ex", "exs"],
+            "erlang" => &["erl", "hrl"],
+            "haskell" => &["hs"],
+            "ocaml" => &["ml", "mli"],
+            "r" => &["r", "R"],
+            "julia" => &["jl"],
+            "clojure" => &["clj", "cljs", "cljc", "edn"],
+            "less" => &["less"],
+            "sass" => &["sass"],
+            "graphql" => &["graphql", "gql"],
+            "rst" => &["rst"],
+            "asciidoc" => &["adoc", "asciidoc"],
+            "ini" => &["ini", "cfg"],
+            "cmake" => &["cmake"],
+            "groovy" => &["groovy", "gradle"],
+            "objective-c" => &["m", "mm"],
+            "c#" => &["cs"],
+            "powershell" => &["ps1", "psm1"],
+            "batch" => &["bat", "cmd"],
+            "zsh" => &["zsh"],
+            "fish" => &["fish"],
             "dockerfile" => {
                 globs.push("**/Dockerfile".to_string());
+                globs.push("**/*.dockerfile".to_string());
                 extensions
             }
-            _ => extensions,
+            "makefile" => {
+                globs.push("**/Makefile".to_string());
+                globs.push("**/*.mk".to_string());
+                extensions
+            }
+            // Most types are named after their extension (lua, nix, zig, vue, svelte...)
+            other => {
+                globs.push(format!("**/*.{other}"));
+                extensions
+            }
         };
-        globs.extend(exts.iter().map(|e| format!("**/*.{e}")));
+        for ext in exts {
+            let glob = format!("**/*.{ext}");
+            if !globs.contains(&glob) {
+                globs.push(glob);
+            }
+        }
     }
     globs
 }
@@ -159,88 +232,78 @@ fn regex_globs(regex: &str) -> Option<Vec<String>> {
         .then(|| extensions.iter().map(|e| format!("**/*.{e}")).collect())
 }
 
-/// Hooks of known repositories: (command, `{files}` added, files changed by the command)
-fn known(url: &str, id: &str, args: &str) -> Option<(String, bool, bool)> {
-    let repo = url.trim_end_matches('/').trim_end_matches(".git");
-    let repo = repo.rsplit('/').take(2).collect::<Vec<_>>();
-    let repo = format!("{}/{}", repo.get(1)?, repo.first()?);
-    let with_args = |cmd: &str| {
-        if args.is_empty() {
-            cmd.to_string()
-        } else {
-            format!("{cmd} {args}")
+/// A hook of a repository of the pre-commit ecosystem: `from` + `rev` + `id`, its definition
+/// is read from the repository when the config loads. Only what the config changes is kept.
+fn repository_hook(
+    url: &str,
+    rev: Option<&str>,
+    id: &str,
+    hook: &Value,
+    t: Trigger,
+    global: &Global,
+) -> Hook {
+    let (include, include_regex) = files_of(hook, global);
+    let own_exclude = hook
+        .get("exclude")
+        .and_then(Value::as_str)
+        .filter(|r| !r.is_empty() && *r != "^$")
+        .map(String::from);
+    let (exclude, exclude_regex) = exclude_of(either(own_exclude, global.exclude.clone()));
+    let list = |key: &str| hook.get(key).map(|v| strings(Some(v)));
+    Hook {
+        name: hook
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(id)
+            .to_string(),
+        trigger: Some(t),
+        from: Some(url.to_string()),
+        rev: rev.map(String::from),
+        id: Some(id.to_string()),
+        args: list("args"),
+        additional_dependencies: list("additional_dependencies").filter(|d| !d.is_empty()),
+        include,
+        include_regex,
+        exclude,
+        exclude_regex,
+        always_run: hook
+            .get("always_run")
+            .and_then(Value::as_bool)
+            .filter(|a| *a),
+        types: Some(kinds(&strings(hook.get("types")))).filter(|k| !k.is_empty()),
+        ..Default::default()
+    }
+}
+
+/// `types` / `types_or` / `files` of a hook (with the top-level `files`)
+fn files_of(hook: &Value, global: &Global) -> (Option<Vec<String>>, Option<String>) {
+    let mut include = types_globs(&strings(hook.get("types")));
+    include.extend(types_globs(&strings(hook.get("types_or"))));
+    let mut include_regex = None;
+    let files = hook
+        .get("files")
+        .and_then(Value::as_str)
+        .filter(|r| !r.is_empty())
+        .map(String::from)
+        .or_else(|| global.files.clone());
+    if let Some(files) = files {
+        match regex_globs(&files) {
+            Some(globs) if include.is_empty() => include = globs,
+            _ => include_regex = Some(files),
         }
-    };
-    Some(match (repo.as_str(), id) {
-        ("pre-commit/pre-commit-hooks", "check-merge-conflict") => (
-            "! grep -nHIE '^(<<<<<<< |>>>>>>> |=======$)' {files}".into(),
-            false,
-            false,
-        ),
-        ("pre-commit/pre-commit-hooks", "trailing-whitespace") => (
-            "for f in {files}; do [ -f \"$f\" ] && sed -i.goat-bak -E 's/[[:blank:]]+$//' \"$f\" && rm -f \"$f.goat-bak\"; done".into(),
-            false,
-            true,
-        ),
-        ("pre-commit/pre-commit-hooks", "end-of-file-fixer") => (
-            "for f in {files}; do [ -s \"$f\" ] && [ -n \"$(tail -c1 \"$f\")\" ] && echo >> \"$f\"; done; true".into(),
-            false,
-            true,
-        ),
-        ("pre-commit/pre-commit-hooks", "check-added-large-files") => {
-            let max_kb = args
-                .split_whitespace()
-                .find_map(|a| a.strip_prefix("--maxkb="))
-                .unwrap_or("500");
-            (
-                format!("status=0; for f in {{files}}; do [ -f \"$f\" ] || continue; kb=$(( $(wc -c < \"$f\") / 1024 )); if [ \"$kb\" -gt {max_kb} ]; then echo \"$f: ${{kb}} KB (max {max_kb} KB)\"; status=1; fi; done; exit $status"),
-                false,
-                false,
-            )
-        }
-        ("pre-commit/pre-commit-hooks", "no-commit-to-branch") => {
-            let mut branches: Vec<&str> = args
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .windows(2)
-                .filter(|w| w[0] == "--branch" || w[0] == "-b")
-                .map(|w| w[1])
-                .collect();
-            if branches.is_empty() {
-                branches = vec!["main", "master"];
-            }
-            (
-                format!(
-                    "branch=$(git branch --show-current); if echo \"$branch\" | grep -qxE '{}'; then echo \"Direct commits on $branch are not allowed\"; exit 1; fi",
-                    branches.join("|")
-                ),
-                false,
-                false,
-            )
-        }
-        ("astral-sh/ruff-pre-commit" | "charliermarsh/ruff-pre-commit", "ruff" | "ruff-check") => {
-            (with_args("ruff check"), true, args.contains("--fix"))
-        }
-        ("astral-sh/ruff-pre-commit" | "charliermarsh/ruff-pre-commit", "ruff-format") => {
-            (with_args("ruff format"), true, true)
-        }
-        ("psf/black" | "psf/black-pre-commit-mirror", "black") => (with_args("black"), true, true),
-        ("pre-commit/mirrors-prettier" | "rbubley/mirrors-prettier", "prettier") => (
-            with_args("npx prettier --write --ignore-unknown"),
-            true,
-            true,
-        ),
-        ("pre-commit/mirrors-eslint", "eslint") => (with_args("npx eslint"), true, args.contains("--fix")),
-        ("doublify/pre-commit-rust", "fmt") => (with_args("cargo fmt --"), false, true),
-        ("doublify/pre-commit-rust", "clippy") => (with_args("cargo clippy"), false, false),
-        ("doublify/pre-commit-rust", "cargo-check") => (with_args("cargo check"), false, false),
-        ("compilerla/conventional-pre-commit", "conventional-pre-commit") => (
-            "head -n1 \"$1\" | grep -qE '^((feat|fix|chore|docs|refactor|perf|test|ci|build|style|revert)(\\(.+\\))?!?: .+|Merge .+)' || { echo 'Use a conventional commit message: type(scope): subject'; exit 1; }".into(),
-            false,
-            false,
-        ),
-        _ => return None,
-    })
+    }
+    ((!include.is_empty()).then_some(include), include_regex)
+}
+
+/// `exclude` as globs when it is simple, else as a regex
+fn exclude_of(regex: Option<String>) -> (Option<Vec<String>>, Option<String>) {
+    match regex {
+        Some(regex) => match regex_globs(&regex) {
+            Some(globs) => (Some(globs), None),
+            None => (None, Some(regex)),
+        },
+        None => (None, None),
+    }
 }
 
 /// Top-level `files` and `exclude`: they apply to every hook
@@ -260,12 +323,23 @@ fn either(a: Option<String>, b: Option<String>) -> Option<String> {
 fn convert(
     imported: &mut Imported,
     url: &str,
+    rev: Option<&str>,
     id: &str,
     hook: &Value,
     t: Trigger,
     global: &Global,
 ) -> Option<Hook> {
+    if url == "meta" {
+        imported.note(format!(
+            "pre-commit: `{id}` checks the pre-commit config itself, it was skipped"
+        ));
+        return None;
+    }
+    if url != "local" {
+        return Some(repository_hook(url, rev, id, hook, t, global));
+    }
     let args = strings(hook.get("args")).join(" ");
+    let mut tool = None;
     let pass_filenames = hook.get("pass_filenames").and_then(Value::as_bool) != Some(false);
 
     let (cmd, add_files, stage_fixed) = if url == "local"
@@ -285,40 +359,50 @@ fn convert(
             .get("language")
             .and_then(Value::as_str)
             .unwrap_or("system");
-        if ![
-            "system",
-            "script",
-            "unsupported",
-            "unsupported_script",
-            "fail",
-        ]
-        .contains(&language)
-        {
-            imported.note(format!(
-                "pre-commit: `{id}` uses the {language} environment of pre-commit, its tool must now be installed"
-            ));
-        }
-        let cmd = if args.is_empty() {
-            entry.to_string()
+        if language == "pygrep" {
+            let exe = std::env::current_exe()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "hooker".into());
+            let cmd = format!(
+                "'{}' pygrep {args} -- '{}'",
+                exe.replace('\'', r"'\''"),
+                entry.replace('\'', r"'\''")
+            );
+            (cmd, pass_filenames, false)
         } else {
-            format!("{entry} {args}")
-        };
-        (cmd, pass_filenames, false)
-    } else if let Some(known) = known(url, id, &args) {
-        known
+            // A tool of another language: the installed one, else an environment with its
+            // `additional_dependencies` (only when read as it is: a hooker.toml has no field
+            // for it)
+            let dependencies = strings(hook.get("additional_dependencies"));
+            if !["system", "script", "unsupported", "unsupported_script"].contains(&language) {
+                tool = Some(crate::tools::Tool {
+                    language: language.to_string(),
+                    repo: None,
+                    source: format!("local:{id}"),
+                    dependencies: dependencies.clone(),
+                    isolate: None,
+                    program: entry
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or_default()
+                        .to_string(),
+                });
+                if !dependencies.is_empty() {
+                    imported.note(format!(
+                        "pre-commit: `{id}` needs {} in its {language} environment: it is built when the config is read as it is, install them yourself with a hooker.toml",
+                        dependencies.join(", ")
+                    ));
+                }
+            }
+            let cmd = if args.is_empty() {
+                entry.to_string()
+            } else {
+                format!("{entry} {args}")
+            };
+            (cmd, pass_filenames, false)
+        }
     } else {
-        imported.note(format!(
-            "pre-commit: `{id}` ({url}) runs through pre-commit (`pre-commit run`), keep pre-commit installed or replace it"
-        ));
-        let stage = match t {
-            Trigger::PreCommit => "pre-commit".to_string(),
-            other => other.as_str().to_string(),
-        };
-        (
-            format!("pre-commit run {id} --hook-stage {stage} --files {{files}}"),
-            false,
-            false,
-        )
+        return None;
     };
     let cmd = if add_files && pass_filenames && !cmd.contains("{files}") {
         format!("{cmd} {{files}}")
@@ -375,8 +459,10 @@ fn convert(
         include_regex,
         exclude_regex,
         always_run: always_run.then_some(true),
+        types: Some(kinds(&strings(hook.get("types")))).filter(|k| !k.is_empty()),
         cmd: Some(cmd),
         stage_fixed: stage_fixed.then_some(true),
+        tool,
         ..Default::default()
     })
 }
@@ -429,20 +515,19 @@ repos:
         let hooks = imported.configs[Path::new("")].hooks.clone().unwrap();
         let find = |name: &str| hooks.iter().find(|h| h.name == name).unwrap();
 
-        assert!(
-            find("check-added-large-files")
-                .cmd
-                .as_ref()
-                .unwrap()
-                .contains("-gt 200")
-        );
+        // Hooks of repositories: `from` + `rev` + `id`, only what the config changes
+        let large = find("check-added-large-files");
         assert_eq!(
-            find("check-yaml").cmd.as_deref(),
-            Some("pre-commit run check-yaml --hook-stage pre-commit --files {files}")
+            large.from.as_deref(),
+            Some("https://github.com/pre-commit/pre-commit-hooks")
         );
+        assert_eq!(large.rev.as_deref(), Some("v4.6.0"));
+        assert_eq!(large.id.as_deref(), Some("check-added-large-files"));
+        assert_eq!(large.args, Some(vec!["--maxkb=200".to_string()]));
+        assert!(large.cmd.is_none() && large.trigger.is_none());
         let ruff = find("ruff");
-        assert_eq!(ruff.cmd.as_deref(), Some("ruff check --fix {files}"));
-        assert_eq!(ruff.stage_fixed, Some(true));
+        assert_eq!(ruff.args, Some(vec!["--fix".to_string()]));
+        assert!(find("check-yaml").args.is_none());
         let tests = find("tests");
         assert_eq!(tests.trigger, Some(Trigger::PrePush));
         assert_eq!(tests.cmd.as_deref(), Some("pytest -q"));
@@ -450,11 +535,11 @@ repos:
             find("mypy").include,
             Some(vec!["**/*.py".into(), "**/*.pyi".into()])
         );
-        assert_eq!(
-            find("conventional-pre-commit").trigger,
-            Some(Trigger::CommitMsg)
-        );
-        assert!(imported.notes.iter().any(|n| n.contains("check-yaml")));
+        // Its stage (commit-msg) comes from its definition
+        assert!(find("conventional-pre-commit").trigger.is_none());
+        for hook in &hooks {
+            hook.validate().unwrap();
+        }
     }
 
     #[test]

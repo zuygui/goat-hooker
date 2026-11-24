@@ -169,7 +169,10 @@ impl Config {
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct Hook {
-    #[schemars(description = "Hook name")]
+    #[serde(default)]
+    #[schemars(
+        description = "Hook name (the `id` by default for a hook of the pre-commit ecosystem)"
+    )]
     pub name: String,
 
     /// Optional only for the hooks loading a file (`path`)
@@ -204,6 +207,12 @@ pub struct Hook {
         description = "Runs even when none of the files it targets changed (`always_run` in pre-commit)"
     )]
     pub always_run: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Kinds of files the hook targets, all of them must match: text, binary, executable, non-executable, symlink, file (like the file `types` of pre-commit)"
+    )]
+    pub types: Option<Vec<String>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -301,10 +310,37 @@ pub struct Hook {
     )]
     pub permissions: Option<Permissions>,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Id of a hook of the `from` repository's .pre-commit-hooks.yaml: any hook of the pre-commit ecosystem (ruff, black, eslint, shellcheck...). Its command, files and tool come from there"
+    )]
+    pub id: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Arguments of the `id` hook, replacing the ones of its definition")]
+    pub args: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "More packages installed with the tool of the `id` hook (pip, npm, gem, go or `cli:` cargo packages)"
+    )]
+    pub additional_dependencies: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Tool of the `id` hook: `true` always builds it in its own environment (with the toolchain of the computer), `false` only uses the one installed. Default: the installed one, else its own environment"
+    )]
+    pub isolate: Option<bool>,
+
     /// Set when the hook comes from another repository (`from`): it must be trusted to run
     #[serde(skip)]
     #[schemars(skip)]
     pub origin: Option<Origin>,
+
+    /// What the commands need before they run (hooks of the pre-commit ecosystem)
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub tool: Option<crate::tools::Tool>,
 }
 
 /// A variable shared between hooks
@@ -671,15 +707,46 @@ impl Hook {
             reason: reason.to_string(),
         };
 
-        if self.from.is_some() && self.path.is_none() {
-            return Err(invalid("`from` requires `path`"));
+        if self.from.is_some() && self.path.is_none() && self.id.is_none() {
+            return Err(invalid(
+                "`from` requires `path` (a hooks file) or `id` (a hook of its .pre-commit-hooks.yaml)",
+            ));
+        }
+        if self.id.is_some() && self.path.is_some() {
+            return Err(invalid("`id` and `path` can't be used together"));
+        }
+        if self.id.is_some() && self.from.is_none() {
+            return Err(invalid("`id` requires `from` (the repository of the hook)"));
+        }
+        if self.name.trim().is_empty() && self.id.is_none() {
+            return Err(invalid("missing `name`"));
+        }
+        for (key, set) in [
+            ("args", self.args.is_some()),
+            (
+                "additional_dependencies",
+                self.additional_dependencies.is_some(),
+            ),
+            ("isolate", self.isolate.is_some()),
+        ] {
+            if set && self.id.is_none() {
+                return Err(invalid(&format!("`{key}` is for hooks with `id`")));
+            }
+        }
+        for kind in self.types.iter().flatten() {
+            if !crate::import::KINDS.contains(&kind.as_str()) {
+                return Err(invalid(&format!(
+                    "unknown file kind `{kind}` in `types` ({})",
+                    crate::import::KINDS.join(", ")
+                )));
+            }
         }
         for (key, regex) in [
             ("include_regex", &self.include_regex),
             ("exclude_regex", &self.exclude_regex),
         ] {
             if let Some(regex) = regex
-                && let Err(err) = regex_lite::Regex::new(regex)
+                && let Err(err) = fancy_regex::Regex::new(regex)
             {
                 return Err(invalid(&format!("invalid `{key}`: {err}")));
             }
@@ -709,6 +776,11 @@ impl Hook {
             return Ok(());
         }
 
+        // Hook of the pre-commit ecosystem not read yet: its trigger and command come from its
+        // repository
+        if self.id.is_some() && self.tool.is_none() {
+            return Ok(());
+        }
         if self.trigger.is_none() {
             return Err(invalid("`trigger` is required"));
         }
@@ -1153,6 +1225,28 @@ impl ConfigLoader {
         let mut expanded = Vec::new();
 
         for hook in hooks {
+            // A hook of the pre-commit ecosystem: its definition comes from the repository
+            if let (Some(url), Some(id)) = (hook.from.clone(), hook.id.clone()) {
+                let repo = remote::fetch(&url, hook.rev.as_deref())?;
+                if self.refresh_remotes && self.refreshed.insert(repo.clone()) {
+                    remote::update(&repo, hook.rev.as_deref())?;
+                }
+                let mut hook = hook;
+                crate::tools::complete(&mut hook, &repo, &url)?;
+                let manifest = repo.join(crate::tools::MANIFEST);
+                hook.origin = Some(Origin {
+                    url: url.clone(),
+                    rev: hook.rev.clone(),
+                    path: format!("{}#{id}", crate::tools::MANIFEST),
+                    hash: id_hash(&manifest, &hook)?,
+                    file: manifest,
+                    with: String::new(),
+                    commit: remote::head(&repo),
+                });
+                hook.validate()?;
+                expanded.push(hook);
+                continue;
+            }
             let Some(path) = hook.path.as_ref() else {
                 let mut hook = hook;
                 if let Some(origin) = origin {
@@ -1215,6 +1309,30 @@ impl ConfigLoader {
 
         Ok(expanded)
     }
+}
+
+/// Hash of what a hook of the pre-commit ecosystem runs: its definition and what the
+/// config changes (arguments, dependencies, command, files)
+fn id_hash(manifest: &Path, hook: &Hook) -> Result<String, GoatHookerError> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(fs::read(manifest)?);
+    hasher.update(b"\0");
+    hasher.update(
+        serde_json::to_string(&(
+            &hook.id,
+            &hook.args,
+            &hook.additional_dependencies,
+            &hook.cmd,
+            &hook.cmds,
+        ))
+        .unwrap_or_default(),
+    );
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// Hash of a hooks file and of the values given to its parameters

@@ -187,8 +187,9 @@
       "type": "object",
       "properties": {
         "name": {
-          "description": "Hook name",
-          "type": "string"
+          "description": "Hook name (the `id` by default for a hook of the pre-commit ecosystem)",
+          "type": "string",
+          "default": ""
         },
         "trigger": {
           "description": "Git hook that runs this hook (not used with `path`)",
@@ -241,6 +242,16 @@
             "boolean",
             "null"
           ]
+        },
+        "types": {
+          "description": "Kinds of files the hook targets, all of them must match: text, binary, executable, non-executable, symlink, file (like the file `types` of pre-commit)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
         },
         "cmd": {
           "description": "Shell command, run from the config folder. {files} is replaced by the targeted files",
@@ -406,11 +417,42 @@
               "type": "null"
             }
           ]
+        },
+        "id": {
+          "description": "Id of a hook of the `from` repository's .pre-commit-hooks.yaml: any hook of the pre-commit ecosystem (ruff, black, eslint, shellcheck...). Its command, files and tool come from there",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "args": {
+          "description": "Arguments of the `id` hook, replacing the ones of its definition",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "additional_dependencies": {
+          "description": "More packages installed with the tool of the `id` hook (pip, npm, gem, go or `cli:` cargo packages)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "isolate": {
+          "description": "Tool of the `id` hook: `true` always builds it in its own environment (with the toolchain of the computer), `false` only uses the one installed. Default: the installed one, else its own environment",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
-      },
-      "required": [
-        "name"
-      ]
+      }
     },
     "Trigger": {
       "description": "Client-side Git hook",

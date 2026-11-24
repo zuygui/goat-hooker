@@ -30,6 +30,9 @@ cmds = ["grep -qE '^(feat|fix|chore|docs|refactor|test|ci)' \"$1\""]
 | `exclude` | Glob patterns of files to ignore |
 | `include_regex` / `exclude_regex` | Regexes on the path of a file (relative to the config folder, with `/`), like `files` / `exclude` in pre-commit. `include_regex` must match as well as `include` |
 | `always_run` | Runs even when none of its files changed |
+| `types` | Kinds of files it targets, all of them must match: `text`, `binary`, `executable`, `non-executable`, `symlink`, `file` |
+| `id` | With `from`: a hook of the repository's `.pre-commit-hooks.yaml` (see [Hooks of the pre-commit ecosystem](shared-hooks.md#hooks-of-the-pre-commit-ecosystem)) |
+| `args` / `additional_dependencies` / `isolate` | Arguments, extra packages and environment of an `id` hook |
 | `cmd` / `cmds` | Shell command(s) to run, from the config folder. Git arguments are available as `$1`, `$2`... A command made of plain words and placeholders (`cargo fmt -- {files}`) starts without a shell, which is faster; anything else runs with `sh -c`. |
 | `stage_fixed` | `true` to re-stage the targeted files after the hook (formatters) |
 | `path` | Hooks file to load (`{ "hooks": [...] }`), relative to the config folder |
