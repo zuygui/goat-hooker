@@ -2045,6 +2045,8 @@ mod tests {
         assert!(result.output.contains("not found"), "{}", result.output);
     }
 
+    // Starting processes is much slower on Windows: only the waiting is measured, on unix
+    #[cfg(unix)]
     #[test]
     fn a_fast_command_isnt_slowed_down() {
         let dir = tempdir().unwrap();

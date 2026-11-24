@@ -50,10 +50,12 @@ pub fn worktree_is_clean(root: &Path, git_dir: &Path) -> bool {
 fn check(root: &Path, git_dir: &Path) -> Option<bool> {
     let config = fs::read_to_string(git_dir.join("config")).unwrap_or_default();
     let config = config.to_ascii_lowercase().replace([' ', '\t'], "");
-    // sha256 repositories, or settings changing what git compares
-    if config.contains("objectformat") || config.contains("filemode=false") {
+    // sha256 repositories
+    if config.contains("objectformat") {
         return None;
     }
+    // Without `core.filemode` (Windows), git ignores the executable bit
+    let filemode = !config.contains("filemode=false");
     let path = index_path(root, git_dir);
     let data = fs::read(&path).ok()?;
     let index_time = fs::metadata(&path).ok()?.modified().ok()?;
@@ -75,7 +77,7 @@ fn check(root: &Path, git_dir: &Path) -> Option<bool> {
         let Some(path) = path_of(&entry.path) else {
             return false;
         };
-        fs::symlink_metadata(root.join(path)).is_ok_and(|meta| same_file(entry, &meta))
+        fs::symlink_metadata(root.join(path)).is_ok_and(|meta| same_file(entry, &meta, filemode))
     };
     // Big work trees: the files are checked by several threads, like git does
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8));
@@ -104,7 +106,7 @@ fn path_of(bytes: &[u8]) -> Option<PathBuf> {
     std::str::from_utf8(bytes).ok().map(PathBuf::from)
 }
 
-fn same_file(entry: &Entry, meta: &fs::Metadata) -> bool {
+fn same_file(entry: &Entry, meta: &fs::Metadata, filemode: bool) -> bool {
     let kind = entry.mode & 0o170000;
     let right_kind = match kind {
         0o100000 => meta.is_file(),
@@ -129,13 +131,15 @@ fn same_file(entry: &Entry, meta: &fs::Metadata) -> bool {
         return false;
     }
     #[cfg(unix)]
-    if kind == 0o100000 {
+    if filemode && kind == 0o100000 {
         use std::os::unix::fs::PermissionsExt;
         let executable = meta.permissions().mode() & 0o100 != 0;
         if executable != (entry.mode & 0o100 != 0) {
             return false;
         }
     }
+    #[cfg(not(unix))]
+    let _ = filemode;
     true
 }
 
@@ -313,6 +317,19 @@ mod tests {
         fs::write(dir.path().join("new.txt"), "x").unwrap();
         git(dir.path(), &["add", "-N", "new.txt"]);
         assert!(!clean(dir.path()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_bit_follows_core_filemode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = repo("2");
+        let file = dir.path().join("a.txt");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!clean(dir.path()));
+        // Like on Windows: git doesn't see the change
+        git(dir.path(), &["config", "core.filemode", "false"]);
+        assert!(clean(dir.path()));
     }
 
     #[test]
