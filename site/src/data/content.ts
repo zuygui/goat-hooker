@@ -207,6 +207,30 @@ rev = "v1"
 path = "rust.json"`,
   },
   {
+    id: "ecosystem",
+    label: "pre-commit hooks",
+    title: "The whole pre-commit ecosystem",
+    text: "Any hook with a .pre-commit-hooks.yaml works with from + id: ruff, prettier, shellcheck, codespell... Your installed tools first; otherwise Goat Hooker builds them once with the toolchains of your computer (venv or uv, npm, cargo, go), and never downloads a runtime.",
+    file: "hooker.toml",
+    code: `[[hooks]]
+from = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.8.0"
+id = "ruff"
+args = ["--fix"]
+
+[[hooks]]
+from = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v5.0.0"
+id = "trailing-whitespace"
+
+[[hooks]]
+from = "https://github.com/pre-commit/mirrors-prettier"
+rev = "v3.1.0"
+id = "prettier"
+# its own npm install, at this rev
+isolate = true`,
+  },
+  {
     id: "permissions",
     label: "Permissions",
     title: "Safe with other people's hooks",

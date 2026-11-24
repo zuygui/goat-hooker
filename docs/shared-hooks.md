@@ -140,6 +140,6 @@ To switch for good, `hooker import` writes the same thing as a `hooker.toml` (`-
 
 - husky (`.husky/*`, or `husky.hooks` in package.json) and its lint-staged config (one hook per command, in order)
 - lefthook (`lefthook.yml`): commands, jobs, scripts, `root` becomes a sub-project, `piped` becomes `needs`
-- pre-commit (`.pre-commit-config.yaml`): local hooks, the well-known hooks (pre-commit-hooks, ruff, black, prettier, eslint, Rust, conventional commits), the other ones through `pre-commit run`
+- pre-commit (`.pre-commit-config.yaml`): local hooks, and the hooks of other repositories as `from` + `rev` + `id` hooks (see [Hooks of the pre-commit ecosystem](#hooks-of-the-pre-commit-ecosystem)), with their `args`, `additional_dependencies`, files and stages
 
-What can't be converted exactly (regexes, `skip` conditions...) is listed.
+What can't be converted exactly (`skip` conditions of lefthook, groups of jobs...) is listed.
