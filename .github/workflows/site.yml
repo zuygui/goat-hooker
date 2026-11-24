@@ -19,6 +19,13 @@ on:
       - "docs/**"
       - ".github/workflows/site.yml"
   workflow_dispatch:
+  # Called by the release workflow: its commits (version, changelog) don't start workflows
+  workflow_call:
+    inputs:
+      ref:
+        description: Branch or commit to build
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -34,6 +41,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - name: Build the site
         uses: withastro/action@v6
         with:
