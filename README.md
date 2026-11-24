@@ -152,6 +152,14 @@ The whole documentation is on **[zuygui.github.io/goat-hooker/docs](https://zuyg
 - Sharing hooks: [Shared hooks](docs/shared-hooks.md), [Hooks of the pre-commit ecosystem](docs/precommit-hooks.md), [Security](docs/security.md)
 - Reference: [Configuration](docs/config-reference.md), [CLI](docs/cli.md), [Environment and files](docs/environment.md), [FAQ](docs/faq.md)
 
+## A word on AI
+
+I'll be honest: a large part of Goat Hooker's code was written with an AI. I don't like having AI code in my place. But I'm in my first year of medical school, and without it the project couldn't have gone on. I needed Goat Hooker to be ready so I could code on my other projects during my holidays, and I didn't have the time to build it alone.
+
+I'm sorry to those who find this a shame, and I understand them. The project still comes from an original idea and a real problem: Git hooks that don't get in the way, even in a big mono-repo. I designed it, chose what it should do, reviewed and tested what went in, and learned a lot along the way.
+
+I hope Goat Hooker helps you as much as it helps me.
+
 ## Building from source
 
 ```sh
