@@ -59,8 +59,124 @@ fn git_bytes(dir: &Path, args: &[&str]) -> Result<Vec<u8>, GoatHookerError> {
     Ok(output.stdout)
 }
 
+/// Where the files of a repository are, read from the disk instead of asking git: starting
+/// git costs a few milliseconds, several times per commit
+#[derive(Debug, Clone, PartialEq)]
+struct Layout {
+    /// The work tree (`--show-toplevel`)
+    root: PathBuf,
+    /// `.git`, or `.git/worktrees/<name>` in a linked worktree
+    git_dir: PathBuf,
+    /// `.git` (shared by the worktrees)
+    common_dir: PathBuf,
+}
+
+/// The repository containing `dir`, found like git does, or `None` when only git can tell
+/// (`GIT_DIR` set, bare repository, `core.worktree`...): the callers then ask git
+fn layout(dir: &Path) -> Option<Layout> {
+    // Git variables changing where the repository is
+    if ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"]
+        .iter()
+        .any(|v| std::env::var_os(v).is_some())
+    {
+        return None;
+    }
+    let dir = if dir.is_absolute() {
+        dir.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(dir)
+    };
+    let dir = plain(&fs::canonicalize(dir).ok()?);
+    for root in dir.ancestors() {
+        let dot_git = root.join(".git");
+        let Ok(meta) = fs::metadata(&dot_git) else {
+            continue;
+        };
+        let git_dir = if meta.is_dir() {
+            dot_git
+        } else {
+            // Linked worktree or submodule: `gitdir: <path>`
+            let content = fs::read_to_string(&dot_git).ok()?;
+            let target = PathBuf::from(content.trim().strip_prefix("gitdir:")?.trim());
+            plain(&fs::canonicalize(root.join(target)).ok()?)
+        };
+        // A `HEAD` tells a repository from a stray `.git` folder
+        if !git_dir.join("HEAD").is_file() {
+            return None;
+        }
+        let common_dir = match fs::read_to_string(git_dir.join("commondir")) {
+            Ok(common) => plain(&fs::canonicalize(git_dir.join(common.trim())).ok()?),
+            Err(_) => git_dir.clone(),
+        };
+        // Settings moving the work tree: left to git
+        let config = fs::read_to_string(common_dir.join("config")).unwrap_or_default();
+        if config.lines().any(|l| {
+            let l = l.trim().to_ascii_lowercase();
+            l.starts_with("worktree") || (l.starts_with("bare") && l.contains("true"))
+        }) {
+            return None;
+        }
+        return Some(Layout {
+            root: root.to_path_buf(),
+            git_dir,
+            common_dir,
+        });
+    }
+    None
+}
+
+/// Layout of the repository of `dir`, found once per folder
+fn cached_layout(dir: &Path) -> Option<Layout> {
+    static KNOWN: std::sync::Mutex<Vec<(PathBuf, Option<Layout>)>> =
+        std::sync::Mutex::new(Vec::new());
+    if let Some((_, layout)) = KNOWN.lock().unwrap().iter().find(|(d, _)| d == dir) {
+        return layout.clone();
+    }
+    let found = layout(dir);
+    KNOWN
+        .lock()
+        .unwrap()
+        .push((dir.to_path_buf(), found.clone()));
+    found
+}
+
+/// Files of the `.git` folder shared by the worktrees (like `git rev-parse --git-path`)
+const COMMON_PATHS: [&str; 11] = [
+    "config",
+    "objects",
+    "refs",
+    "packed-refs",
+    "info",
+    "logs",
+    "remotes",
+    "branches",
+    "rr-cache",
+    "shallow",
+    "worktrees",
+];
+
+/// `git rev-parse --git-path <name>` read from the disk, when it doesn't depend on settings
+fn native_git_path(dir: &Path, name: &str) -> Option<PathBuf> {
+    // Moved by settings or variables: `core.hooksPath`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`
+    if name == "hooks" || name.starts_with("hooks/") || name == "index" || name == "objects" {
+        return None;
+    }
+    let layout = cached_layout(dir)?;
+    let first = name.split('/').next().unwrap_or(name);
+    let shared = COMMON_PATHS.contains(&first) && name != "logs/HEAD";
+    let base = if shared {
+        &layout.common_dir
+    } else {
+        &layout.git_dir
+    };
+    Some(base.join(name))
+}
+
 /// Path of a file in the `.git` folder (handles worktrees)
 fn git_path(root: &Path, name: &str) -> Result<PathBuf, GoatHookerError> {
+    if let Some(path) = native_git_path(root, name) {
+        return Ok(path);
+    }
     // Asked several times by a run (variables, cache, history...): one git command each
     static KNOWN: std::sync::Mutex<Vec<((PathBuf, String), PathBuf)>> =
         std::sync::Mutex::new(Vec::new());
@@ -134,6 +250,9 @@ impl UnstagedStash {
             return Ok(None);
         }
 
+        if worktree_is_clean(root) {
+            return Ok(None);
+        }
         let output = git(
             root,
             &[
@@ -290,8 +409,16 @@ fn merge_file(
     Ok(output.status.success().then_some(output.stdout))
 }
 
+/// The work tree surely has no unstaged change (read from the index, without git)
+fn worktree_is_clean(root: &Path) -> bool {
+    cached_layout(root).is_some_and(|l| crate::index::worktree_is_clean(&l.root, &l.git_dir))
+}
+
 /// Root of the repository
 pub fn repo_root(dir: &Path) -> Result<PathBuf, GoatHookerError> {
+    if let Some(layout) = cached_layout(dir) {
+        return Ok(layout.root);
+    }
     let root = git(dir, &["rev-parse", "--show-toplevel"])?;
     Ok(PathBuf::from(root.trim()))
 }
@@ -341,6 +468,9 @@ pub fn staged_files(root: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
 
 /// Tracked files with unstaged changes, as absolute paths
 pub fn unstaged_files(root: &Path) -> Result<Vec<PathBuf>, GoatHookerError> {
+    if worktree_is_clean(root) {
+        return Ok(vec![]);
+    }
     let output = git(root, &["diff", "--name-only", "-z"])?;
     Ok(split_paths(root, &output))
 }
@@ -726,5 +856,71 @@ mod tests {
         git(&root, &["add", "."]).unwrap();
 
         assert!(UnstagedStash::save(&root).unwrap().is_none());
+    }
+
+    /// What git itself says, to compare with what is read from the disk
+    fn rev_parse(dir: &Path, args: &[&str]) -> PathBuf {
+        let out = PathBuf::from(git(dir, &[&["rev-parse"], args].concat()).unwrap().trim());
+        let out = if out.is_absolute() {
+            out
+        } else {
+            dir.join(out)
+        };
+        plain(&fs::canonicalize(out).unwrap())
+    }
+
+    #[test]
+    fn layout_matches_git() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        fs::write(dir.path().join("a.txt"), "a").unwrap();
+        git(dir.path(), &["add", "."]).unwrap();
+        git(dir.path(), &["commit", "-qm", "init", "--no-verify"]).unwrap();
+        let sub = dir.path().join("sub/deeper");
+        fs::create_dir_all(&sub).unwrap();
+
+        let found = layout(&sub).unwrap();
+        assert_eq!(found.root, rev_parse(&sub, &["--show-toplevel"]));
+        assert_eq!(found.git_dir, rev_parse(&sub, &["--git-dir"]));
+        for name in ["HEAD", "MERGE_HEAD", "goat-hooker", "config", "refs/heads"] {
+            let native = native_git_path(&sub, name).unwrap();
+            let expected = git(&sub, &["rev-parse", "--git-path", name]).unwrap();
+            let expected = sub.join(expected.trim());
+            assert_eq!(
+                plain(&fs::canonicalize(native.parent().unwrap()).unwrap()),
+                plain(&fs::canonicalize(expected.parent().unwrap()).unwrap()),
+                "{name}"
+            );
+        }
+
+        // A linked worktree: its own HEAD, the shared config and refs
+        let worktree = dir.path().join("wt");
+        git(dir.path(), &["worktree", "add", "-q", "wt"]).unwrap();
+        let linked = layout(&worktree).unwrap();
+        assert_eq!(linked.root, rev_parse(&worktree, &["--show-toplevel"]));
+        assert_eq!(linked.git_dir, rev_parse(&worktree, &["--git-dir"]));
+        assert_eq!(
+            linked.common_dir,
+            rev_parse(&worktree, &["--git-common-dir"])
+        );
+        assert_eq!(
+            native_git_path(&worktree, "HEAD").unwrap(),
+            linked.git_dir.join("HEAD")
+        );
+        assert_eq!(
+            native_git_path(&worktree, "refs/heads").unwrap(),
+            linked.common_dir.join("refs/heads")
+        );
+        // Settings that move things are left to git
+        assert!(native_git_path(&worktree, "hooks").is_none());
+        assert!(native_git_path(&worktree, "index").is_none());
+    }
+
+    #[test]
+    fn no_layout_outside_a_repository() {
+        let dir = tempdir().unwrap();
+        // A stray `.git` folder isn't a repository
+        fs::create_dir(dir.path().join(".git")).unwrap();
+        assert!(layout(dir.path()).is_none());
     }
 }

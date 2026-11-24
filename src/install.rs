@@ -56,8 +56,15 @@ pub fn is_installed(root: &Path) -> bool {
 /// adds the triggers a config started to use, removes ours that aren't used anymore.
 /// Hand-written hooks are left alone.
 pub fn sync(root: &Path, configs: &[Config]) -> Result<(), GoatHookerError> {
-    let hooks_dir = git::hooks_dir(root)?;
     let used = used_triggers(configs);
+    // Nothing changed since the last sync (same triggers, same git settings): finding the
+    // hooks folder would start git on every commit
+    let stamp = git::data_dir(root)?.join("synced");
+    let state = sync_state(root, &used);
+    if fs::read_to_string(&stamp).is_ok_and(|s| s == state) {
+        return Ok(());
+    }
+    let hooks_dir = git::hooks_dir(root)?;
     for trigger in Trigger::ALL {
         let path = hooks_dir.join(trigger.as_str());
         if used.contains(&trigger) {
@@ -68,7 +75,29 @@ pub fn sync(root: &Path, configs: &[Config]) -> Result<(), GoatHookerError> {
             fs::remove_file(&path)?;
         }
     }
+    if let Some(dir) = stamp.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(&stamp, state)?;
     Ok(())
+}
+
+/// What the Git hooks depend on: the triggers used, and the git settings (`core.hooksPath`)
+fn sync_state(root: &Path, used: &[Trigger]) -> String {
+    let settings = git::git_file(root, "config")
+        .and_then(|config| Ok(fs::metadata(config)?))
+        .map(|meta| {
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or_default();
+            format!("{} {modified}", meta.len())
+        })
+        .unwrap_or_default();
+    let triggers: Vec<&str> = used.iter().map(|t| t.as_str()).collect();
+    format!("{}\n{settings}\n", triggers.join(","))
 }
 
 fn ours(path: &Path) -> bool {

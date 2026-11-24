@@ -12,12 +12,68 @@ const MATCH_OPTIONS: MatchOptions = MatchOptions {
     require_literal_leading_dot: false,
 };
 
+/// A compiled glob. The usual shapes (`*.rs`, `**/*.rs`, `**`, a plain path) are checked
+/// without the glob engine: a commit can have thousands of files for each hook.
+enum Glob {
+    /// `*.ext`: a file of the folder itself ending with `.ext`
+    Suffix(String),
+    /// `**/*.ext`: any file ending with `.ext`
+    DeepSuffix(String),
+    /// `**`, `**/*`: everything
+    All,
+    /// A path without wildcards
+    Exact(String),
+    Pattern(Pattern),
+}
+
+/// No character with a meaning in a glob
+fn is_plain(text: &str) -> bool {
+    !text.contains(['*', '?', '[', ']', '{', '}', '!', '\\'])
+}
+
+impl Glob {
+    fn new(pattern: &str) -> Result<Self, glob::PatternError> {
+        let compiled = Pattern::new(pattern)?;
+        let suffix = |prefix: &str| {
+            pattern
+                .strip_prefix(prefix)
+                .filter(|ext| is_plain(ext) && !ext.contains('/'))
+                .map(String::from)
+        };
+        Ok(if pattern == "**" || pattern == "**/*" {
+            Glob::All
+        } else if let Some(ext) = suffix("**/*") {
+            Glob::DeepSuffix(ext)
+        } else if let Some(ext) = suffix("*") {
+            Glob::Suffix(ext)
+        } else if is_plain(pattern) {
+            Glob::Exact(pattern.to_string())
+        } else {
+            Glob::Pattern(compiled)
+        })
+    }
+
+    /// `path`: relative to the project, with `/` between folders
+    fn matches(&self, path: &str, original: &Path) -> bool {
+        match self {
+            Glob::Suffix(ext) => !path.contains('/') && path.ends_with(ext.as_str()),
+            Glob::DeepSuffix(ext) => path
+                .rsplit('/')
+                .next()
+                .is_some_and(|name| name.ends_with(ext.as_str())),
+            Glob::All => true,
+            Glob::Exact(exact) => path == exact,
+            Glob::Pattern(pattern) => pattern.matches_path_with(original, MATCH_OPTIONS),
+        }
+    }
+}
+
 /// A hook with its patterns already compiled
 struct CompiledHook<'a> {
     hook: &'a Hook,
     base_dir: PathBuf,
-    include: Vec<Pattern>,
-    exclude: Vec<Pattern>,
+    include: Vec<Glob>,
+    exclude: Vec<Glob>,
 }
 
 /// A hook to run, with the folder to run it from
@@ -82,12 +138,14 @@ impl<'a> Matcher<'a> {
         trigger: Trigger,
         files: Option<&[PathBuf]>,
     ) -> Vec<MatchedHook<'a>> {
-        let files_abs: Option<Vec<PathBuf>> =
-            files.map(|files| files.iter().map(|f| normalize_path(f)).collect());
-        let changed_projects = files_abs
-            .as_ref()
-            .map(|files| self.dependencies.changed_projects(files))
-            .unwrap_or_default();
+        let files_abs: Option<Vec<PathBuf>> = files.map(normalize_files);
+        // Only the `affected` hooks look at the projects that changed
+        let changed_projects = match files_abs.as_ref() {
+            Some(files) if self.hooks.iter().any(|c| c.hook.affected == Some(true)) => {
+                self.dependencies.changed_projects(files)
+            }
+            _ => Default::default(),
+        };
 
         self.hooks
             .iter()
@@ -145,11 +203,18 @@ impl CompiledHook<'_> {
     }
 
     fn matches_relative(&self, relative: &Path) -> bool {
+        let text = relative.to_string_lossy();
+        // `\` on Windows: the globs use `/`
+        let text = if cfg!(windows) {
+            std::borrow::Cow::Owned(text.replace('\\', "/"))
+        } else {
+            text
+        };
         // Checks the exclusions before the inclusions
         if self
             .exclude
             .iter()
-            .any(|pattern| pattern.matches_path_with(relative, MATCH_OPTIONS))
+            .any(|glob| glob.matches(&text, relative))
         {
             return false;
         }
@@ -161,7 +226,7 @@ impl CompiledHook<'_> {
 
         self.include
             .iter()
-            .any(|pattern| pattern.matches_path_with(relative, MATCH_OPTIONS))
+            .any(|glob| glob.matches(&text, relative))
     }
 }
 
@@ -169,18 +234,34 @@ impl CompiledHook<'_> {
 fn compile_patterns(
     hook: &Hook,
     patterns: Option<&Vec<String>>,
-) -> Result<Vec<Pattern>, GoatHookerError> {
+) -> Result<Vec<Glob>, GoatHookerError> {
     patterns
         .into_iter()
         .flatten()
         .map(|pattern| {
-            Pattern::new(pattern.trim_start_matches("./")).map_err(|source| {
+            Glob::new(pattern.trim_start_matches("./")).map_err(|source| {
                 GoatHookerError::InvalidPattern {
                     hook: hook.name.clone(),
                     pattern: pattern.clone(),
                     source,
                 }
             })
+        })
+        .collect()
+}
+
+/// Normalizes many files: the folders are resolved once each (a commit can have thousands of
+/// files in a few folders, and resolving a path costs a system call per component)
+pub(crate) fn normalize_files(files: &[PathBuf]) -> Vec<PathBuf> {
+    let mut folders: std::collections::HashMap<&Path, PathBuf> = std::collections::HashMap::new();
+    files
+        .iter()
+        .map(|file| match (file.parent(), file.file_name()) {
+            (Some(parent), Some(name)) if file.is_absolute() => folders
+                .entry(parent)
+                .or_insert_with(|| normalize_path(parent))
+                .join(name),
+            _ => normalize_path(file),
         })
         .collect()
 }
@@ -327,5 +408,48 @@ mod tests {
             Matcher::new(&configs),
             Err(GoatHookerError::InvalidPattern { .. })
         ));
+    }
+
+    #[test]
+    fn fast_globs_match_like_the_glob_engine() {
+        let patterns = [
+            "*.rs",
+            "**/*.rs",
+            "**",
+            "**/*",
+            "src/main.rs",
+            "*.test.ts",
+            "**/*.d.ts",
+            "Cargo.toml",
+            "src/*.rs",
+            "**/src/*.rs",
+            "*",
+        ];
+        let paths = [
+            "main.rs",
+            "src/main.rs",
+            "src/a/b.rs",
+            "a.test.ts",
+            "web/a.test.ts",
+            "types/x.d.ts",
+            "x.d.ts",
+            "Cargo.toml",
+            "crates/a/Cargo.toml",
+            ".rs",
+            "rs",
+            "README.md",
+            "a.rsx",
+        ];
+        for pattern in patterns {
+            let fast = Glob::new(pattern).unwrap();
+            let engine = Pattern::new(pattern).unwrap();
+            for path in paths {
+                assert_eq!(
+                    fast.matches(path, Path::new(path)),
+                    engine.matches_path_with(Path::new(path), MATCH_OPTIONS),
+                    "{pattern} on {path}"
+                );
+            }
+        }
     }
 }

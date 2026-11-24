@@ -956,21 +956,93 @@ fn execute_command(
     )
 }
 
-/// Stops a command and what it started
-fn kill_tree(child: &mut std::process::Child) {
+/// Stops a command and what it started (its process group on unix)
+fn kill_tree(pid: u32) {
     #[cfg(unix)]
     {
         let _ = Command::new("kill")
-            .args(["-s", "KILL", "--", &format!("-{}", child.id())])
+            .args(["-s", "KILL", "--", &format!("-{pid}")])
+            .status();
+        let _ = Command::new("kill")
+            .args(["-s", "KILL", "--", &pid.to_string()])
             .status();
     }
     #[cfg(windows)]
     {
         let _ = Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .args(["/T", "/F", "/PID", &pid.to_string()])
             .status();
     }
-    let _ = child.kill();
+}
+
+/// What the threads watching a command send
+enum Event {
+    Output(Vec<u8>),
+    Exit(std::io::Result<std::process::ExitStatus>),
+}
+
+/// A started command
+struct Prepared {
+    child: std::process::Child,
+    /// stdout and stderr together, for a command started without a shell
+    merged: Option<std::io::PipeReader>,
+    network_note: Option<&'static str>,
+}
+
+/// Builtins of the shell that aren't programs: commands starting with them need `sh`
+const SHELL_ONLY: [&str; 22] = [
+    ".", ":", "alias", "bg", "cd", "command", "eval", "exec", "exit", "export", "fg", "getopts",
+    "hash", "jobs", "read", "readonly", "return", "set", "shift", "source", "trap", "unset",
+];
+
+/// Arguments of a command that doesn't need a shell: words made of plain characters, and
+/// `{files}` / `{name}` placeholders as whole words (one argument per file).
+/// `None` when the shell would change something (quotes, `$`, globs, `&&`, redirections...).
+fn direct_argv(
+    cmd: &str,
+    files: &[PathBuf],
+    values: &[(String, Value)],
+) -> Option<Vec<std::ffi::OsString>> {
+    let plain = |word: &str| {
+        word.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_./:@%+=,^".contains(&b))
+    };
+    let mut argv: Vec<std::ffi::OsString> = Vec::new();
+    for (i, word) in cmd.split_ascii_whitespace().enumerate() {
+        if word == FILES_PLACEHOLDER {
+            argv.extend(files.iter().map(|f| f.as_os_str().to_owned()));
+            continue;
+        }
+        if let Some(name) = word.strip_prefix('{').and_then(|w| w.strip_suffix('}')) {
+            match values.iter().find(|(n, _)| n == name)?.1 {
+                Value::Text(ref text) => argv.push(text.into()),
+                Value::List(ref items) => argv.extend(items.iter().map(Into::into)),
+            }
+            continue;
+        }
+        // `NAME=value cmd` sets a variable for the command: left to the shell
+        if !plain(word) || (i == 0 && (word.contains('=') || SHELL_ONLY.contains(&word))) {
+            return None;
+        }
+        argv.push(word.into());
+    }
+    // The program must be a word of the command, not a placeholder
+    let first = cmd.split_ascii_whitespace().next()?;
+    (!first.starts_with('{')).then_some(argv)
+}
+
+/// Output until the end of a stopped command, then the event of its end
+fn continue_until_exit(
+    events: &std::sync::mpsc::Receiver<Event>,
+    receive: &mut impl FnMut(Vec<u8>),
+) -> std::io::Result<Event> {
+    loop {
+        match events.recv() {
+            Ok(Event::Output(chunk)) => receive(chunk),
+            Ok(exit) => return Ok(exit),
+            Err(_) => return Err(std::io::Error::other("the command can't be watched")),
+        }
+    }
 }
 
 /// Like `execute_command`, with the environment and restrictions of the hook
@@ -1019,62 +1091,109 @@ fn execute_in(
         .map(|f| f.to_string_lossy().to_string())
         .collect();
 
-    let (mut command, network_note) = sandboxed_shell(sandbox.network);
-    if let Some(allowed) = sandbox.env.as_ref() {
-        command.env_clear();
-        for (name, value) in std::env::vars_os() {
-            let name_str = name.to_string_lossy();
-            if BASIC_ENV.contains(&name_str.as_ref())
-                || name_str.starts_with("GIT_")
-                || name_str.starts_with("HOOKER_")
-                || allowed.iter().any(|a| *a == name_str)
-            {
-                command.env(name, value);
+    // A simple command (`cargo fmt -- {files}`) is started without a shell: one process
+    // less per hook. Anything the shell would interpret goes through `sh -c`.
+    let direct = if cfg!(unix) && sandbox.network {
+        direct_argv(cmd, files, values)
+    } else {
+        None
+    };
+    let prepare = |direct: Option<&[std::ffi::OsString]>| -> std::io::Result<Prepared> {
+        let (mut command, network_note) = match direct {
+            Some(argv) => {
+                let mut command = Command::new(&argv[0]);
+                command.args(&argv[1..]);
+                (command, None)
+            }
+            None => sandboxed_shell(sandbox.network),
+        };
+        if let Some(allowed) = sandbox.env.as_ref() {
+            command.env_clear();
+            for (name, value) in std::env::vars_os() {
+                let name_str = name.to_string_lossy();
+                if BASIC_ENV.contains(&name_str.as_ref())
+                    || name_str.starts_with("GIT_")
+                    || name_str.starts_with("HOOKER_")
+                    || allowed.iter().any(|a| *a == name_str)
+                {
+                    command.env(name, value);
+                }
             }
         }
-    }
-    command.envs(sandbox.extra_env.iter().cloned());
-    command
-        .arg("-c")
-        // stderr redirected to stdout to keep the order of the messages in capture mode
-        .arg(match output {
-            Output::Inherit => shell_cmd,
-            Output::Capture => format!("{{ {shell_cmd}\n}} 2>&1"),
+        command.envs(sandbox.extra_env.iter().cloned());
+        if direct.is_none() {
+            command
+                .arg("-c")
+                // stderr redirected to stdout to keep the order of the messages in capture mode
+                .arg(match output {
+                    Output::Inherit => shell_cmd.clone(),
+                    Output::Capture => format!("{{ {shell_cmd}\n}} 2>&1"),
+                })
+                .arg("hooker") // $0
+                .args(&input.args);
+        }
+        command
+            .current_dir(dir)
+            .env("HOOKER_FILES", files_env.join("\n"))
+            .envs(env_values.iter().cloned())
+            .envs(output_file.map(|f| ("HOOKER_OUTPUT", f.as_os_str().to_owned())))
+            .envs(
+                (input.force_color && output == Output::Capture)
+                    .then_some([("FORCE_COLOR", "1"), ("CLICOLOR_FORCE", "1")])
+                    .into_iter()
+                    .flatten(),
+            )
+            .stdin(if input.stdin.is_some() {
+                Stdio::piped()
+            } else if output == Output::Capture {
+                Stdio::null()
+            } else {
+                Stdio::inherit()
+            });
+
+        let mut merged = None;
+        match output {
+            // Redirect the standard output and error to the parent process
+            Output::Inherit => {
+                command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+            }
+            // Without a shell, both go to the same pipe, in the order they are written
+            Output::Capture if direct.is_some() => {
+                let (reader, writer) = std::io::pipe()?;
+                command.stdout(writer.try_clone()?).stderr(writer);
+                merged = Some(reader);
+            }
+            Output::Capture => {
+                command.stdout(Stdio::piped()).stderr(Stdio::piped());
+            }
+        };
+
+        // With a timeout, the command gets its own process group: everything it started is
+        // stopped
+        #[cfg(unix)]
+        if sandbox.deadline.is_some() {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let child = command.spawn()?;
+        // `command` keeps the write end of the pipe: dropped so that the output ends
+        drop(command);
+        Ok(Prepared {
+            child,
+            merged,
+            network_note,
         })
-        .arg("hooker") // $0
-        .args(&input.args)
-        .current_dir(dir)
-        .env("HOOKER_FILES", files_env.join("\n"))
-        .envs(env_values)
-        .envs(output_file.map(|f| ("HOOKER_OUTPUT", f.as_os_str().to_owned())))
-        .envs(
-            (input.force_color && output == Output::Capture)
-                .then_some([("FORCE_COLOR", "1"), ("CLICOLOR_FORCE", "1")])
-                .into_iter()
-                .flatten(),
-        )
-        .stdin(if input.stdin.is_some() {
-            Stdio::piped()
-        } else if output == Output::Capture {
-            Stdio::null()
-        } else {
-            Stdio::inherit()
-        });
-
-    match output {
-        // Redirect the standard output and error to the parent process
-        Output::Inherit => command.stdout(Stdio::inherit()).stderr(Stdio::inherit()),
-        Output::Capture => command.stdout(Stdio::piped()).stderr(Stdio::piped()),
     };
-
-    // With a timeout, the command gets its own process group: everything it started is stopped
-    #[cfg(unix)]
-    if sandbox.deadline.is_some() {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-
-    let mut child = command.spawn()?;
+    let prepared = match prepare(direct.as_deref()) {
+        // Not a program: maybe a shell function or alias, `sh` tells
+        Err(e) if direct.is_some() && e.kind() == std::io::ErrorKind::NotFound => prepare(None),
+        other => other,
+    }?;
+    let Prepared {
+        mut child,
+        merged,
+        network_note,
+    } = prepared;
 
     if let (Some(content), Some(mut child_stdin)) = (input.stdin.as_ref(), child.stdin.take()) {
         // The command may not read stdin: a closed pipe is ignored
@@ -1085,8 +1204,9 @@ fn execute_in(
     // what they read: the command can then be waited for without waiting for the processes it
     // started, which may keep its output open (`sleep` started by Git Bash on Windows survives
     // the end of `sh`).
-    let (sender, chunks) = std::sync::mpsc::channel::<Vec<u8>>();
+    let (sender, events) = std::sync::mpsc::channel::<Event>();
     for mut pipe in [
+        merged.map(|p| Box::new(p) as Box<dyn std::io::Read + Send>),
         child
             .stdout
             .take()
@@ -1103,13 +1223,17 @@ fn execute_in(
         std::thread::spawn(move || {
             let mut buffer = [0u8; 8192];
             while let Ok(n) = pipe.read(&mut buffer) {
-                if n == 0 || sender.send(buffer[..n].to_vec()).is_err() {
+                if n == 0 || sender.send(Event::Output(buffer[..n].to_vec())).is_err() {
                     break;
                 }
             }
         });
     }
-    drop(sender);
+    // The end of the command is sent too: nothing is polled, a fast command costs nothing
+    let pid = child.id();
+    std::thread::spawn(move || {
+        let _ = sender.send(Event::Exit(child.wait()));
+    });
 
     let mut collected = Vec::<u8>::new();
     let mut receive = |chunk: Vec<u8>| {
@@ -1120,27 +1244,31 @@ fn execute_in(
     };
     let mut timed_out = false;
     let status = loop {
-        match chunks.recv_timeout(Duration::from_millis(10)) {
-            Ok(chunk) => receive(chunk),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                // Output closed: only the end of the process is left
-                std::thread::sleep(Duration::from_millis(5));
+        let event = match sandbox.deadline {
+            Some(deadline) => {
+                match events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                    Ok(event) => event,
+                    Err(_) => {
+                        // Too long: stopped, then its end is waited for
+                        kill_tree(pid);
+                        timed_out = true;
+                        continue_until_exit(&events, &mut receive)?
+                    }
+                }
             }
-        }
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if sandbox.deadline.is_some_and(|d| Instant::now() >= d) {
-            kill_tree(&mut child);
-            timed_out = true;
-            break child.wait()?;
+            None => events
+                .recv()
+                .map_err(|_| std::io::Error::other("the command can't be watched"))?,
+        };
+        match event {
+            Event::Output(chunk) => receive(chunk),
+            Event::Exit(status) => break status?,
         }
     };
     // The rest of the output: until it is closed, or a moment without anything once the
     // command is over (processes it left behind keep it open)
     let grace = Duration::from_millis(if timed_out { 200 } else { 1000 });
-    while let Ok(chunk) = chunks.recv_timeout(grace) {
+    while let Ok(Event::Output(chunk)) = events.recv_timeout(grace) {
         receive(chunk);
     }
     let success = status.success() && !timed_out;
@@ -1837,5 +1965,108 @@ mod tests {
         assert!(results[0].stdout().contains("timeout"));
         // the output came while the hook was running
         assert!(lines.lock().unwrap().contains("started"));
+    }
+
+    #[test]
+    fn simple_commands_skip_the_shell() {
+        let files = vec![PathBuf::from("a b.rs"), PathBuf::from("c.rs")];
+        let values = vec![("schema".to_string(), Value::Text("x.json".into()))];
+        let argv = |cmd: &str| {
+            direct_argv(cmd, &files, &values).map(|a| {
+                a.iter()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(
+            argv("cargo fmt -- {files}").unwrap(),
+            ["cargo", "fmt", "--", "a b.rs", "c.rs"]
+        );
+        assert_eq!(
+            argv("tsc --project {schema}").unwrap(),
+            ["tsc", "--project", "x.json"]
+        );
+        for shell in [
+            "cargo fmt && cargo test",
+            "echo $HOME",
+            "eslint 'src/**'",
+            "ls *.rs",
+            "cd api",
+            "FOO=1 make",
+            "echo hi > out",
+            "{files}",
+            "x {unknown}",
+        ] {
+            assert!(argv(shell).is_none(), "{shell}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn direct_command_output_and_failure() {
+        let dir = tempdir().unwrap();
+        // stdout and stderr in the captured output, in order
+        std::fs::write(
+            dir.path().join("both.sh"),
+            "#!/bin/sh\necho out\necho err >&2\nexit 3\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            dir.path().join("both.sh"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        let result = execute_command(
+            "./both.sh",
+            dir.path(),
+            &input(&[], None),
+            &[],
+            &[],
+            None,
+            Output::Capture,
+        )
+        .unwrap();
+        assert!(!result.success);
+        assert_eq!(result.output, "out\nerr\n");
+
+        // Not a program: `sh` says so, the hook fails
+        let result = execute_command(
+            "no-such-program-hooker",
+            dir.path(),
+            &input(&[], None),
+            &[],
+            &[],
+            None,
+            Output::Capture,
+        )
+        .unwrap();
+        assert!(!result.success);
+        assert!(result.output.contains("not found"), "{}", result.output);
+    }
+
+    #[test]
+    fn a_fast_command_isnt_slowed_down() {
+        let dir = tempdir().unwrap();
+        let start = Instant::now();
+        for _ in 0..20 {
+            let result = execute_command(
+                "git --version",
+                dir.path(),
+                &input(&[], None),
+                &[],
+                &[],
+                None,
+                Output::Capture,
+            )
+            .unwrap();
+            assert!(result.success);
+        }
+        // Waiting for the end used to poll every 10 ms
+        assert!(
+            start.elapsed() < Duration::from_millis(2000),
+            "{:?}",
+            start.elapsed()
+        );
     }
 }
