@@ -74,19 +74,19 @@ def text(x, y, content, size=14, color=None, weight=400, anchor="start", family=
 
 # MARK: features
 
-TOOLS = ["Goat Hooker", "lefthook", "pre-commit", "husky + lint-staged"]
+TOOLS = ["Goat Hooker", "lefthook", "prek", "pre-commit", "husky + lint-staged"]
 YES, PART, NO = "yes", "part", "no"
 
 COMMON = [
-    ("Runs hooks on the staged files they target", [YES, YES, YES, PART]),
-    ("Hides unstaged changes while hooks run", [YES, YES, YES, PART]),
-    ("Stages again the files formatters fixed", [YES, YES, NO, PART]),
-    ("Runs hooks in parallel", [YES, YES, PART, PART]),
-    ("Shared hooks from Git repositories", [YES, YES, YES, NO]),
-    ("Local changes for one computer", [YES, YES, NO, NO]),
-    ("Skips one hook by name", [YES, YES, YES, NO]),
-    ("A config per project of a mono-repo", [YES, PART, NO, NO]),
-    ("Installs the tools the hooks need", [NO, NO, YES, NO]),
+    ("Runs hooks on the staged files they target", [YES, YES, YES, YES, PART]),
+    ("Hides unstaged changes while hooks run", [YES, YES, YES, YES, PART]),
+    ("Stages again the files formatters fixed", [YES, YES, NO, NO, PART]),
+    ("Runs hooks in parallel", [YES, YES, PART, PART, PART]),
+    ("Shared hooks from Git repositories", [YES, YES, YES, YES, NO]),
+    ("Local changes for one computer", [YES, YES, NO, NO, NO]),
+    ("Skips one hook by name", [YES, YES, YES, YES, NO]),
+    ("A config per project of a mono-repo", [YES, PART, YES, NO, NO]),
+    ("Installs the tools the hooks need", [NO, NO, YES, YES, NO]),
 ]
 ONLY = [
     "Skips hooks whose files didn't change (cache)",
@@ -117,8 +117,8 @@ def mark(cx, cy, kind, t):
 
 def features(theme):
     t = THEMES[theme]
-    width = 830
-    first, col = 360, 112
+    width = 880
+    first, col = 360, 96
     row = 32
     top = 112
     rows = len(COMMON) + len(ONLY)
@@ -169,7 +169,13 @@ def features(theme):
     parts.append(mark(362, y - 4, NO, t))
     parts.append(text(378, y + 1, "no", 12.5, t["muted"]))
     parts.append(
-        text(40, y + 26, "lefthook 2.2, pre-commit 4.7, husky 9.1 + lint-staged 17.6, November 2026", 12, t["muted"])
+        text(
+            40,
+            y + 26,
+            "lefthook 2.2, prek 0.5, pre-commit 4.7, husky 9.1 + lint-staged 17.6, November 2026",
+            12,
+            t["muted"],
+        )
     )
     return card(width, height, theme, "\n".join(parts))
 
@@ -179,6 +185,7 @@ def features(theme):
 SCENARIOS = [
     ("noop", "One hook that does nothing", "the cost of the tool itself"),
     ("five", "Five hooks of 200 ms", "how the hooks are scheduled"),
+    ("many", "1,000 staged files", "five hooks matching them"),
     ("retry", "The same commit again", "after a failed commit message, same staged files"),
 ]
 
@@ -197,7 +204,11 @@ def speed(theme, results):
     y = 110
     for key, title, subtitle in SCENARIOS:
         values = results["scenarios"][key]
-        tools = [tool for tool in ["goat-hooker", "lefthook", "pre-commit", "husky + lint-staged"] if tool in values]
+        tools = [
+            tool
+            for tool in ["goat-hooker", "lefthook", "prek", "pre-commit", "husky + lint-staged"]
+            if tool in values
+        ]
         top = max(values[tool] for tool in tools)
         parts.append(text(left, y + 14, title, 15, t["fg"], 700))
         parts.append(text(left + 9 * len(title) + 22, y + 14, subtitle, 13, t["muted"]))
@@ -221,8 +232,9 @@ def speed(theme, results):
             40,
             y + 4,
             f"Goat Hooker {versions['goat-hooker'].split()[-1]}, lefthook {versions['lefthook']}, "
-            f"pre-commit {versions['pre-commit'].split()[-1]}, husky {versions['husky']} + lint-staged "
-            f"{versions['lint-staged']}, {versions['git']}, 2-core Linux VM",
+            f"prek {versions['prek'].split()[-1]}, pre-commit {versions['pre-commit'].split()[-1]}, "
+            f"husky {versions['husky']} + lint-staged {versions['lint-staged']}, "
+            f"{versions['git'].replace('git version', 'git')}, 2-core Linux VM",
             12,
             t["muted"],
         )

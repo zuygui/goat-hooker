@@ -4,18 +4,18 @@ export const YES = "yes";
 export const PART = "part";
 export const NO = "no";
 
-export const compareTools = ["Goat Hooker", "lefthook", "pre-commit", "husky + lint-staged"];
+export const compareTools = ["Goat Hooker", "lefthook", "prek", "pre-commit", "husky + lint-staged"];
 
 export const compareCommon: [string, string[]][] = [
-  ["Runs hooks on the staged files they target", [YES, YES, YES, PART]],
-  ["Hides unstaged changes while hooks run", [YES, YES, YES, PART]],
-  ["Stages again the files formatters fixed", [YES, YES, NO, PART]],
-  ["Runs hooks in parallel", [YES, YES, PART, PART]],
-  ["Shared hooks from Git repositories", [YES, YES, YES, NO]],
-  ["Local changes for one computer", [YES, YES, NO, NO]],
-  ["Skips one hook by name", [YES, YES, YES, NO]],
-  ["A config per project of a mono-repo", [YES, PART, NO, NO]],
-  ["Installs the tools the hooks need", [NO, NO, YES, NO]],
+  ["Runs hooks on the staged files they target", [YES, YES, YES, YES, PART]],
+  ["Hides unstaged changes while hooks run", [YES, YES, YES, YES, PART]],
+  ["Stages again the files formatters fixed", [YES, YES, NO, NO, PART]],
+  ["Runs hooks in parallel", [YES, YES, PART, PART, PART]],
+  ["Shared hooks from Git repositories", [YES, YES, YES, YES, NO]],
+  ["Local changes for one computer", [YES, YES, NO, NO, NO]],
+  ["Skips one hook by name", [YES, YES, YES, YES, NO]],
+  ["A config per project of a mono-repo", [YES, PART, YES, NO, NO]],
+  ["Installs the tools the hooks need", [NO, NO, YES, YES, NO]],
 ];
 
 export const compareOnly = [

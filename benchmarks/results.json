@@ -2,29 +2,41 @@
   "runs": 15,
   "scenarios": {
     "noop": {
-      "none": 7,
-      "goat-hooker": 36,
-      "lefthook": 33,
-      "pre-commit": 181,
-      "husky + lint-staged": 441
+      "none": 8,
+      "goat-hooker": 17,
+      "lefthook": 30,
+      "prek": 25,
+      "pre-commit": 200,
+      "husky + lint-staged": 460
     },
     "five": {
-      "none": 7,
-      "goat-hooker": 244,
-      "lefthook": 247,
-      "pre-commit": 1206,
-      "husky + lint-staged": 646
+      "none": 8,
+      "goat-hooker": 223,
+      "lefthook": 244,
+      "prek": 1059,
+      "pre-commit": 1227,
+      "husky + lint-staged": 679
+    },
+    "many": {
+      "none": 18,
+      "goat-hooker": 40,
+      "lefthook": 63,
+      "prek": 99,
+      "pre-commit": 263,
+      "husky + lint-staged": 563
     },
     "retry": {
-      "goat-hooker": 24,
-      "lefthook": 248,
-      "pre-commit": 1206,
-      "husky + lint-staged": 636
+      "goat-hooker": 18,
+      "lefthook": 252,
+      "prek": 1061,
+      "pre-commit": 1219,
+      "husky + lint-staged": 698
     }
   },
   "versions": {
-    "goat-hooker": "goat-hooker 0.4.0",
+    "goat-hooker": "goat-hooker main",
     "lefthook": "2.2.2",
+    "prek": "prek 0.5.11",
     "pre-commit": "pre-commit 4.7.0",
     "husky": "9.1.7",
     "lint-staged": "17.6.2",
