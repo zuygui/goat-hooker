@@ -229,7 +229,9 @@ pub struct Hook {
     pub stage_fixed: Option<bool>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Git repository URL to load the hooks file from (requires `path`)")]
+    #[schemars(
+        description = "Git repository to load a hooks file (`path`) or a hook of its .pre-commit-hooks.yaml (`id`) from"
+    )]
     pub from: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]

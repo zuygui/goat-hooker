@@ -13,6 +13,9 @@ const REPOSITORY = "https://github.com/zuygui/goat-hooker/blob/main/";
 const source = new URL("../../docs/", import.meta.url).pathname;
 const target = new URL("../src/content/docs/docs/", import.meta.url).pathname;
 
+// The configuration reference is written from schema.json first
+await import("./config-reference.mjs");
+
 rmSync(target, { recursive: true, force: true });
 mkdirSync(target, { recursive: true });
 

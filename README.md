@@ -144,13 +144,13 @@ Each stage is its own module in [`src/`](src/): [`config`](src/config/mod.rs), [
 
 ## Documentation
 
-- [Installation](docs/installation.md)
-- [The `hooker` CLI](docs/cli.md): commands, skipping hooks, `watch`, `doctor`, CI, cache
-- [Configuration](docs/configuration.md): every field, branches, timeout, local changes
-- [Mono-repos](docs/monorepos.md) and [affected projects](docs/monorepos.md#affected-projects)
-- [Hooks graph and variables](docs/graph.md)
-- [Shared hooks](docs/shared-hooks.md): hooks files, the catalogue, permissions and trust, imports
-- [Desktop app](docs/desktop-app.md)
+The whole documentation is on **[zuygui.github.io/goat-hooker/docs](https://zuygui.github.io/goat-hooker/docs/)** (and in [`docs/`](docs)):
+
+- Getting started: [Quickstart](docs/quickstart.md), [Installation](docs/installation.md), [Coming from another tool](docs/migrating.md)
+- Writing hooks: [Configuration](docs/configuration.md), [Choosing the files](docs/files.md), [Writing commands](docs/commands.md), [Hooks graph and variables](docs/graph.md), [Local changes](docs/local-changes.md)
+- Using hooks: [Running hooks](docs/running.md), [Cache](docs/cache.md), [Mono-repos](docs/monorepos.md), [CI](docs/ci.md), [Desktop app](docs/desktop-app.md)
+- Sharing hooks: [Shared hooks](docs/shared-hooks.md), [Hooks of the pre-commit ecosystem](docs/precommit-hooks.md), [Security](docs/security.md)
+- Reference: [Configuration](docs/config-reference.md), [CLI](docs/cli.md), [Environment and files](docs/environment.md), [FAQ](docs/faq.md)
 
 ## Building from source
 
