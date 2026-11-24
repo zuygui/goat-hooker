@@ -1,16 +1,16 @@
-# Release automatique (https://release-plz.dev)
-# On each push to main: a “chore: release” PR updates the version and the CHANGELOG
-# (from the conventional commits). When it is merged: published on crates.io,
-# tag `vX.Y.Z` and GitHub Release, then the binaries and installers are added to it.
+# Releases (https://release-plz.dev), only on demand: push a commit
+# `chore: release vX.Y.Z` on main. The release workflow then sets the version, writes the
+# CHANGELOG from the conventional commits, publishes on crates.io, creates the `vX.Y.Z` tag
+# and the GitHub Release, and adds the binaries and installers to it.
+# No release pull request is opened: other pushes release nothing.
 
 [workspace]
 # A single tag for the whole project (CLI + app)
 git_tag_name = "v{{ version }}"
 git_release_name = "Goat Hooker v{{ version }}"
 changelog_path = "./CHANGELOG.md"
-pr_labels = ["release"]
-# In 0.x, a new feature (feat) bumps the minor version (0.1 → 0.2)
-features_always_increment_minor = true
+# The version comes from the release commit, not from the API changes
+semver_check = false
 
 [[package]]
 name = "goat-hooker-gui"
