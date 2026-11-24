@@ -54,6 +54,34 @@ path = "hooks/rust.json"
 with = { clippy_args = "--all-targets" }
 ```
 
+## Hooks of the pre-commit ecosystem
+
+Any hook of a repository with a `.pre-commit-hooks.yaml` (ruff, black, prettier, eslint, shellcheck, codespell, pre-commit-hooks...) can be used from a `hooker.toml` with `from`, `rev` and `id`:
+
+```toml
+[[hooks]]
+from = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.8.0"
+id = "ruff"
+args = ["--fix"]
+
+[[hooks]]
+from = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v5.0.0"
+id = "trailing-whitespace"
+```
+
+Its command, files (`types`, `files`, `exclude`) and stage come from its definition; whatever the hook sets itself wins (`args`, `include`, `trigger`, `cmd`...). Like every hook of another repository, it runs once you reviewed it with `hooker trust`. It may fix the files it targets, and the fixes are staged again (`stage_fixed = false` to keep them out of the commit).
+
+The tool of the hook:
+
+- **Installed on your computer**: when its program (`ruff`, `eslint`...) is in the PATH, it is used as it is.
+- **Otherwise**, it is built once in the cache with the toolchain of your computer: a virtualenv for Python (with `uv` when it is there), `npm install` for Node, `cargo install` for Rust, `go install` for Go, `gem install` for Ruby, conda environments, Docker images. Goat Hooker never downloads a language runtime: a missing toolchain is an error saying what to install.
+- `isolate = true` always builds its own environment (to get the exact version of `rev`), `isolate = false` never does.
+- `additional_dependencies` adds packages to that environment.
+
+Supported languages: `system`, `script`, `python`, `node`, `rust`, `golang`, `ruby`, `conda`, `docker`, `docker_image`, `pygrep` and `fail`.
+
 ## Share your hooks
 
 Add `share` to the root `hooker.toml` of a repository: `hooker search` (and the app) find it on GitHub.
@@ -103,7 +131,7 @@ git commit               # runs the hooks of your lefthook.yml / .pre-commit-con
 What is read:
 
 - lefthook: commands, jobs, scripts, `glob`, `exclude` (globs or regex), `root`, `piped`, `parallel`, `env`, `fail_text`, `stage_fixed`, `skip` / `only` with `ref:`, and `lefthook-local.yml`
-- pre-commit: local hooks (`language: fail` too), `files` / `exclude` regexes (top-level ones too), `types`, `stages`, `always_run`, `pass_filenames`, the well-known hooks (pre-commit-hooks, ruff, black, prettier, eslint, Rust, conventional commits) and the other ones through `pre-commit run`
+- pre-commit: every hook of every repository, run by Goat Hooker itself (see [Hooks of the pre-commit ecosystem](#hooks-of-the-pre-commit-ecosystem)): local hooks, `files` / `exclude` regexes (top-level ones too), `types`, `stages`, `args`, `additional_dependencies`, `always_run`, `pass_filenames`. The hooks of other repositories are reviewed once with `hooker trust`
 - husky (`.husky/*`, or `husky.hooks` in package.json) and lint-staged (package.json or `.lintstagedrc`): one hook per command, in order, with the fixed files staged again
 
 ## Import from husky, lefthook and pre-commit

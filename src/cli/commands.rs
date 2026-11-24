@@ -241,6 +241,22 @@ pub enum AppCommands {
     /// Print the JSON schema of the configuration file
     #[command()]
     Schema,
+
+    /// Look for a regex in files (the `pygrep` hooks of the pre-commit ecosystem): fails when
+    /// a line matches
+    #[command(hide = true)]
+    Pygrep {
+        #[arg(short = 'i', long)]
+        ignore_case: bool,
+        /// The regex may match several lines
+        #[arg(long)]
+        multiline: bool,
+        /// Fails when a file has no match instead
+        #[arg(long)]
+        negate: bool,
+        pattern: String,
+        files: Vec<PathBuf>,
+    },
 }
 
 fn styles() -> Styles {

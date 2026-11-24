@@ -74,6 +74,7 @@ Goats keep their footing on the steepest cliffs. Goat Hooker keeps your commits 
 - **Only what changed.** Each hook runs on the staged files it targets and sees exactly what will be committed: unstaged changes are put aside. A hook whose files didn't change since it last passed is skipped.
 - **Built for mono-repos.** Each project owns its `hooker.toml`. Dependencies between projects are read from Cargo, `package.json`, `go.mod` and `pyproject.toml`, so a change in `core` also runs the tests of `api`.
 - **Fast.** One native binary, hooks in parallel and a cache. `hooker watch` runs the hooks while you stage, so the commit itself is instant.
+- **The whole pre-commit ecosystem.** Any hook with a `.pre-commit-hooks.yaml` (ruff, prettier, shellcheck...) works with `from` + `id`, with your installed tools first.
 - **Hooks that work together.** Hooks wait for each other and pass values: `codegen` hands its schema to `client`. Shared variables record who may read and write them.
 - **Safe with other people's hooks.** Hooks from other repositories run only once you reviewed them, and again only after you review their changes. They get read-only files, no network and a filtered environment unless they are allowed more.
 - **A desktop app.** See what the next commit will run, edit hooks without touching the config file, wire them like nodes in Blender, and read their output live.
@@ -89,7 +90,7 @@ Goats keep their footing on the steepest cliffs. Goat Hooker keeps your commits 
   <img src=".github/assets/features-dark.svg#gh-dark-mode-only" alt="Features of Goat Hooker, lefthook, prek, pre-commit and husky + lint-staged" />
 </p>
 
-lefthook, prek and pre-commit are great tools, and prek and pre-commit still do something Goat Hooker doesn't: they install the tools your hooks need. Spotted a mistake in this table? [Open an issue](https://github.com/zuygui/goat-hooker/issues/new).
+lefthook, prek and pre-commit are great tools. prek and pre-commit go one step further on tools: they download the language runtimes your hooks need, where Goat Hooker builds the tools with the toolchains already on your computer. Spotted a mistake in this table? [Open an issue](https://github.com/zuygui/goat-hooker/issues/new).
 
 ## Speed
 

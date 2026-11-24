@@ -134,6 +134,30 @@ pub fn changes(root: &Path, origin: &Origin) -> Option<Vec<String>> {
             fs::read_to_string(d.join("trusted").join(format!("{previous_hash}.json"))).ok()
         })
         .and_then(|c| serde_json::from_str(&c).ok())?;
+    // A hook of the pre-commit ecosystem: its definition in the .pre-commit-hooks.yaml
+    if let Some((_, id)) = origin.path.split_once('#') {
+        let definition = |content: &str| -> Option<String> {
+            let hooks: serde_json::Value = serde_yaml_ng::from_str(content).ok()?;
+            hooks
+                .as_array()?
+                .iter()
+                .find(|h| h["id"].as_str() == Some(id))
+                .map(|h| serde_json::to_string(h).unwrap_or_default())
+        };
+        let before = definition(snapshot["content"].as_str()?);
+        let after = definition(&fs::read_to_string(&origin.file).ok()?);
+        return Some(if before == after {
+            vec![format!(
+                "~ `{id}`: its arguments, dependencies or command in the config changed"
+            )]
+        } else {
+            vec![format!(
+                "~ `{id}` changed in {}: now {}",
+                crate::tools::MANIFEST,
+                after.unwrap_or_else(|| "removed".into())
+            )]
+        });
+    }
     let before = hooks_of(
         snapshot["content"].as_str()?,
         snapshot["with"].as_str().unwrap_or("null"),

@@ -19,6 +19,7 @@ pub mod notify;
 pub mod remote;
 pub mod runner;
 pub mod templates;
+pub mod tools;
 pub mod trust;
 pub mod variables;
 pub mod watch;

@@ -23,6 +23,8 @@ mod husky;
 mod lefthook;
 mod precommit;
 
+pub(crate) use precommit::{KINDS, kinds, stage as precommit_stage, types_globs};
+
 /// Result of an import
 #[derive(Debug, Default)]
 pub struct Imported {

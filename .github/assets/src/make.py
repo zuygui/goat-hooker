@@ -83,10 +83,11 @@ COMMON = [
     ("Stages again the files formatters fixed", [YES, YES, NO, NO, PART]),
     ("Runs hooks in parallel", [YES, YES, PART, PART, PART]),
     ("Shared hooks from Git repositories", [YES, YES, YES, YES, NO]),
+    ("Hooks of the pre-commit ecosystem", [YES, NO, YES, YES, NO]),
     ("Local changes for one computer", [YES, YES, NO, NO, NO]),
     ("Skips one hook by name", [YES, YES, YES, YES, NO]),
     ("A config per project of a mono-repo", [YES, PART, YES, NO, NO]),
-    ("Installs the tools the hooks need", [NO, NO, YES, YES, NO]),
+    ("Installs the tools the hooks need", [PART, NO, YES, YES, NO]),
 ]
 ONLY = [
     "Skips hooks whose files didn't change (cache)",
@@ -96,7 +97,7 @@ ONLY = [
     "Review of shared hooks before they run",
     "Runs hooks while you stage (hooker watch)",
     "Desktop app",
-    "Runs lefthook, pre-commit and husky configs as they are",
+    "Runs lefthook and husky configs as they are",
 ]
 
 
@@ -115,23 +116,30 @@ def mark(cx, cy, kind, t):
     return f'<rect x="{cx - 6}" y="{cy - 1.25}" width="12" height="2.5" rx="1.25" fill="{t["no"]}"/>'
 
 
+def text_width(content, size):
+    """Width of a text in Inter, from the average width of its characters"""
+    narrow = sum(content.count(c) for c in "iljtf.,:;'()|! ")
+    wide = sum(content.count(c) for c in "mwMW")
+    return size * (0.56 * len(content) - 0.28 * narrow + 0.3 * wide)
+
+
 def features(theme):
     t = THEMES[theme]
-    width = 880
-    first, col = 360, 96
+    col = 96
     row = 32
     top = 112
     rows = len(COMMON) + len(ONLY)
-    height = top + rows * row + 2 * 40 + 120
+    # The labels decide where the columns start
+    longest = max(text_width(label, 14) for label in [label for label, _ in COMMON] + ONLY)
+    first = int(max(360, 40 + longest + 28))
+    width = first + col * len(TOOLS) + 40
     xs = [first + col * i + col / 2 for i in range(len(TOOLS))]
     parts = [
         text(40, 52, "How Goat Hooker compares", 24, PINK, 700),
         text(40, 78, "Features of the Git hooks managers, built in or with their usual setup", 14, t["muted"]),
     ]
-    # Column of Goat Hooker
-    parts.append(
-        f'<rect x="{first + 4}" y="{top - 26}" width="{col - 8}" height="{rows * row + 2 * 40 + 34}" rx="12" fill="{t["highlight"]}"/>'
-    )
+    # Column of Goat Hooker: drawn first (under the marks), sized once the rows are placed
+    column = len(parts)
     for i, tool in enumerate(TOOLS):
         color = PINK if i == 0 else t["fg"]
         lines = tool.split(" + ")
@@ -161,7 +169,11 @@ def features(theme):
         for i in range(len(TOOLS)):
             parts.append(mark(xs[i], y + 16, YES if i == 0 else NO, t))
         y += row
-    y += 26
+    parts.insert(
+        column,
+        f'<rect x="{first + 4}" y="{top - 26}" width="{col - 8}" height="{y + 8 - (top - 26)}" rx="12" fill="{t["highlight"]}"/>',
+    )
+    y += 34
     parts.append(mark(48, y - 4, YES, t))
     parts.append(text(64, y + 1, "built in", 12.5, t["muted"]))
     parts.append(mark(148, y - 4, PART, t))
@@ -177,6 +189,8 @@ def features(theme):
             t["muted"],
         )
     )
+    # Room for the wave under the last line
+    height = int(y + 26 + 90)
     return card(width, height, theme, "\n".join(parts))
 
 

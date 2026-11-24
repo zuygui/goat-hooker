@@ -74,8 +74,10 @@ struct CompiledHook<'a> {
     base_dir: PathBuf,
     include: Vec<Glob>,
     exclude: Vec<Glob>,
-    include_regex: Option<regex_lite::Regex>,
-    exclude_regex: Option<regex_lite::Regex>,
+    include_regex: Option<fancy_regex::Regex>,
+    exclude_regex: Option<fancy_regex::Regex>,
+    /// `types`: kinds of files (text, executable...)
+    kinds: Vec<String>,
 }
 
 /// A hook to run, with the folder to run it from
@@ -112,6 +114,7 @@ impl<'a> Matcher<'a> {
                     exclude: compile_patterns(hook, hook.exclude.as_ref())?,
                     include_regex: compile_regex(hook, hook.include_regex.as_deref())?,
                     exclude_regex: compile_regex(hook, hook.exclude_regex.as_deref())?,
+                    kinds: hook.types.clone().unwrap_or_default(),
                 });
             }
         }
@@ -205,8 +208,9 @@ impl CompiledHook<'_> {
     /// Path relative to the project if the file matches the hook
     fn matched_path(&self, file_path_abs: &Path) -> Option<PathBuf> {
         let relative = file_path_abs.strip_prefix(&self.base_dir).ok()?;
-        self.matches_relative(relative)
-            .then(|| relative.to_path_buf())
+        (self.matches_relative(relative)
+            && self.kinds.iter().all(|kind| is_kind(file_path_abs, kind)))
+        .then(|| relative.to_path_buf())
     }
 
     #[cfg(test)]
@@ -230,7 +234,7 @@ impl CompiledHook<'_> {
             || self
                 .exclude_regex
                 .as_ref()
-                .is_some_and(|r| r.is_match(&text))
+                .is_some_and(|r| r.is_match(text.as_ref()).unwrap_or(false))
         {
             return false;
         }
@@ -238,7 +242,7 @@ impl CompiledHook<'_> {
         if self
             .include_regex
             .as_ref()
-            .is_some_and(|r| !r.is_match(&text))
+            .is_some_and(|r| !r.is_match(text.as_ref()).unwrap_or(false))
         {
             return false;
         }
@@ -254,14 +258,51 @@ impl CompiledHook<'_> {
     }
 }
 
+/// The file is of this kind (the file `types` of pre-commit)
+fn is_kind(file: &Path, kind: &str) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(file) else {
+        return false;
+    };
+    let executable = || {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            meta.permissions().mode() & 0o111 != 0
+        }
+        #[cfg(not(unix))]
+        {
+            file.extension()
+                .is_some_and(|e| ["exe", "bat", "cmd", "com"].contains(&&*e.to_string_lossy()))
+        }
+    };
+    // Like git and pre-commit: a NUL byte in the beginning means binary
+    let text = || {
+        use std::io::Read;
+        let mut start = [0u8; 8192];
+        std::fs::File::open(file)
+            .and_then(|mut f| f.read(&mut start))
+            .is_ok_and(|n| !start[..n].contains(&0))
+    };
+    match kind {
+        "file" => meta.is_file(),
+        "symlink" => meta.file_type().is_symlink(),
+        "directory" => meta.is_dir(),
+        "executable" => meta.is_file() && executable(),
+        "non-executable" => meta.is_file() && !executable(),
+        "text" => meta.is_file() && text(),
+        "binary" => meta.is_file() && !text(),
+        _ => false,
+    }
+}
+
 /// Compiles a regex of a hook (`include_regex`, `exclude_regex`)
 fn compile_regex(
     hook: &Hook,
     regex: Option<&str>,
-) -> Result<Option<regex_lite::Regex>, GoatHookerError> {
+) -> Result<Option<fancy_regex::Regex>, GoatHookerError> {
     regex
         .map(|r| {
-            regex_lite::Regex::new(r).map_err(|err| GoatHookerError::InvalidHook {
+            fancy_regex::Regex::new(r).map_err(|err| GoatHookerError::InvalidHook {
                 name: hook.name.clone(),
                 reason: format!("invalid regex `{r}`: {err}"),
             })
