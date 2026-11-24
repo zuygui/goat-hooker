@@ -499,7 +499,13 @@ mod tests {
         lint.exclude_regex = Some(r"_test\.py$".into());
         let mut always = hook("always", Some(vec!["nothing"]), None);
         always.always_run = Some(true);
-        let dir = std::env::temp_dir();
+        // Real files: paths are compared once resolved (`\\?\` and short names on Windows)
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().to_path_buf();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        for file in ["src/a_x.py", "src/c_x.py", "src/b_x_test.py", "a_x.py"] {
+            std::fs::write(dir.join(file), "").unwrap();
+        }
         let config = Config {
             hooks: Some(vec![lint, always]),
             base_dir: Some(dir.clone()),
