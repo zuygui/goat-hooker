@@ -960,12 +960,14 @@ fn execute_command(
 fn kill_tree(pid: u32) {
     #[cfg(unix)]
     {
-        let _ = Command::new("kill")
-            .args(["-s", "KILL", "--", &format!("-{pid}")])
-            .status();
-        let _ = Command::new("kill")
-            .args(["-s", "KILL", "--", &pid.to_string()])
-            .status();
+        // The process group, then the process alone (when it has no group of its own)
+        for target in [format!("-{pid}"), pid.to_string()] {
+            let _ = Command::new("kill")
+                .args(["-s", "KILL", "--", &target])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
     }
     #[cfg(windows)]
     {

@@ -127,7 +127,7 @@
 <rect x="690.0" y="706.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
 <rect x="786.0" y="706.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
 <line x1="40" x2="840" y1="724" y2="724" stroke="#ECEAEA"/>
-<text x="40" y="745" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Imports husky, lefthook and pre-commit configs</text>
+<text x="40" y="745" font-family="Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#1F1D1D" text-anchor="start" >Runs lefthook, pre-commit and husky configs as they are</text>
 <circle cx="408.0" cy="740" r="9" fill="#65DDDB"/><path d="M404.0 740 l3 3 l5.5 -6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 <rect x="498.0" y="738.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>
 <rect x="594.0" y="738.75" width="12" height="2.5" rx="1.25" fill="#C9C4C4"/>

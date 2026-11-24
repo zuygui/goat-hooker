@@ -65,6 +65,12 @@ pub fn add_hook(args: AddArgs) -> Result<(), GoatHookerError> {
     let root = ui::current_repo()?;
     let config_path = goat_hooker::config::config_path(&root);
     if !config_path.exists() {
+        if goat_hooker::config::has_config(&root) {
+            return Err(GoatHookerError::InvalidHook {
+                name: args.name.clone().unwrap_or_default(),
+                reason: "the hooks come from the config of another tool, read as it is: run `hooker import` to get a hooker.toml to add hooks to".to_string(),
+            });
+        }
         return Err(GoatHookerError::ConfigNotFound(config_path));
     }
 

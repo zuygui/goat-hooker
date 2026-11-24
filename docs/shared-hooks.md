@@ -89,9 +89,26 @@ A hook without permission is **denied**: it doesn't run (not trusted, forbidden 
 
 Hooks loaded with `from` don't run until they are trusted: `hooker trust` (or the app) shows their commands and permissions. They must be trusted again when their file or their `with` values change. `HOOKER_TRUST_ALL=1` skips the check (CI).
 
+## Coming from husky, lefthook or pre-commit
+
+Without a `hooker.toml`, Goat Hooker reads the config of the hooks manager you already use, as it is: nothing to migrate, and your teammates who still use that tool aren't affected.
+
+```sh
+hooker install --force   # replaces the Git hooks of the other tool
+git commit               # runs the hooks of your lefthook.yml / .pre-commit-config.yaml / .husky
+```
+
+`hooker status` shows the config in use, and `hooker doctor` lists what can't be read exactly. A `hooker.toml` always wins over the other configs.
+
+What is read:
+
+- lefthook: commands, jobs, scripts, `glob`, `exclude` (globs or regex), `root`, `piped`, `parallel`, `env`, `fail_text`, `stage_fixed`, `skip` / `only` with `ref:`, and `lefthook-local.yml`
+- pre-commit: local hooks (`language: fail` too), `files` / `exclude` regexes (top-level ones too), `types`, `stages`, `always_run`, `pass_filenames`, the well-known hooks (pre-commit-hooks, ruff, black, prettier, eslint, Rust, conventional commits) and the other ones through `pre-commit run`
+- husky (`.husky/*`, or `husky.hooks` in package.json) and lint-staged (package.json or `.lintstagedrc`): one hook per command, in order, with the fixed files staged again
+
 ## Import from husky, lefthook and pre-commit
 
-`hooker import` converts the config of another hooks manager (`--dry-run` to only show it):
+To switch for good, `hooker import` writes the same thing as a `hooker.toml` (`--dry-run` to only show it):
 
 - husky (`.husky/*`, or `husky.hooks` in package.json) and its lint-staged config (one hook per command, in order)
 - lefthook (`lefthook.yml`): commands, jobs, scripts, `root` becomes a sub-project, `piped` becomes `needs`

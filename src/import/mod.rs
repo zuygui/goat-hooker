@@ -75,6 +75,30 @@ impl Imported {
     }
 }
 
+/// Config files of the other hooks managers in `root`, found without reading them
+pub fn foreign_files(root: &Path) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = lefthook::FILES
+        .iter()
+        .chain([precommit::FILE].iter())
+        .map(|f| root.join(f))
+        .filter(|f| f.is_file())
+        .collect();
+    let husky = root.join(".husky");
+    if Trigger::ALL
+        .iter()
+        .any(|t| husky.join(t.as_str()).is_file())
+    {
+        found.push(husky);
+    }
+    let package = root.join("package.json");
+    if fs::read_to_string(&package)
+        .is_ok_and(|p| p.contains("\"lint-staged\"") || p.contains("\"husky\""))
+    {
+        found.push(package);
+    }
+    found
+}
+
 /// Reads the configs of the other hooks managers found at the root of the repository
 pub fn detect(root: &Path) -> Result<Imported, GoatHookerError> {
     let mut imported = Imported::default();

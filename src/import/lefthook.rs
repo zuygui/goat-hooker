@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 use super::{Imported, globs, read_json, read_yaml, strings, trigger};
 use crate::{config::Hook, errors::GoatHookerError};
 
-const FILES: [&str; 7] = [
+pub(crate) const FILES: [&str; 7] = [
     "lefthook.yml",
     "lefthook.yaml",
     ".lefthook.yml",
@@ -19,7 +19,7 @@ const FILES: [&str; 7] = [
 ];
 
 /// Keys of lefthook that goat-hooker has no equivalent for
-const UNSUPPORTED: [&str; 6] = ["skip", "only", "tags", "files", "interactive", "use_stdin"];
+const UNSUPPORTED: [&str; 4] = ["tags", "files", "interactive", "use_stdin"];
 
 pub fn import(root: &Path, imported: &mut Imported) -> Result<(), GoatHookerError> {
     let Some(file) = FILES.iter().map(|f| root.join(f)).find(|f| f.is_file()) else {
@@ -31,14 +31,20 @@ pub fn import(root: &Path, imported: &mut Imported) -> Result<(), GoatHookerErro
     } else {
         read_yaml(&file)?
     };
-    let Value::Object(config) = config else {
+    let Value::Object(mut config) = config else {
         return Ok(());
     };
-    for local in ["lefthook-local.yml", "lefthook-local.yaml"] {
-        if root.join(local).is_file() {
-            imported.note(format!(
-                "lefthook: {local} (local overrides) wasn't imported"
-            ));
+    // `lefthook-local.yml`: changes of this computer, merged over the config
+    for local in [
+        "lefthook-local.yml",
+        "lefthook-local.yaml",
+        ".lefthook-local.yml",
+    ] {
+        let file = root.join(local);
+        if file.is_file()
+            && let Ok(Value::Object(local)) = read_yaml(&file)
+        {
+            merge(&mut config, local);
         }
     }
     for key in ["extends", "remotes", "remote"] {
@@ -123,6 +129,33 @@ pub fn import(root: &Path, imported: &mut Imported) -> Result<(), GoatHookerErro
     Ok(())
 }
 
+/// Deep merge of `lefthook-local.yml` over `lefthook.yml` (objects merged, the rest replaced)
+fn merge(base: &mut Map<String, Value>, over: Map<String, Value>) {
+    for (key, value) in over {
+        match (base.get_mut(&key), value) {
+            (Some(Value::Object(base)), Value::Object(over)) => merge(base, over),
+            (_, value) => {
+                base.insert(key, value);
+            }
+        }
+    }
+}
+
+/// `skip` / `only` of lefthook: `true`, or conditions (`merge`, `rebase`, `ref: main`).
+/// Returns the branches the condition names, `None` when it isn't only about branches.
+fn branch_condition(value: &Value) -> Option<Vec<String>> {
+    let items = match value {
+        Value::Array(items) => items.clone(),
+        other => vec![other.clone()],
+    };
+    let mut branches = Vec::new();
+    for item in items {
+        let branch = item.get("ref").and_then(Value::as_str)?;
+        branches.push(branch.to_string());
+    }
+    (!branches.is_empty()).then_some(branches)
+}
+
 /// Name of a sub-project in references (`web:lint`)
 fn project(dir: &Path) -> String {
     if dir.as_os_str().is_empty() {
@@ -152,6 +185,22 @@ fn convert(
             ));
         }
     }
+    // `skip: true` turns the command off; branches become `skip_branches` / `branches`
+    let mut branches = None;
+    let mut skip_branches = None;
+    for (key, target) in [("skip", &mut skip_branches), ("only", &mut branches)] {
+        let Some(value) = job.get(key) else { continue };
+        if key == "skip" && value.as_bool() == Some(true) {
+            return None;
+        }
+        match branch_condition(value) {
+            Some(names) => *target = Some(names),
+            None if value.as_bool() == Some(false) => {}
+            None => imported.note(format!(
+                "lefthook: `{key}` of `{name}` ({trigger_name}) only converts `ref:` conditions, the others were ignored"
+            )),
+        }
+    }
 
     let dir = job
         .get("root")
@@ -174,10 +223,16 @@ fn convert(
         .flat_map(|g| globs(g))
         .map(relative)
         .collect();
+    let mut exclude_regex = None;
     let exclude: Vec<String> = match job.get("exclude") {
+        // A regex on the path from the root of the repository
+        Some(Value::String(regex)) if dir.as_os_str().is_empty() => {
+            exclude_regex = Some(regex.clone());
+            vec![]
+        }
         Some(Value::String(regex)) => {
             imported.note(format!(
-                "lefthook: the `exclude` regex of `{name}` ({regex}) can't be converted to globs, it was ignored"
+                "lefthook: the `exclude` regex of `{name}` ({regex}) is on paths from the repository root, `root` changes them: it was ignored"
             ));
             vec![]
         }
@@ -197,6 +252,31 @@ fn convert(
     for i in 1..=3 {
         cmd = cmd.replace(&format!("{{{i}}}"), &format!("\"${i}\""));
     }
+    // `env`: variables of the command
+    if let Some(Value::Object(env)) = job.get("env") {
+        let exports: Vec<String> = env
+            .iter()
+            .filter_map(|(k, v)| {
+                let value = match v {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                k.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    .then(|| format!("export {k}='{}'", value.replace('\'', r"'\''")))
+            })
+            .collect();
+        if !exports.is_empty() {
+            cmd = format!("{}; {cmd}", exports.join("; "));
+        }
+    }
+    // `fail_text`: shown when the command fails
+    if let Some(text) = job.get("fail_text").and_then(Value::as_str) {
+        cmd = format!(
+            "{{ {cmd}\n}} || {{ echo '{}'; exit 1; }}",
+            text.replace('\'', r"'\''")
+        );
+    }
     if run.contains("{all_files}") {
         imported.note(format!(
             "lefthook: `{name}` used {{all_files}}, it now gets the staged (or pushed) files"
@@ -210,6 +290,9 @@ fn convert(
             trigger: super::trigger(trigger_name),
             include: (!include.is_empty()).then_some(include),
             exclude: (!exclude.is_empty()).then_some(exclude),
+            exclude_regex,
+            branches,
+            skip_branches,
             cmd: Some(cmd),
             stage_fixed: job
                 .get("stage_fixed")
@@ -275,6 +358,7 @@ pre-push:
         let hooks = root.hooks.clone().unwrap();
         let rustfmt = hooks.iter().find(|h| h.name == "rustfmt").unwrap();
         assert!(rustfmt.exclude.is_none());
+        assert_eq!(rustfmt.exclude_regex.as_deref(), Some("generated/.*"));
         let commitlint = hooks.iter().find(|h| h.name == "commitlint").unwrap();
         assert_eq!(commitlint.trigger, Some(Trigger::CommitMsg));
         assert_eq!(
@@ -283,6 +367,52 @@ pre-push:
         );
         let test = hooks.iter().find(|h| h.name == "test").unwrap();
         assert_eq!(test.needs, Some(vec!["build".to_string()]));
-        assert!(imported.notes.iter().any(|n| n.contains("regex")));
+    }
+
+    #[test]
+    fn lefthook_local_skip_only_env_and_fail_text() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("lefthook.yml"),
+            r#"
+pre-commit:
+  commands:
+    lint:
+      run: eslint {staged_files}
+      env:
+        NODE_ENV: test
+      fail_text: "Run npm run lint:fix"
+    slow:
+      run: cargo test
+      only:
+        - ref: main
+    off:
+      run: echo off
+    docs:
+      run: echo docs
+      skip:
+        - ref: release
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("lefthook-local.yml"),
+            "pre-commit:\n  commands:\n    off:\n      skip: true\n",
+        )
+        .unwrap();
+
+        let mut imported = Imported::default();
+        import(dir.path(), &mut imported).unwrap();
+        let hooks = imported.configs[Path::new("")].hooks.clone().unwrap();
+        let names: Vec<&str> = hooks.iter().map(|h| h.name.as_str()).collect();
+        assert_eq!(names, ["lint", "slow", "docs"]);
+        assert_eq!(
+            hooks[0].cmd.as_deref(),
+            Some(
+                "{ export NODE_ENV='test'; eslint {files}\n} || { echo 'Run npm run lint:fix'; exit 1; }"
+            )
+        );
+        assert_eq!(hooks[1].branches, Some(vec!["main".to_string()]));
+        assert_eq!(hooks[2].skip_branches, Some(vec!["release".to_string()]));
     }
 }

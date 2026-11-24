@@ -12,7 +12,7 @@ use crate::cli::ui;
 pub fn check() -> Result<(), GoatHookerError> {
     let root = ui::current_repo()?;
     let config_path = goat_hooker::config::config_path(&root);
-    if !config_path.exists() {
+    if !goat_hooker::config::has_config(&root) {
         println!(
             "{} no hooker.toml  {} {}",
             "○".yellow(),

@@ -15,7 +15,7 @@ use crate::{
     errors::GoatHookerError,
 };
 
-const FILE: &str = ".pre-commit-config.yaml";
+pub(crate) const FILE: &str = ".pre-commit-config.yaml";
 
 pub fn import(root: &Path, imported: &mut Imported) -> Result<(), GoatHookerError> {
     let file = root.join(FILE);
@@ -26,10 +26,18 @@ pub fn import(root: &Path, imported: &mut Imported) -> Result<(), GoatHookerErro
     let config = super::read_yaml(&file)?;
 
     let default_stages = strings(config.get("default_stages"));
-    let global_exclude = config.get("exclude").and_then(Value::as_str);
-    if global_exclude.is_some() {
-        imported.note("pre-commit: the global `exclude` regex can't be converted, it was ignored");
-    }
+    let global = Global {
+        files: config
+            .get("files")
+            .and_then(Value::as_str)
+            .filter(|r| !r.is_empty())
+            .map(String::from),
+        exclude: config
+            .get("exclude")
+            .and_then(Value::as_str)
+            .filter(|r| !r.is_empty() && *r != "^$")
+            .map(String::from),
+    };
 
     for repo in config
         .get("repos")
@@ -61,7 +69,7 @@ pub fn import(root: &Path, imported: &mut Imported) -> Result<(), GoatHookerErro
                 stages.iter().filter_map(|s| stage(s)).collect()
             };
             for t in triggers {
-                if let Some(converted) = convert(imported, url, id, hook, t) {
+                if let Some(converted) = convert(imported, url, id, hook, t, &global) {
                     imported.add(Path::new(""), converted);
                 }
             }
@@ -235,11 +243,43 @@ fn known(url: &str, id: &str, args: &str) -> Option<(String, bool, bool)> {
     })
 }
 
-fn convert(imported: &mut Imported, url: &str, id: &str, hook: &Value, t: Trigger) -> Option<Hook> {
+/// Top-level `files` and `exclude`: they apply to every hook
+struct Global {
+    files: Option<String>,
+    exclude: Option<String>,
+}
+
+/// One regex matching what either regex matches
+fn either(a: Option<String>, b: Option<String>) -> Option<String> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(format!("(?:{a})|(?:{b})")),
+        (a, b) => a.or(b),
+    }
+}
+
+fn convert(
+    imported: &mut Imported,
+    url: &str,
+    id: &str,
+    hook: &Value,
+    t: Trigger,
+    global: &Global,
+) -> Option<Hook> {
     let args = strings(hook.get("args")).join(" ");
     let pass_filenames = hook.get("pass_filenames").and_then(Value::as_bool) != Some(false);
 
-    let (cmd, add_files, stage_fixed) = if url == "local" {
+    let (cmd, add_files, stage_fixed) = if url == "local"
+        && hook.get("language").and_then(Value::as_str) == Some("fail")
+    {
+        // `language: fail`: the entry is the message, the hook fails when files match
+        let entry = hook.get("entry").and_then(Value::as_str).unwrap_or(id);
+        let message = entry.replace('\'', r"'\''");
+        (
+            format!("printf '%s\\n' '{message}' {{files}}; exit 1"),
+            false,
+            false,
+        )
+    } else if url == "local" {
         let entry = hook.get("entry").and_then(Value::as_str)?;
         let language = hook
             .get("language")
@@ -286,34 +326,42 @@ fn convert(imported: &mut Imported, url: &str, id: &str, hook: &Value, t: Trigge
         cmd
     };
 
-    // Files: `types` / `types_or`, then `files`
+    // Files: `types` / `types_or` as globs, `files` and `exclude` as globs when they are
+    // simple, else kept as regexes (the hook needs both `types` and `files` to match)
     let mut include = types_globs(&strings(hook.get("types")));
     include.extend(types_globs(&strings(hook.get("types_or"))));
-    if let Some(files) = hook.get("files").and_then(Value::as_str) {
-        match regex_globs(files) {
-            Some(globs) => include = globs,
-            None => imported.note(format!(
-                "pre-commit: the `files` regex of `{id}` ({files}) can't be converted to globs, it was ignored"
-            )),
-        }
-    }
-    let exclude = match hook.get("exclude").and_then(Value::as_str) {
-        Some(regex) => match regex_globs(regex) {
-            Some(globs) => Some(globs),
-            None => {
-                imported.note(format!(
-                    "pre-commit: the `exclude` regex of `{id}` ({regex}) can't be converted to globs, it was ignored"
-                ));
-                None
-            }
+    let mut include_regex = None;
+    let files = hook
+        .get("files")
+        .and_then(Value::as_str)
+        .filter(|r| !r.is_empty())
+        .map(String::from);
+    match (files, global.files.clone()) {
+        (Some(files), None) | (None, Some(files)) => match regex_globs(&files) {
+            Some(globs) if include.is_empty() => include = globs,
+            _ => include_regex = Some(files),
         },
-        None => None,
-    };
-    if hook.get("always_run").and_then(Value::as_bool) == Some(true) {
-        imported.note(format!(
-            "pre-commit: `{id}` had always_run, it now runs only when files are staged"
-        ));
+        (Some(files), Some(top)) => {
+            include_regex = Some(files);
+            imported.note(format!(
+                "pre-commit: `{id}` has its own `files`, the top-level `files` ({top}) isn't applied to it"
+            ));
+        }
+        (None, None) => {}
     }
+    let own_exclude = hook
+        .get("exclude")
+        .and_then(Value::as_str)
+        .filter(|r| !r.is_empty() && *r != "^$")
+        .map(String::from);
+    let (exclude, exclude_regex) = match either(own_exclude, global.exclude.clone()) {
+        Some(regex) => match regex_globs(&regex) {
+            Some(globs) => (Some(globs), None),
+            None => (None, Some(regex)),
+        },
+        None => (None, None),
+    };
+    let always_run = hook.get("always_run").and_then(Value::as_bool) == Some(true);
 
     Some(Hook {
         name: hook
@@ -324,6 +372,9 @@ fn convert(imported: &mut Imported, url: &str, id: &str, hook: &Value, t: Trigge
         trigger: Some(t),
         include: (!include.is_empty()).then_some(include),
         exclude,
+        include_regex,
+        exclude_regex,
+        always_run: always_run.then_some(true),
         cmd: Some(cmd),
         stage_fixed: stage_fixed.then_some(true),
         ..Default::default()
@@ -411,5 +462,59 @@ repos:
         assert_eq!(regex_globs(r"\.rs$"), Some(vec!["**/*.rs".to_string()]));
         assert_eq!(regex_globs("^src/"), Some(vec!["src/**".to_string()]));
         assert_eq!(regex_globs(r"^src/.*\.py$"), None);
+    }
+
+    #[test]
+    fn regexes_always_run_and_fail() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(FILE),
+            r#"
+exclude: ^vendor/
+repos:
+  - repo: local
+    hooks:
+      - id: lint
+        name: lint
+        language: system
+        entry: ruff check
+        types: [python]
+        files: ^src/(a|b)_
+        exclude: _test\.py$
+      - id: no-txt
+        name: no txt
+        language: fail
+        entry: "Text files are not allowed"
+        files: \.txt$
+      - id: always
+        name: always
+        language: system
+        entry: echo hi
+        always_run: true
+        pass_filenames: false
+"#,
+        )
+        .unwrap();
+        let mut imported = Imported::default();
+        import(dir.path(), &mut imported).unwrap();
+        let hooks = imported.configs[Path::new("")].hooks.clone().unwrap();
+
+        // `types` and `files` must both match: `files` stays a regex
+        assert_eq!(
+            hooks[0].include,
+            Some(vec!["**/*.py".into(), "**/*.pyi".into()])
+        );
+        assert_eq!(hooks[0].include_regex.as_deref(), Some("^src/(a|b)_"));
+        assert_eq!(
+            hooks[0].exclude_regex.as_deref(),
+            Some(r"(?:_test\.py$)|(?:^vendor/)")
+        );
+        // A simple `files` alone becomes a glob
+        assert_eq!(hooks[1].include, Some(vec!["**/*.txt".into()]));
+        assert!(hooks[1].cmd.as_deref().unwrap().ends_with("exit 1"));
+        assert_eq!(hooks[2].always_run, Some(true));
+        for hook in &hooks {
+            hook.validate().unwrap();
+        }
     }
 }

@@ -74,6 +74,8 @@ struct CompiledHook<'a> {
     base_dir: PathBuf,
     include: Vec<Glob>,
     exclude: Vec<Glob>,
+    include_regex: Option<regex_lite::Regex>,
+    exclude_regex: Option<regex_lite::Regex>,
 }
 
 /// A hook to run, with the folder to run it from
@@ -108,6 +110,8 @@ impl<'a> Matcher<'a> {
                     base_dir: base_dir.clone(),
                     include: compile_patterns(hook, hook.include.as_ref())?,
                     exclude: compile_patterns(hook, hook.exclude.as_ref())?,
+                    include_regex: compile_regex(hook, hook.include_regex.as_deref())?,
+                    exclude_regex: compile_regex(hook, hook.exclude_regex.as_deref())?,
                 });
             }
         }
@@ -157,6 +161,14 @@ impl<'a> Matcher<'a> {
                             .iter()
                             .filter_map(|f| compiled.matched_path(f))
                             .collect();
+                        if matched.is_empty() && compiled.hook.always_run == Some(true) {
+                            return Some(MatchedHook {
+                                hook: compiled.hook,
+                                base_dir: compiled.base_dir.clone(),
+                                files: vec![],
+                                affected_by: None,
+                            });
+                        }
                         if matched.is_empty() {
                             // A project it depends on changed
                             if compiled.hook.affected == Some(true)
@@ -215,6 +227,18 @@ impl CompiledHook<'_> {
             .exclude
             .iter()
             .any(|glob| glob.matches(&text, relative))
+            || self
+                .exclude_regex
+                .as_ref()
+                .is_some_and(|r| r.is_match(&text))
+        {
+            return false;
+        }
+        // `include_regex` and `include` must both match when both are set (like pre-commit)
+        if self
+            .include_regex
+            .as_ref()
+            .is_some_and(|r| !r.is_match(&text))
         {
             return false;
         }
@@ -228,6 +252,21 @@ impl CompiledHook<'_> {
             .iter()
             .any(|glob| glob.matches(&text, relative))
     }
+}
+
+/// Compiles a regex of a hook (`include_regex`, `exclude_regex`)
+fn compile_regex(
+    hook: &Hook,
+    regex: Option<&str>,
+) -> Result<Option<regex_lite::Regex>, GoatHookerError> {
+    regex
+        .map(|r| {
+            regex_lite::Regex::new(r).map_err(|err| GoatHookerError::InvalidHook {
+                name: hook.name.clone(),
+                reason: format!("invalid regex `{r}`: {err}"),
+            })
+        })
+        .transpose()
 }
 
 /// Compiles the glob patterns of a hook (relative to the folder of the project)
@@ -451,5 +490,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn regexes_and_always_run() {
+        let mut lint = hook("lint", Some(vec!["**/*.py"]), None);
+        lint.include_regex = Some("^src/(a|b)_".into());
+        lint.exclude_regex = Some(r"_test\.py$".into());
+        let mut always = hook("always", Some(vec!["nothing"]), None);
+        always.always_run = Some(true);
+        // Real files: paths are compared once resolved (`\\?\` and short names on Windows)
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().to_path_buf();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        for file in ["src/a_x.py", "src/c_x.py", "src/b_x_test.py", "a_x.py"] {
+            std::fs::write(dir.join(file), "").unwrap();
+        }
+        let config = Config {
+            hooks: Some(vec![lint, always]),
+            base_dir: Some(dir.clone()),
+            ..Default::default()
+        };
+        let configs = [config];
+        let matcher = Matcher::new(&configs).unwrap();
+        let files: Vec<PathBuf> = ["src/a_x.py", "src/c_x.py", "src/b_x_test.py", "a_x.py"]
+            .iter()
+            .map(|f| dir.join(f))
+            .collect();
+        let hooks = matcher.hooks_to_run(Trigger::PreCommit, Some(&files));
+        let lint = hooks.iter().find(|h| h.hook.name == "lint").unwrap();
+        assert_eq!(lint.files, vec![PathBuf::from("src/a_x.py")]);
+        // No file of its own, it runs anyway
+        assert!(
+            hooks
+                .iter()
+                .any(|h| h.hook.name == "always" && h.files.is_empty())
+        );
     }
 }

@@ -72,13 +72,13 @@ cmd = '''grep -qE '^(feat|fix|docs|chore)(\(.+\))?: ' "$1"'''
 Goats keep their footing on the steepest cliffs. Goat Hooker keeps your commits steady on the steepest mono-repos.
 
 - **Only what changed.** Each hook runs on the staged files it targets and sees exactly what will be committed: unstaged changes are put aside. A hook whose files didn't change since it last passed is skipped.
-- **Built for mono-repos.** Each project owns its `hooker.config.json`. Dependencies between projects are read from Cargo, `package.json`, `go.mod` and `pyproject.toml`, so a change in `core` also runs the tests of `api`.
+- **Built for mono-repos.** Each project owns its `hooker.toml`. Dependencies between projects are read from Cargo, `package.json`, `go.mod` and `pyproject.toml`, so a change in `core` also runs the tests of `api`.
 - **Fast.** One native binary, hooks in parallel and a cache. `hooker watch` runs the hooks while you stage, so the commit itself is instant.
 - **Hooks that work together.** Hooks wait for each other and pass values: `codegen` hands its schema to `client`. Shared variables record who may read and write them.
 - **Safe with other people's hooks.** Hooks from other repositories run only once you reviewed them, and again only after you review their changes. They get read-only files, no network and a filtered environment unless they are allowed more.
 - **A desktop app.** See what the next commit will run, edit hooks without touching the config file, wire them like nodes in Blender, and read their output live.
 - **Easy to adopt.**
-  - `hooker import` converts husky / lint-staged, lefthook and pre-commit configs.
+  - Already on lefthook, pre-commit or husky + lint-staged? Goat Hooker runs your config as it is: `hooker install --force` and commit. `hooker import` converts it to a `hooker.toml` when you want Goat Hooker's own features.
   - `hooker init` starts from ready-made hooks for Rust, JavaScript and Python.
   - `hooker doctor` says what is wrong and how to fix it.
 

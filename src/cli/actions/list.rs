@@ -36,6 +36,15 @@ pub fn list_hooks(config_path: Option<PathBuf>) -> Result<(), GoatHookerError> {
             if let Some(exclude) = hook.exclude.as_ref() {
                 println!("      exclude: {}", exclude.join(", ").dimmed());
             }
+            if let Some(regex) = &hook.include_regex {
+                println!("      include regex: {}", regex.trim().dimmed());
+            }
+            if let Some(regex) = &hook.exclude_regex {
+                println!("      exclude regex: {}", regex.trim().dimmed());
+            }
+            if hook.always_run == Some(true) {
+                println!("      {}", "always runs".dimmed());
+            }
             if let Some(needs) = hook.needs.as_ref() {
                 println!("      needs: {}", needs.join(", ").dimmed());
             }

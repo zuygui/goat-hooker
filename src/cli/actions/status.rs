@@ -49,7 +49,7 @@ pub fn show_status() -> Result<(), GoatHookerError> {
 
     // Config
     let config_path = goat_hooker::config::config_path(&root);
-    if !config_path.exists() {
+    if !goat_hooker::config::has_config(&root) {
         println!(
             "  {:<11} {} no hooker.toml  {} {}",
             "Config",
@@ -66,13 +66,16 @@ pub fn show_status() -> Result<(), GoatHookerError> {
         .map(|c| c.hooks.iter().flatten().count())
         .sum();
     let parallel = configs.first().and_then(|c| c.parallel).unwrap_or(false);
+    // lefthook, pre-commit or husky: read as it is
+    let foreign = configs
+        .first()
+        .filter(|c| c.is_foreign())
+        .and_then(|c| c.file.clone());
+    let shown = foreign.clone().unwrap_or_else(|| config_path.clone());
     println!(
         "  {:<11} {} {}",
         "Config",
-        config_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy(),
+        shown.strip_prefix(&root).unwrap_or(&shown).display(),
         format!(
             "· {} · {}{}",
             ui::plural(configs.len(), "project"),
@@ -81,6 +84,30 @@ pub fn show_status() -> Result<(), GoatHookerError> {
         )
         .dimmed()
     );
+    if foreign.is_some() {
+        println!(
+            "  {:<11} {} {}",
+            "",
+            "read as it is, nothing to migrate · to switch for good →".dimmed(),
+            ui::command("hooker import")
+        );
+        let notes = goat_hooker::import::detect(&root)
+            .map(|i| i.notes)
+            .unwrap_or_default();
+        if !notes.is_empty() {
+            println!(
+                "  {:<11} {} {} {}",
+                "",
+                "⚠".yellow(),
+                format!(
+                    "{} can't be read exactly →",
+                    ui::plural(notes.len(), "part")
+                )
+                .dimmed(),
+                ui::command("hooker doctor")
+            );
+        }
+    }
 
     // Projects
     println!();

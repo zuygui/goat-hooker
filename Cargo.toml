@@ -59,6 +59,7 @@ schemars = "1"
 serde_yaml_ng = "0.10"
 toml = "0.9"
 sha2 = "0.10"
+regex-lite = "0.1.9"
 
 [dev-dependencies]
 tempfile = "3.6"
