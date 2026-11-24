@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Times `git commit` with Goat Hooker, lefthook, pre-commit and husky + lint-staged.
+"""Times `git commit` with Goat Hooker, lefthook, prek, pre-commit and husky + lint-staged.
 
 Each tool gets a fresh repository with the same hooks, and each scenario is timed over
 several commits (median). Writes the results to `benchmarks/results.json`.
 
 Requirements: `hooker` (or HOOKER=path), and a folder with `npm install lefthook husky
-lint-staged` (TOOLS=path, default /tmp/bench-tools), and `pre-commit` in PATH.
+lint-staged` (TOOLS=path, default /tmp/bench-tools), and `prek` and `pre-commit` in PATH.
 
     python3 benchmarks/run.py
 """
@@ -24,10 +24,11 @@ HOOKER = os.environ.get("HOOKER") or shutil.which("hooker") or "hooker"
 TOOLS = Path(os.environ.get("TOOLS", "/tmp/bench-tools")).resolve()
 BIN = TOOLS / "node_modules" / ".bin"
 
-# name, number of hooks, duration of each hook (seconds)
+# name, number of hooks, duration of each hook (seconds), files changed by each commit
 SCENARIOS = {
-    "noop": (1, 0.0),
-    "five": (5, 0.2),
+    "noop": (1, 0.0, 1),
+    "five": (5, 0.2, 1),
+    "many": (5, 0.0, 1000),
 }
 # Same globs written differently, so that lint-staged runs the tasks concurrently
 LINT_STAGED_GLOBS = ["*.txt", "**/*.txt", "*.t?t", "a*.txt", "[a]*.txt"]
@@ -59,20 +60,18 @@ def setup(tool, hooks, seconds, cache, root):
     cmd = command(seconds)
 
     if tool == "goat-hooker":
-        config = {
-            "parallel": True,
-            "hooks": [
-                {
-                    "name": f"hook{i}",
-                    "trigger": "pre-commit",
-                    "include": ["*.txt"],
-                    "cmd": cmd,
-                    "cache": cache,
-                }
-                for i in range(hooks)
-            ],
-        }
-        (root / "hooker.config.json").write_text(json.dumps(config))
+        lines = ["parallel = true"]
+        for i in range(hooks):
+            lines += [
+                "",
+                "[[hooks]]",
+                f'name = "hook{i}"',
+                'trigger = "pre-commit"',
+                'include = ["**/*.txt"]',
+                f'cmd = "{cmd}"',
+                f"cache = {'true' if cache else 'false'}",
+            ]
+        (root / "hooker.toml").write_text("\n".join(lines) + "\n")
         sh(f"{HOOKER} install", root)
     elif tool == "lefthook":
         lines = ["pre-commit:", "  parallel: true", "  commands:"]
@@ -80,7 +79,7 @@ def setup(tool, hooks, seconds, cache, root):
             lines += [f"    hook{i}:", '      glob: "*.txt"', f'      run: "{cmd}"']
         (root / "lefthook.yml").write_text("\n".join(lines) + "\n")
         sh(f"{BIN / 'lefthook'} install", root)
-    elif tool == "pre-commit":
+    elif tool in ("pre-commit", "prek"):
         lines = ["repos:", "  - repo: local", "    hooks:"]
         for i in range(hooks):
             lines += [
@@ -92,8 +91,8 @@ def setup(tool, hooks, seconds, cache, root):
                 "        pass_filenames: false",
             ]
         (root / ".pre-commit-config.yaml").write_text("\n".join(lines) + "\n")
-        sh("pre-commit install", root)
-        sh("pre-commit run --all-files", root, check=False)  # builds its environments once
+        sh(f"{tool} install", root)
+        sh(f"{tool} run --all-files", root, check=False)  # builds its environments once
     elif tool == "husky + lint-staged":
         os.symlink(TOOLS / "node_modules", root / "node_modules")
         package = {
@@ -110,9 +109,13 @@ def setup(tool, hooks, seconds, cache, root):
     sh("git add -A && git commit -q --allow-empty -m setup --no-verify", root)
 
 
-def time_commits(root, same_content):
+def time_commits(root, same_content, files=1):
     times = []
+    if files > 1:
+        (root / "many").mkdir(exist_ok=True)
     for run in range(RUNS + 1):
+        for i in range(files - 1):
+            (root / "many" / f"f{i}.txt").write_text(f"{run} {i}\n")
         if same_content:
             # The same staged files again: a commit retried after a failure
             (root / "a.txt").write_text("same\n")
@@ -123,7 +126,7 @@ def time_commits(root, same_content):
                 continue
         else:
             (root / "a.txt").write_text(f"{run} {time.time()}\n")
-            sh("git add a.txt", root)
+            sh("git add -A", root)
         start = time.perf_counter()
         sh(f"git commit -q -m run{run}", root)
         elapsed = time.perf_counter() - start
@@ -135,15 +138,18 @@ def time_commits(root, same_content):
 
 
 def main():
-    tools = ["none", "goat-hooker", "lefthook", "pre-commit", "husky + lint-staged"]
+    tools = ["none", "goat-hooker", "lefthook", "prek", "pre-commit", "husky + lint-staged"]
+    only = os.environ.get("TOOLS_ONLY")
+    if only:
+        tools = ["none"] + [t for t in tools if t in only.split(",")]
     results = {"runs": RUNS, "scenarios": {}}
-    for name, (hooks, seconds) in SCENARIOS.items():
+    for name, (hooks, seconds, files) in SCENARIOS.items():
         results["scenarios"][name] = {}
         for tool in tools:
             root = Path(tempfile.mkdtemp(prefix="bench-"))
             try:
                 setup(tool, hooks, seconds, False, root)
-                results["scenarios"][name][tool] = time_commits(root, False)
+                results["scenarios"][name][tool] = time_commits(root, False, files)
             finally:
                 shutil.rmtree(root, ignore_errors=True)
             print(name, tool, results["scenarios"][name][tool], "ms", flush=True)
@@ -162,13 +168,14 @@ def main():
     versions = {
         "goat-hooker": subprocess.run([HOOKER, "--version"], capture_output=True, text=True).stdout.strip(),
         "lefthook": subprocess.run([str(BIN / "lefthook"), "version"], capture_output=True, text=True).stdout.strip(),
+        "prek": subprocess.run(["prek", "--version"], capture_output=True, text=True).stdout.strip(),
         "pre-commit": subprocess.run(["pre-commit", "--version"], capture_output=True, text=True).stdout.strip(),
         "husky": json.loads((TOOLS / "node_modules/husky/package.json").read_text())["version"],
         "lint-staged": json.loads((TOOLS / "node_modules/lint-staged/package.json").read_text())["version"],
         "git": subprocess.run(["git", "--version"], capture_output=True, text=True).stdout.strip(),
     }
     results["versions"] = versions
-    out = Path(__file__).parent / "results.json"
+    out = Path(os.environ.get("OUT") or Path(__file__).parent / "results.json")
     out.write_text(json.dumps(results, indent=2) + "\n")
     print(json.dumps(results, indent=2))
 

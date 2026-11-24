@@ -28,7 +28,7 @@ cmds = ["grep -qE '^(feat|fix|chore|docs|refactor|test|ci)' \"$1\""]
 | `trigger` | Git hook: `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit`, `pre-rebase`, `post-rewrite`, `pre-push`, `applypatch-msg`, `pre-applypatch`, `post-applypatch`, `pre-auto-gc`, `post-checkout`, `post-merge` |
 | `include` | Glob patterns, relative to the config folder. Without it, the hook targets all files |
 | `exclude` | Glob patterns of files to ignore |
-| `cmd` / `cmds` | Shell command(s) to run, from the config folder. Git arguments are available as `$1`, `$2`... |
+| `cmd` / `cmds` | Shell command(s) to run, from the config folder. Git arguments are available as `$1`, `$2`... A command made of plain words and placeholders (`cargo fmt -- {files}`) starts without a shell, which is faster; anything else runs with `sh -c`. |
 | `stage_fixed` | `true` to re-stage the targeted files after the hook (formatters) |
 | `path` | Hooks file to load (`{ "hooks": [...] }`), relative to the config folder |
 | `from` / `rev` | Git repository (and branch or tag) to load `path` from, cloned once in `~/.cache/goat-hooker` |

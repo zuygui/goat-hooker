@@ -191,9 +191,9 @@ impl Dependencies {
     /// Projects containing the files (the deepest project of each file)
     pub fn changed_projects(&self, files: &[PathBuf]) -> BTreeSet<PathBuf> {
         let projects: Vec<PathBuf> = self.direct.keys().cloned().collect();
-        files
+        crate::matcher::normalize_files(files)
             .iter()
-            .filter_map(|f| owner(&projects, &normalize(f)).cloned())
+            .filter_map(|f| owner(&projects, f).cloned())
             .collect()
     }
 }

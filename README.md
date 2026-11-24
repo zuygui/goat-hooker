@@ -85,22 +85,23 @@ Goats keep their footing on the steepest cliffs. Goat Hooker keeps your commits 
 ## How it compares
 
 <p align="center">
-  <img src=".github/assets/features-light.svg#gh-light-mode-only" alt="Features of Goat Hooker, lefthook, pre-commit and husky + lint-staged" />
-  <img src=".github/assets/features-dark.svg#gh-dark-mode-only" alt="Features of Goat Hooker, lefthook, pre-commit and husky + lint-staged" />
+  <img src=".github/assets/features-light.svg#gh-light-mode-only" alt="Features of Goat Hooker, lefthook, prek, pre-commit and husky + lint-staged" />
+  <img src=".github/assets/features-dark.svg#gh-dark-mode-only" alt="Features of Goat Hooker, lefthook, prek, pre-commit and husky + lint-staged" />
 </p>
 
-lefthook and pre-commit are great tools, and pre-commit still does something Goat Hooker doesn't: it installs the tools your hooks need. Spotted a mistake in this table? [Open an issue](https://github.com/zuygui/goat-hooker/issues/new).
+lefthook, prek and pre-commit are great tools, and prek and pre-commit still do something Goat Hooker doesn't: they install the tools your hooks need. Spotted a mistake in this table? [Open an issue](https://github.com/zuygui/goat-hooker/issues/new).
 
 ## Speed
 
 <p align="center">
-  <img src=".github/assets/speed-light.svg#gh-light-mode-only" alt="Time of a git commit. One hook doing nothing: Goat Hooker 36 ms, lefthook 33 ms, pre-commit 181 ms, husky + lint-staged 441 ms. Five hooks of 200 ms: Goat Hooker 244 ms, lefthook 247 ms, pre-commit 1206 ms, husky + lint-staged 646 ms. The same commit again: Goat Hooker 24 ms, lefthook 248 ms, pre-commit 1206 ms, husky + lint-staged 636 ms" />
-  <img src=".github/assets/speed-dark.svg#gh-dark-mode-only" alt="Time of a git commit. One hook doing nothing: Goat Hooker 36 ms, lefthook 33 ms, pre-commit 181 ms, husky + lint-staged 441 ms. Five hooks of 200 ms: Goat Hooker 244 ms, lefthook 247 ms, pre-commit 1206 ms, husky + lint-staged 646 ms. The same commit again: Goat Hooker 24 ms, lefthook 248 ms, pre-commit 1206 ms, husky + lint-staged 636 ms" />
+  <img src=".github/assets/speed-light.svg#gh-light-mode-only" alt="Time of a git commit. One hook doing nothing: Goat Hooker 17 ms, lefthook 30 ms, prek 25 ms, pre-commit 200 ms, husky + lint-staged 460 ms. Five hooks of 200 ms: Goat Hooker 223 ms, lefthook 244 ms, prek 1059 ms, pre-commit 1227 ms, husky + lint-staged 679 ms. 1,000 staged files: Goat Hooker 40 ms, lefthook 63 ms, prek 99 ms, pre-commit 263 ms, husky + lint-staged 563 ms. The same commit again: Goat Hooker 18 ms, lefthook 252 ms, prek 1061 ms, pre-commit 1219 ms, husky + lint-staged 698 ms" />
+  <img src=".github/assets/speed-dark.svg#gh-dark-mode-only" alt="Time of a git commit. One hook doing nothing: Goat Hooker 17 ms, lefthook 30 ms, prek 25 ms, pre-commit 200 ms, husky + lint-staged 460 ms. Five hooks of 200 ms: Goat Hooker 223 ms, lefthook 244 ms, prek 1059 ms, pre-commit 1227 ms, husky + lint-staged 679 ms. 1,000 staged files: Goat Hooker 40 ms, lefthook 63 ms, prek 99 ms, pre-commit 263 ms, husky + lint-staged 563 ms. The same commit again: Goat Hooker 18 ms, lefthook 252 ms, prek 1061 ms, pre-commit 1219 ms, husky + lint-staged 698 ms" />
 </p>
 
-- **The tool itself:** Goat Hooker adds about as much to a commit as lefthook, a sixth of what pre-commit adds, and a fifteenth of what husky + lint-staged adds through `npx`.
-- **Five hooks:** they run in parallel, like with lefthook, where pre-commit runs them one after the other.
-- **The same commit again**, after a rejected commit message for example: the hooks come from the cache, so the commit takes 24 ms instead of 248 ms or more.
+- **The tool itself:** Goat Hooker adds 9 ms to a commit, less than half of what lefthook (22 ms) and prek (17 ms) add. It reads the repository and the index itself instead of starting git, and starts simple commands without a shell.
+- **Five hooks:** they run in parallel. prek and pre-commit run them one after the other unless you set priorities.
+- **1,000 staged files:** matching the files against the hooks takes a few milliseconds.
+- **The same commit again**, after a rejected commit message for example: the hooks come from the cache, so the commit takes 18 ms instead of 252 ms or more.
 
 These are small numbers on a 2-core VM. Method and caveats are in [`benchmarks/`](benchmarks/README.md), and you can reproduce them with `python3 benchmarks/run.py`.
 

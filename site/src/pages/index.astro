@@ -41,7 +41,7 @@ const releaseNotes = (release?.[3] ?? "")
   .slice(0, 8);
 
 // Benchmark charts, from benchmarks/results.json
-const order = ["goat-hooker", "lefthook", "pre-commit", "husky + lint-staged"];
+const order = ["goat-hooker", "lefthook", "prek", "pre-commit", "husky + lint-staged"];
 const names: Record<string, string> = { "goat-hooker": "Goat Hooker" };
 const versionOf = (tool: string) => {
   const v = bench.versions as Record<string, string>;
@@ -54,7 +54,12 @@ const charts = [
     title: "One hook that does nothing",
     caption: `The cost of the tool itself, on top of git commit (${(bench.scenarios as any).noop.none} ms alone).`,
   },
-  { id: "five", title: "Five hooks of 200 ms", caption: "How the hooks are scheduled. pre-commit runs them one after the other." },
+  {
+    id: "five",
+    title: "Five hooks of 200 ms",
+    caption: "How the hooks are scheduled. prek and pre-commit run them one after the other.",
+  },
+  { id: "many", title: "1,000 staged files", caption: "Five hooks matching them: the files are matched in a few milliseconds." },
   {
     id: "retry",
     title: "The same commit again",
@@ -179,8 +184,8 @@ const install = [
           <h2>Fast where it counts: the moment you commit.</h2>
           <p class="section-lede">
             Time of a <code>git commit</code>, median of {bench.runs} runs, lower is better. Goat Hooker
-            costs as little as lefthook, runs hooks in parallel, and a commit retried with the same
-            files is {retryFactor}× faster because the hooks come from the cache.
+            adds less than half of what lefthook and prek add, runs hooks in parallel, and a commit
+            retried with the same files is {retryFactor}× faster because the hooks come from the cache.
           </p>
           <div class="charts">
             {charts.map((chart) => (
@@ -272,7 +277,7 @@ const install = [
       <section class="section section-alt" id="compare">
         <div class="wrap">
           <p class="eyebrow">Compare</p>
-          <h2>Goat Hooker, lefthook, pre-commit and husky.</h2>
+          <h2>Goat Hooker, lefthook, prek, pre-commit and husky.</h2>
           <div class="table-wrap">
             <table class="compare">
               <thead>
@@ -282,7 +287,7 @@ const install = [
                 </tr>
               </thead>
               <tbody>
-                <tr class="group"><td colspan="5">Everyday hooks</td></tr>
+                <tr class="group"><td colspan="6">Everyday hooks</td></tr>
                 {compareCommon.map(([label, marks]) => (
                   <tr>
                     <td>{label}</td>
@@ -293,7 +298,7 @@ const install = [
                     ))}
                   </tr>
                 ))}
-                <tr class="group"><td colspan="5">Only in Goat Hooker</td></tr>
+                <tr class="group"><td colspan="6">Only in Goat Hooker</td></tr>
                 {compareOnly.map((label) => (
                   <tr>
                     <td>{label}</td>
@@ -818,7 +823,7 @@ const install = [
   /* Benchmarks */
   .charts {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 16px;
   }
 

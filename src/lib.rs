@@ -12,6 +12,7 @@ pub mod history;
 pub mod hub;
 pub mod impact;
 pub mod import;
+mod index;
 pub mod install;
 pub mod matcher;
 pub mod notify;
